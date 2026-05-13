@@ -1,0 +1,1503 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Consultório Dr. Rafael Duncan · Geriatria</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;1,14..32,400&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+          colors: {
+            emerald: { 400:'#34d399', 500:'#10b981', 600:'#059669', 700:'#047857' },
+            slate: { 850: '#1a2234' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* ── Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    * { font-family: 'Inter', system-ui, -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
+    body { background: #f5f6f8; color: #0f172a; font-size: 14px; line-height: 1.5; }
+
+    /* ── Sidebar ── */
+    .sidebar { background: #111318; border-right: 1px solid rgba(255,255,255,0.05); }
+    .sidebar-logo-bg { background: #1a1f2e; border: 1px solid rgba(255,255,255,0.08); }
+
+    .nav-section { font-size: 10px; font-weight: 600; letter-spacing: 0.1em; color: #3d4454; text-transform: uppercase; padding: 18px 12px 5px; }
+    .nav-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 6px; font-size: 13px; font-weight: 450; color: #6b7280; cursor: pointer; transition: background 0.12s, color 0.12s; margin-bottom: 1px; position: relative; }
+    .nav-item:hover { background: rgba(255,255,255,0.05); color: #c9d1d9; }
+    .nav-item.active { background: rgba(255,255,255,0.07); color: #f1f5f9; font-weight: 500; }
+    .nav-item.active::before { content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 2.5px; height: 14px; background: #10b981; border-radius: 0 2px 2px 0; }
+    .nav-item .icon { width: 16px; height: 16px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; opacity: 0.7; }
+    .nav-item.active .icon { opacity: 1; }
+    .nav-item i { width: 15px; height: 15px; stroke-width: 1.75; }
+
+    /* ── Cards ── */
+    .kpi-card { background: #fff; border-radius: 10px; padding: 20px 22px; border: 1px solid #e8eaed; box-shadow: 0 1px 2px rgba(0,0,0,0.04); transition: box-shadow 0.18s; }
+    .kpi-card:hover { box-shadow: 0 3px 10px rgba(0,0,0,0.07); }
+    .chart-card { background: #fff; border-radius: 10px; border: 1px solid #e8eaed; box-shadow: 0 1px 2px rgba(0,0,0,0.04); padding: 22px 24px; }
+
+    /* ── Badges ── */
+    .badge { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 4px; font-size: 11.5px; font-weight: 500; letter-spacing: 0.01em; }
+    .badge-green  { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+    .badge-red    { background: #fff1f2; color: #9f1239; border: 1px solid #fecdd3; }
+    .badge-yellow { background: #fffbeb; color: #854d0e; border: 1px solid #fde68a; }
+    .badge-blue   { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
+    .badge-gray   { background: #f8fafc; color: #475569; border: 1px solid #e2e8f0; }
+
+    /* ── Trend ── */
+    .trend-up   { color: #059669; font-size: 12px; font-weight: 600; }
+    .trend-down { color: #dc2626; font-size: 12px; font-weight: 600; }
+
+    /* ── Tables ── */
+    .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .data-table th { text-align: left; padding: 9px 16px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: #9ca3af; background: #fafafa; border-bottom: 1px solid #f0f0f0; }
+    .data-table td { padding: 11px 16px; border-bottom: 1px solid #f5f5f5; color: #374151; vertical-align: middle; }
+    .data-table tr:hover td { background: #fafafa; }
+    .data-table tr:last-child td { border-bottom: none; }
+
+    /* ── Buttons ── */
+    .btn-primary { display: inline-flex; align-items: center; gap: 6px; background: #0f172a; color: #fff; padding: 7px 15px; border-radius: 7px; font-size: 13px; font-weight: 500; border: none; cursor: pointer; transition: background 0.15s, box-shadow 0.15s; letter-spacing: -0.01em; }
+    .btn-primary:hover { background: #1e293b; box-shadow: 0 2px 8px rgba(15,23,42,0.18); }
+    .btn-ghost { display: inline-flex; align-items: center; gap: 6px; background: transparent; color: #6b7280; padding: 7px 13px; border-radius: 7px; font-size: 13px; font-weight: 450; border: 1px solid #e5e7eb; cursor: pointer; transition: all 0.12s; }
+    .btn-ghost:hover { background: #f9fafb; color: #111827; border-color: #d1d5db; }
+
+    /* Section toggle */
+    .btn-section-toggle { width:24px; height:24px; border-radius:5px; background:transparent; border:1px solid #e5e7eb; color:#9ca3af; cursor:pointer; font-size:13px; font-weight:600; display:flex; align-items:center; justify-content:center; transition: all 0.12s; }
+    .btn-section-toggle:hover { background:#f3f4f6; color:#374151; }
+    .btn-section-chip { display:inline-flex; align-items:center; gap:5px; background:#fff; border:1px solid #e5e7eb; border-radius:999px; padding:3px 10px; margin-right:5px; font-size:11.5px; color:#6b7280; cursor:pointer; transition: all 0.12s; }
+    .btn-section-chip:hover { background:#ecfdf5; color:#065f46; border-color:#6ee7b7; }
+
+    /* ── Agenda Tabs ── */
+    .ag-tab { padding:5px 13px; border:1px solid transparent; border-radius:6px; font-size:12.5px; font-weight:500; cursor:pointer; background:transparent; color:#6b7280; transition: all 0.12s; }
+    .ag-tab.active { background:#fff; color:#0f172a; border-color:#e5e7eb; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+    .ag-tab:not(.active):hover { background:#f3f4f6; color:#374151; }
+
+    /* ── Calendário mensal ── */
+    .cal-grid { display:grid; grid-template-columns: repeat(7, 1fr); gap:1px; background:#e5e7eb; border-radius:8px; overflow:hidden; }
+    .cal-head { background:#fafafa; padding:7px 10px; font-size:10.5px; font-weight:600; color:#9ca3af; text-transform:uppercase; letter-spacing:0.06em; text-align:center; }
+    .cal-day { background:#fff; min-height:96px; padding:6px 8px; display:flex; flex-direction:column; gap:3px; cursor:pointer; transition: background 0.12s; }
+    .cal-day:hover { background:#f9fafb; }
+    .cal-day.outside { background:#fafafa; }
+    .cal-day.outside .cal-day-num { color:#d1d5db; }
+    .cal-day.today { background:#f0fdf9; }
+    .cal-day.has-blockage { background-image: repeating-linear-gradient(45deg, transparent, transparent 8px, #fff7f7 8px, #fff7f7 12px); }
+    .cal-day-num { font-size:11.5px; font-weight:600; color:#111827; }
+    .cal-evt { font-size:10px; padding:2px 6px; border-radius:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; line-height:1.4; }
+    .cal-evt.confirmado { background:#eff6ff; color:#1d4ed8; }
+    .cal-evt.compareceu { background:#f0fdf4; color:#15803d; }
+    .cal-evt.noshow     { background:#fff1f2; color:#be123c; text-decoration:line-through; }
+    .cal-evt.cancelado  { background:#f5f5f5; color:#9ca3af; text-decoration:line-through; }
+    .cal-evt.bloqueio   { background:#fffbeb; color:#92400e; font-style:italic; }
+    .cal-more { font-size:10px; color:#9ca3af; padding:1px 6px; }
+
+    /* ── Vista semanal/diária ── */
+    .week-grid { display:grid; grid-template-columns: 56px repeat(7, 1fr); border-radius:8px; overflow:hidden; border:1px solid #e5e7eb; }
+    .week-grid.dia-view { grid-template-columns: 56px 1fr; }
+    .week-head { background:#fafafa; padding:9px 8px; text-align:center; font-size:11px; font-weight:600; color:#6b7280; border-bottom:1px solid #e5e7eb; border-right:1px solid #e5e7eb; }
+    .week-head.today { background:#f0fdf9; color:#065f46; }
+    .week-slot-time { background:#fafafa; padding:5px 7px; text-align:right; font-size:10.5px; color:#9ca3af; border-bottom:1px solid #f0f0f0; border-right:1px solid #e5e7eb; }
+    .week-slot { background:#fff; min-height:40px; border-bottom:1px solid #f5f5f5; border-right:1px solid #e5e7eb; padding:2px; position:relative; cursor:pointer; transition: background 0.12s; }
+    .week-slot:hover { background:#f9fafb; }
+    .week-slot.bloqueado { background-image: repeating-linear-gradient(45deg, #fff, #fff 6px, #fffbeb 6px, #fffbeb 10px); cursor:not-allowed; }
+    .week-slot.fora { background:#fafafa; cursor:not-allowed; }
+    .week-evt { font-size:10.5px; padding:3px 7px; border-radius:4px; cursor:pointer; line-height:1.35; margin-bottom:2px; }
+    .week-evt.confirmado { background:#eff6ff; color:#1d4ed8; border-left:2px solid #3b82f6; }
+    .week-evt.compareceu { background:#f0fdf4; color:#15803d; border-left:2px solid #10b981; }
+    .week-evt.noshow     { background:#fff1f2; color:#be123c; border-left:2px solid #f43f5e; }
+    .week-evt.cancelado  { background:#f5f5f5; color:#9ca3af; border-left:2px solid #d1d5db; }
+    .week-evt.bloqueio   { background:#fffbeb; color:#92400e; border-left:2px solid #f59e0b; font-style:italic; }
+
+    /* ── Misc ── */
+    .progress-bar { height:5px; background:#f0f0f0; border-radius:999px; overflow:hidden; }
+    .progress-fill { height:100%; border-radius:999px; }
+    .funil-step { background:#fff; border-radius:8px; border:1px solid #e8eaed; padding:14px 18px; display:flex; flex-direction:column; gap:4px; }
+    .kpi-icon { width:38px; height:38px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:17px; flex-shrink:0; }
+
+    /* ── Modal ── */
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.45); backdrop-filter:blur(6px); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px; }
+    .modal { background:#fff; border-radius:14px; width:100%; max-width:480px; max-height:90vh; overflow-y:auto; box-shadow: 0 20px 60px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.05); }
+    .modal-title { font-size:15px; font-weight:600; color:#0f172a; letter-spacing:-0.01em; }
+    .input { width:100%; border:1px solid #e5e7eb; border-radius:7px; padding:8px 12px; font-size:13px; color:#111827; outline:none; transition:border-color 0.15s, box-shadow 0.15s; background:#fff; }
+    .input:focus { border-color:#10b981; box-shadow:0 0 0 3px rgba(16,185,129,0.1); }
+    .select { width:100%; border:1px solid #e5e7eb; border-radius:7px; padding:8px 12px; font-size:13px; color:#111827; outline:none; background:#fff; transition:border-color 0.15s; }
+    .select:focus { border-color:#10b981; box-shadow:0 0 0 3px rgba(16,185,129,0.1); }
+    label { display:block; font-size:11.5px; font-weight:500; color:#6b7280; margin-bottom:5px; letter-spacing:0.01em; }
+
+    /* ── Alert banner ── */
+    .alert-banner { background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:12px 16px; display:flex; align-items:flex-start; gap:10px; }
+
+    /* ── Page transitions ── */
+    .page { display:none; }
+    .page.active { display:block; animation: fadeIn 0.18s ease; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:translateY(0); } }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width:5px; } ::-webkit-scrollbar-track { background:transparent; } ::-webkit-scrollbar-thumb { background:#d1d5db; border-radius:999px; }
+
+    /* ── Chat Widget ── */
+    .chat-bubble { max-width:88%; padding:10px 14px; border-radius:12px; font-size:13px; line-height:1.55; word-break:break-word; white-space:pre-wrap; }
+    .chat-bubble.user { background:#0f172a; color:#f8fafc; align-self:flex-end; border-bottom-right-radius:3px; }
+    .chat-bubble.sofia { background:#f9fafb; color:#111827; align-self:flex-start; border:1px solid #e5e7eb; border-bottom-left-radius:3px; }
+    .chat-bubble.system-ok { background:#f0fdf4; color:#166534; align-self:center; font-size:12px; font-weight:500; border:1px solid #bbf7d0; border-radius:6px; text-align:center; padding:5px 14px; }
+    .chat-bubble.typing { color:#9ca3af; font-style:italic; }
+    .chat-suggest { background:#fff; border:1px solid #e5e7eb; border-radius:999px; padding:4px 12px; font-size:11.5px; font-weight:450; color:#6b7280; cursor:pointer; white-space:nowrap; transition:all 0.12s; }
+    .chat-suggest:hover { background:#f0fdf4; border-color:#6ee7b7; color:#065f46; }
+    #chat-input-el:focus { border-color:#10b981; outline:none; box-shadow:0 0 0 3px rgba(16,185,129,0.1); }
+    @keyframes pulse-mic { 0%,100% { box-shadow:0 0 0 0 rgba(239,68,68,0.4); } 50% { box-shadow:0 0 0 7px rgba(239,68,68,0); } }
+    .mic-recording { animation:pulse-mic 1s infinite !important; background:#ef4444 !important; }
+  </style>
+</head>
+<body>
+
+<div style="display:flex; min-height:100vh;">
+
+  <!-- ======= SIDEBAR ======= -->
+  <aside class="sidebar" style="width:220px; flex-shrink:0; position:fixed; height:100vh; display:flex; flex-direction:column; overflow-y:auto;">
+    <!-- Logo -->
+    <div style="padding:18px 14px 10px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div class="sidebar-logo-bg" style="width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+          <span style="font-size:13px;font-weight:700;color:#10b981;letter-spacing:-0.5px;">RD</span>
+        </div>
+        <div>
+          <div style="font-size:12.5px;font-weight:600;color:#e2e8f0;letter-spacing:-0.01em;line-height:1.25;">Dr. Rafael Duncan</div>
+          <div style="font-size:10.5px;color:#3d4454;font-weight:400;margin-top:1px;">Geriatria</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Divider -->
+    <div style="height:1px;background:rgba(255,255,255,0.05);margin:6px 14px;"></div>
+
+    <!-- Nav -->
+    <nav style="padding:6px 8px;flex:1;">
+      <div class="nav-section">Principal</div>
+      <div class="nav-item active" onclick="showPage('dashboard')" id="nav-dashboard">
+        <span class="icon"><i data-lucide="layout-dashboard"></i></span> Dashboard
+      </div>
+
+      <div class="nav-section">Pacientes</div>
+      <div class="nav-item" onclick="showPage('crm')" id="nav-crm">
+        <span class="icon"><i data-lucide="users"></i></span> CRM
+      </div>
+      <div class="nav-item" onclick="showPage('pacientes')" id="nav-pacientes">
+        <span class="icon"><i data-lucide="clipboard-list"></i></span> Atendidos
+      </div>
+      <div class="nav-item" onclick="showPage('followup')" id="nav-followup">
+        <span class="icon"><i data-lucide="refresh-cw"></i></span> Follow-Up
+      </div>
+
+      <div class="nav-section">Operacional</div>
+      <div class="nav-item" onclick="showPage('agenda')" id="nav-agenda">
+        <span class="icon"><i data-lucide="calendar"></i></span> Agenda
+      </div>
+      <div class="nav-item" onclick="showPage('receita')" id="nav-receita">
+        <span class="icon"><i data-lucide="trending-up"></i></span> Receita
+      </div>
+      <div class="nav-item" onclick="showPage('despesas')" id="nav-despesas">
+        <span class="icon"><i data-lucide="trending-down"></i></span> Despesas
+      </div>
+      <div class="nav-item" onclick="showPage('precos')" id="nav-precos">
+        <span class="icon"><i data-lucide="tag"></i></span> Tabela de Preços
+      </div>
+
+      <div class="nav-section">Relatórios</div>
+      <div class="nav-item" onclick="showPage('relatorio')" id="nav-relatorio">
+        <span class="icon"><i data-lucide="file-text"></i></span> Mensal
+      </div>
+      <div class="nav-item" onclick="showPage('metas')" id="nav-metas">
+        <span class="icon"><i data-lucide="target"></i></span> Metas Anuais
+      </div>
+      <div class="nav-item" onclick="showPage('backup')" id="nav-backup">
+        <span class="icon"><i data-lucide="hard-drive"></i></span> Backup
+      </div>
+    </nav>
+
+    <!-- Footer -->
+    <div style="padding:10px 14px;border-top:1px solid rgba(255,255,255,0.05);">
+      <div style="display:flex;align-items:center;gap:9px;">
+        <div id="sidebar-avatar" style="width:28px;height:28px;background:#1e293b;border:1px solid rgba(255,255,255,0.1);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#94a3b8;flex-shrink:0;">R</div>
+        <div style="flex:1;min-width:0;">
+          <div id="sidebar-nome" style="font-size:11.5px;font-weight:500;color:#c9d1d9;letter-spacing:-0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Rafael Duncan</div>
+          <div id="sidebar-role" style="font-size:10px;color:#3d4454;">Médico</div>
+        </div>
+        <button onclick="logoutUser()" title="Sair" style="background:transparent;border:none;cursor:pointer;padding:4px;border-radius:5px;color:#3d4454;transition:color 0.15s;" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='#3d4454'">
+          <i data-lucide="log-out" style="width:14px;height:14px;stroke-width:2;"></i>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ======= MAIN ======= -->
+  <main style="margin-left:220px; flex:1; padding:28px 36px; max-width:1240px;">
+
+    <!-- ===================== DASHBOARD ===================== -->
+    <div id="page-dashboard" class="page active">
+
+      <!-- Header -->
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:28px;">
+        <div>
+          <div style="font-size:21px;font-weight:700;color:#0f172a;letter-spacing:-0.5px;">Bom dia, Dr. Rafael</div>
+          <div style="font-size:13px;color:#9ca3af;margin-top:3px;font-weight:400;">Consultório de Geriatria · Maio 2026</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <select class="select" style="width:140px;" onchange="updateDashboard(this.value)">
+            <option value="2026-05">Maio 2026</option>
+            <option value="2026-04">Abril 2026</option>
+            <option value="2026-03">Março 2026</option>
+          </select>
+          <button class="btn-primary" onclick="openModal('modal-paciente')">
+            <span>+</span> Nova Consulta
+          </button>
+        </div>
+      </div>
+
+      <!-- ===== INSIGHTS DA SOFIA ===== -->
+      <div data-section="insights" style="margin-bottom:24px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <div style="font-size:10.5px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.08em;">Insights · Sofia AI</div>
+          <div style="flex:1;height:1px;background:#e2e8f0;"></div>
+          <div style="font-size:11px;color:#94a3b8;" id="insights-timestamp">—</div>
+          <button onclick="gerarInsightsSofia(true)" id="btn-refresh-insights" style="background:#f1f5f9;border:none;border-radius:6px;padding:5px 10px;font-size:11.5px;color:#475569;cursor:pointer;font-weight:600;">🔄 Atualizar</button>
+          <button onclick="toggleSection('insights')" class="btn-section-toggle" title="Ocultar seção">−</button>
+        </div>
+        <div data-section-body="insights">
+          <div id="insights-cards" style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;">
+            <div class="kpi-card" style="padding:16px 18px;border-left:3px solid #cbd5e1;">
+              <div style="font-size:12px;color:#94a3b8;">Clique em <strong>🔄 Atualizar</strong> para gerar insights automáticos da Sofia</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- KPI Grid -->
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
+
+        <div class="kpi-card">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;">
+            <div>
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:2px;">Faturamento Bruto</div>
+              <div style="font-size:28px;font-weight:800;color:#0f172a;letter-spacing:-1px;" id="kpi-fat">R$ 0</div>
+            </div>
+            <div class="kpi-icon" style="background:#d1fae5;"><span>💵</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="trend-up" id="kpi-fat-trend">↑ 0%</span>
+            <span style="font-size:12px;color:#94a3b8;" id="kpi-fat-sub">vs mês anterior</span>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;">
+            <div>
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:2px;">Lucro Líquido</div>
+              <div style="font-size:28px;font-weight:800;color:#10b981;letter-spacing:-1px;" id="kpi-lucro">R$ 0</div>
+            </div>
+            <div class="kpi-icon" style="background:#d1fae5;"><span>📈</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:12px;font-weight:600;color:#10b981;" id="kpi-margem">Margem 0%</span>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;">
+            <div>
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:2px;">Pacientes Atendidos</div>
+              <div style="font-size:28px;font-weight:800;color:#0f172a;letter-spacing:-1px;" id="kpi-pac">0</div>
+            </div>
+            <div class="kpi-icon" style="background:#dbeafe;"><span>🩺</span></div>
+          </div>
+          <div>
+            <span style="font-size:12px;color:#94a3b8;">Ticket médio: </span>
+            <span style="font-size:12px;font-weight:600;color:#3b82f6;" id="kpi-ticket">R$ 0</span>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;">
+            <div>
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:2px;">Taxa de Ocupação</div>
+              <div style="font-size:28px;font-weight:800;color:#0f172a;letter-spacing:-1px;" id="kpi-ocup">0%</div>
+            </div>
+            <div class="kpi-icon" style="background:#fef3c7;"><span>📅</span></div>
+          </div>
+          <div class="progress-bar" style="margin-top:8px;">
+            <div class="progress-fill" id="kpi-ocup-bar" style="width:0%;background:linear-gradient(90deg,#10b981,#34d399);"></div>
+          </div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:5px;" id="kpi-noshow">No-show: 0%</div>
+        </div>
+
+        <div class="kpi-card">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;">
+            <div>
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:2px;">Total Despesas</div>
+              <div style="font-size:28px;font-weight:800;color:#ef4444;letter-spacing:-1px;" id="kpi-desp">R$ 0</div>
+            </div>
+            <div class="kpi-icon" style="background:#fee2e2;"><span>📉</span></div>
+          </div>
+          <div>
+            <span style="font-size:12px;color:#94a3b8;">Inadimplência: </span>
+            <span style="font-size:12px;font-weight:600;color:#f59e0b;" id="kpi-inad">0%</span>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;">
+            <div>
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:2px;">Conversão CRM</div>
+              <div style="font-size:28px;font-weight:800;color:#8b5cf6;letter-spacing:-1px;" id="kpi-conv">0%</div>
+            </div>
+            <div class="kpi-icon" style="background:#ede9fe;"><span>🎯</span></div>
+          </div>
+          <div>
+            <span style="font-size:12px;color:#94a3b8;" id="kpi-conv-sub">Contatos → Consultas</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ===== PACOTE 3: RETENÇÃO E LTV ===== -->
+      <div style="margin-bottom:24px;" data-section="retencao">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <div style="font-size:13px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:0.06em;">💎 Retenção e Lifetime Value</div>
+          <div style="flex:1;height:1px;background:#e2e8f0;"></div>
+          <div style="font-size:11px;color:#94a3b8;">Geriatria vive de paciente recorrente</div>
+          <button onclick="toggleSection('retencao')" class="btn-section-toggle" title="Ocultar seção">−</button>
+        </div>
+        <div data-section-body="retencao">
+
+        <!-- KPIs de retenção -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px;">
+
+          <div class="kpi-card" style="padding:16px 18px;">
+            <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Taxa de Retorno (90d)</div>
+            <div style="font-size:24px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;" id="ret-taxa">0%</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:4px;" id="ret-taxa-sub">% que voltam em até 90 dias</div>
+          </div>
+
+          <div class="kpi-card" style="padding:16px 18px;">
+            <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">LTV Médio</div>
+            <div style="font-size:24px;font-weight:800;color:#10b981;letter-spacing:-0.5px;" id="ret-ltv">R$ 0</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:4px;" id="ret-ltv-sub">Receita ÷ pacientes únicos</div>
+          </div>
+
+          <div class="kpi-card" style="padding:16px 18px;">
+            <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Pacientes Ativos</div>
+            <div style="font-size:24px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;" id="ret-ativos">0</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:4px;" id="ret-ativos-sub">Consulta nos últimos 6 meses</div>
+          </div>
+
+          <div class="kpi-card" style="padding:16px 18px;">
+            <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Frequência Média</div>
+            <div style="font-size:24px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;" id="ret-freq">— dias</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:4px;">Intervalo médio entre consultas</div>
+          </div>
+
+        </div>
+
+        <!-- Lista de pacientes para reativar -->
+        <div class="chart-card" style="padding:0;overflow:hidden;">
+          <div style="padding:16px 20px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+            <div>
+              <div style="font-size:14px;font-weight:700;color:#0f172a;">⚠️ Pacientes para reativar</div>
+              <div style="font-size:12px;color:#94a3b8;margin-top:2px;">Sem consulta há mais de 6 meses — oportunidade de reagendamento</div>
+            </div>
+            <div style="font-size:11px;font-weight:700;color:#dc2626;background:#fee2e2;padding:4px 10px;border-radius:999px;" id="ret-abandonados-count">0</div>
+          </div>
+          <div id="ret-abandonados-list" style="max-height:260px;overflow-y:auto;">
+            <div style="padding:32px;text-align:center;color:#94a3b8;font-size:13px;">Sem pacientes abandonados — todos em dia 🎉</div>
+          </div>
+        </div>
+        </div>
+
+      </div>
+
+      <!-- ===== PACOTE 2: AQUISIÇÃO E MARKETING ===== -->
+      <div style="margin-bottom:24px;" data-section="marketing">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <div style="font-size:13px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:0.06em;">📣 Aquisição e Marketing</div>
+          <div style="flex:1;height:1px;background:#e2e8f0;"></div>
+          <div style="font-size:11px;color:#94a3b8;">Saiba quais canais valem investimento</div>
+          <button onclick="toggleSection('marketing')" class="btn-section-toggle" title="Ocultar seção">−</button>
+        </div>
+        <div data-section-body="marketing">
+
+        <!-- KPIs de marketing -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px;">
+
+          <div class="kpi-card" style="padding:16px 18px;">
+            <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">CAC (Custo p/ Aquisição)</div>
+            <div style="font-size:24px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;" id="mkt-cac">R$ 0</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:4px;" id="mkt-cac-sub">Marketing ÷ pacientes novos</div>
+          </div>
+
+          <div class="kpi-card" style="padding:16px 18px;">
+            <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">ROI Marketing</div>
+            <div style="font-size:24px;font-weight:800;color:#10b981;letter-spacing:-0.5px;" id="mkt-roi">—</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:4px;" id="mkt-roi-sub">Receita ÷ investimento</div>
+          </div>
+
+          <div class="kpi-card" style="padding:16px 18px;">
+            <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Melhor Canal (R$)</div>
+            <div style="font-size:18px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;line-height:1.2;" id="mkt-top-canal">—</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:4px;" id="mkt-top-canal-sub">Maior receita gerada</div>
+          </div>
+
+          <div class="kpi-card" style="padding:16px 18px;">
+            <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Conversão Total</div>
+            <div style="font-size:24px;font-weight:800;color:#8b5cf6;letter-spacing:-0.5px;" id="mkt-conv-total">0%</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:4px;" id="mkt-conv-total-sub">Contatos → Atendeu</div>
+          </div>
+
+        </div>
+
+        <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:16px;">
+
+          <!-- Tabela ROI por canal -->
+          <div class="chart-card" style="padding:0;overflow:hidden;">
+            <div style="padding:14px 18px;border-bottom:1px solid #f1f5f9;">
+              <div style="font-size:13.5px;font-weight:700;color:#0f172a;">📊 ROI por canal</div>
+              <div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">Performance de cada origem de paciente</div>
+            </div>
+            <div style="max-height:340px;overflow-y:auto;">
+              <table class="data-table" style="font-size:12.5px;">
+                <thead><tr><th>Canal</th><th style="text-align:center;">Contatos</th><th style="text-align:center;">Atendeu</th><th style="text-align:center;">Conv.</th><th style="text-align:right;">Receita</th></tr></thead>
+                <tbody id="mkt-canais-tbody">
+                  <tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:32px;">Sem dados ainda</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Funil visual -->
+          <div class="chart-card">
+            <div style="padding:0 0 14px;border-bottom:1px solid #f1f5f9;margin-bottom:16px;">
+              <div style="font-size:13.5px;font-weight:700;color:#0f172a;">🪜 Funil de conversão</div>
+              <div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">% que avança em cada etapa</div>
+            </div>
+            <div id="mkt-funil" style="display:flex;flex-direction:column;gap:10px;">
+              <div style="text-align:center;color:#94a3b8;font-size:12.5px;padding:20px;">Sem dados ainda</div>
+            </div>
+          </div>
+
+        </div>
+        </div>
+
+      </div>
+
+      <!-- ===== PACOTE 1: INTELIGÊNCIA FINANCEIRA ===== -->
+      <div style="margin-bottom:24px;" data-section="financeiro">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <div style="font-size:13px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:0.06em;">💰 Inteligência Financeira</div>
+          <div style="flex:1;height:1px;background:#e2e8f0;"></div>
+          <div style="font-size:11px;color:#94a3b8;">Projeção, DRE e fôlego de caixa</div>
+          <button onclick="toggleSection('financeiro')" class="btn-section-toggle" title="Ocultar seção">−</button>
+        </div>
+        <div data-section-body="financeiro">
+
+        <!-- KPIs financeiros -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px;">
+
+          <div class="kpi-card" style="padding:16px 18px;">
+            <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Projeção do Mês</div>
+            <div style="font-size:24px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;" id="fin-proj">R$ 0</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:4px;" id="fin-proj-sub">Pace atual extrapolado</div>
+            <div class="progress-bar" style="margin-top:8px;height:5px;">
+              <div class="progress-fill" id="fin-proj-bar" style="width:0%;background:linear-gradient(90deg,#3b82f6,#60a5fa);"></div>
+            </div>
+            <div style="font-size:10.5px;color:#94a3b8;margin-top:4px;" id="fin-proj-meta">vs meta —</div>
+          </div>
+
+          <div class="kpi-card" style="padding:16px 18px;">
+            <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Receita Líquida</div>
+            <div style="font-size:24px;font-weight:800;color:#10b981;letter-spacing:-0.5px;" id="fin-receita-liq">R$ 0</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:4px;" id="fin-receita-liq-sub">Bruta menos inadimplência</div>
+          </div>
+
+          <div class="kpi-card" style="padding:16px 18px;">
+            <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Burn Rate Mensal</div>
+            <div style="font-size:24px;font-weight:800;color:#ef4444;letter-spacing:-0.5px;" id="fin-burn">R$ 0</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:4px;" id="fin-burn-sub">Média despesas fixas (3m)</div>
+          </div>
+
+          <div class="kpi-card" style="padding:16px 18px;">
+            <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Runway (Fôlego)</div>
+            <div style="font-size:24px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;" id="fin-runway">— meses</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:4px;" id="fin-runway-sub">Quanto o caixa aguenta sem receita</div>
+          </div>
+
+        </div>
+
+        <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:16px;">
+
+          <!-- DRE simplificado -->
+          <div class="chart-card" style="padding:0;overflow:hidden;">
+            <div style="padding:14px 18px;border-bottom:1px solid #f1f5f9;">
+              <div style="font-size:13.5px;font-weight:700;color:#0f172a;">📋 DRE Simplificado do Mês</div>
+              <div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">Demonstrativo de resultado</div>
+            </div>
+            <div id="fin-dre" style="padding:14px 18px;">
+              <div style="text-align:center;color:#94a3b8;font-size:13px;padding:20px;">Sem dados ainda</div>
+            </div>
+          </div>
+
+          <!-- Receita por tipo de consulta -->
+          <div class="chart-card" style="padding:0;overflow:hidden;">
+            <div style="padding:14px 18px;border-bottom:1px solid #f1f5f9;">
+              <div style="font-size:13.5px;font-weight:700;color:#0f172a;">🩺 Receita por tipo de consulta</div>
+              <div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">Onde está sua maior margem</div>
+            </div>
+            <div id="fin-tipos" style="padding:14px 18px;">
+              <div style="text-align:center;color:#94a3b8;font-size:13px;padding:20px;">Sem dados ainda</div>
+            </div>
+          </div>
+
+        </div>
+        </div>
+
+      </div>
+
+      <!-- ===== PACOTE 5: TENDÊNCIAS E GRÁFICOS ===== -->
+      <div data-section="graficos" style="margin-bottom:24px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <div style="font-size:13px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:0.06em;">📈 Tendências e Gráficos</div>
+          <div style="flex:1;height:1px;background:#e2e8f0;"></div>
+          <div style="font-size:11px;color:#94a3b8;">Histórico e padrões</div>
+          <button onclick="toggleSection('graficos')" class="btn-section-toggle" title="Ocultar seção">−</button>
+        </div>
+        <div data-section-body="graficos">
+
+          <!-- Linha 12 meses (largura total) -->
+          <div class="chart-card" style="margin-bottom:16px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+              <div>
+                <div style="font-size:14px;font-weight:700;color:#0f172a;">Faturamento × Lucro × Despesas (12 meses)</div>
+                <div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">Tendência de receita e resultado</div>
+              </div>
+            </div>
+            <div style="position:relative;height:280px;width:100%;">
+              <canvas id="chart-12meses"></canvas>
+            </div>
+          </div>
+
+          <!-- Donut + Bar lado a lado -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+
+            <div class="chart-card">
+              <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:4px;">💰 Receita por canal de origem</div>
+              <div style="font-size:11.5px;color:#94a3b8;margin-bottom:14px;">De onde vem seu dinheiro</div>
+              <div style="position:relative;height:240px;width:100%;">
+                <canvas id="chart-canal-receita"></canvas>
+              </div>
+            </div>
+
+            <div class="chart-card">
+              <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:4px;">📅 Faturamento por dia da semana</div>
+              <div style="font-size:11.5px;color:#94a3b8;margin-bottom:14px;">Quais dias rendem mais</div>
+              <div style="position:relative;height:240px;width:100%;">
+                <canvas id="chart-diasem"></canvas>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Painel de seções ocultas (aparece se houver algo escondido) -->
+      <div id="sections-hidden-bar" style="display:none;margin-bottom:24px;padding:10px 16px;background:#f1f5f9;border-radius:10px;font-size:12.5px;color:#64748b;">
+        <span style="margin-right:8px;">📦 Seções ocultas:</span>
+        <span id="sections-hidden-list"></span>
+      </div>
+
+      <!-- Charts Row: Receita vs Meta + Ocupação Semanal -->
+      <div style="display:grid;grid-template-columns:1.4fr 0.6fr;gap:20px;margin-bottom:24px;">
+        <div class="chart-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <div>
+              <div style="font-size:14px;font-weight:700;color:#0f172a;">Receita Acumulada vs Meta</div>
+              <div style="font-size:12px;color:#94a3b8;margin-top:2px;">Mês atual · linha tracejada = projeção</div>
+            </div>
+          </div>
+          <div style="position:relative;height:200px;width:100%;">
+            <canvas id="chart-receita-meta"></canvas>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div style="margin-bottom:16px;">
+            <div style="font-size:14px;font-weight:700;color:#0f172a;">Ocupação Semanal</div>
+            <div style="font-size:12px;color:#94a3b8;margin-top:2px;">Média de consultas por dia</div>
+          </div>
+          <div style="position:relative;height:200px;width:100%;">
+            <canvas id="chart-ocupacao"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Charts Row -->
+      <div style="display:grid;grid-template-columns:1.2fr 0.8fr;gap:20px;margin-bottom:24px;">
+        <div class="chart-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+            <div>
+              <div style="font-size:14px;font-weight:700;color:#0f172a;">Canais de Origem</div>
+              <div style="font-size:12px;color:#94a3b8;margin-top:2px;">De onde vêm seus pacientes</div>
+            </div>
+          </div>
+          <div style="position:relative;height:240px;width:100%;">
+            <canvas id="chart-canais"></canvas>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div style="margin-bottom:20px;">
+            <div style="font-size:14px;font-weight:700;color:#0f172a;">Despesas</div>
+            <div style="font-size:12px;color:#94a3b8;margin-top:2px;">Por categoria</div>
+          </div>
+          <div style="position:relative;height:240px;width:100%;">
+            <canvas id="chart-despesas"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom row: Funil + Últimos -->
+      <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:20px;">
+
+        <!-- Funil CRM -->
+        <div class="chart-card">
+          <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:16px;">Funil CRM</div>
+          <div id="funil-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+        </div>
+
+        <!-- Últimas consultas -->
+        <div class="chart-card" style="padding:0;overflow:hidden;">
+          <div style="padding:20px 20px 12px;display:flex;align-items:center;justify-content:space-between;">
+            <div style="font-size:14px;font-weight:700;color:#0f172a;">Últimas Consultas</div>
+            <button class="btn-ghost" style="font-size:12px;" onclick="showPage('pacientes')">Ver todas →</button>
+          </div>
+          <table class="data-table" id="dash-ultimas">
+            <thead>
+              <tr>
+                <th>Paciente</th>
+                <th>Data</th>
+                <th>Tipo</th>
+                <th>Valor</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="dash-ultimas-tbody">
+              <tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:32px;">Nenhuma consulta registrada</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ===================== CRM ===================== -->
+    <div id="page-crm" class="page">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:28px;">
+        <div>
+          <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">CRM de Contatos</div>
+          <div style="font-size:13.5px;color:#94a3b8;margin-top:4px;">Funil de conversão · Todos os contatos recebidos</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn-ghost" onclick="openImportarWA()" title="Cole uma conversa do WhatsApp para a IA extrair os dados">💬 Importar do WhatsApp</button>
+          <button class="btn-primary" onclick="openModal('modal-crm')">+ Novo Contato</button>
+        </div>
+      </div>
+
+      <!-- Funil -->
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px;">
+        <div class="funil-step">
+          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Contatos</div>
+          <div style="font-size:26px;font-weight:800;color:#3b82f6;" id="funil-contatos">0</div>
+        </div>
+        <div class="funil-step">
+          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Em negoc.</div>
+          <div style="font-size:26px;font-weight:800;color:#8b5cf6;" id="funil-negoc">0</div>
+        </div>
+        <div class="funil-step">
+          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Marcaram</div>
+          <div style="font-size:26px;font-weight:800;color:#f59e0b;" id="funil-marc">0</div>
+        </div>
+        <div class="funil-step">
+          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Atenderam</div>
+          <div style="font-size:26px;font-weight:800;color:#10b981;" id="funil-atend">0</div>
+        </div>
+        <div class="funil-step" style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);border-color:#bbf7d0;">
+          <div style="font-size:11px;font-weight:700;color:#065f46;text-transform:uppercase;letter-spacing:0.06em;">Conversão</div>
+          <div style="font-size:26px;font-weight:800;color:#10b981;" id="funil-conv">0%</div>
+        </div>
+      </div>
+
+      <!-- Filtros -->
+      <div style="display:flex;gap:10px;margin-bottom:16px;">
+        <input type="text" class="input" style="max-width:280px;" placeholder="🔍  Buscar paciente..." oninput="filterTable('crm',this.value)" />
+        <select class="select" style="width:160px;" onchange="filterCrmStatus(this.value)">
+          <option value="">Todos os status</option>
+          <option>Contato feito</option><option>Em negociação</option><option>Marcou</option><option>Atendeu</option><option>Não marcou</option>
+        </select>
+      </div>
+
+      <div class="chart-card" style="padding:0;overflow:hidden;">
+        <table class="data-table">
+          <thead><tr><th>Data</th><th>Paciente</th><th>WhatsApp</th><th>Canal</th><th>Tipo</th><th>Status</th><th></th></tr></thead>
+          <tbody id="crm-tbody"><tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:48px;">Nenhum contato registrado. <button class="btn-primary" style="margin-left:12px;" onclick="openModal('modal-crm')">+ Novo</button></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ===================== PACIENTES ===================== -->
+    <div id="page-pacientes" class="page">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:28px;">
+        <div>
+          <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">Pacientes Atendidos</div>
+          <div style="font-size:13.5px;color:#94a3b8;margin-top:4px;">Registro completo de todas as consultas</div>
+        </div>
+        <button class="btn-primary" onclick="openModal('modal-paciente')">+ Nova Consulta</button>
+      </div>
+      <!-- Banner: CRM pendentes -->
+      <div id="crm-pendentes-atendidos"></div>
+      <div style="display:flex;gap:10px;margin-bottom:16px;">
+        <input type="text" class="input" style="max-width:280px;" placeholder="🔍  Buscar..." oninput="filterTable('pac',this.value)" />
+        <select class="select" style="width:160px;" onchange="filterPacStatus(this.value)">
+          <option value="">Todos</option><option>Pago</option><option>Pendente</option><option>Isento</option>
+        </select>
+      </div>
+      <div class="chart-card" style="padding:0;overflow:hidden;">
+        <table class="data-table">
+          <thead><tr><th>Data</th><th>Paciente</th><th>Tipo de Visita</th><th>Valor</th><th>Pagamento</th><th>Status</th><th></th></tr></thead>
+          <tbody id="pac-tbody"><tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:48px;">Nenhuma consulta registrada.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ===================== FOLLOW-UP ===================== -->
+    <div id="page-followup" class="page">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:28px;">
+        <div>
+          <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">Follow-Up de Pacientes</div>
+          <div style="font-size:13.5px;color:#94a3b8;margin-top:4px;">Acompanhamento pós-consulta · Alertas automáticos</div>
+        </div>
+        <button class="btn-primary" onclick="openModal('modal-followup')">+ Novo Follow-Up</button>
+      </div>
+      <div id="alertas-container"></div>
+      <!-- Banner: atendidos sem follow-up -->
+      <div id="atendidos-sem-followup"></div>
+      <div class="chart-card" style="padding:0;overflow:hidden;">
+        <table class="data-table">
+          <thead><tr><th>Paciente</th><th>Última Consulta</th><th>Próx. Contato</th><th>Tipo</th><th>Feito?</th><th>Reavaliação</th><th>Status</th><th></th></tr></thead>
+          <tbody id="followup-tbody"><tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:48px;">Nenhum follow-up registrado.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ===================== AGENDA ===================== -->
+    <div id="page-agenda" class="page">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+        <div>
+          <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">Agenda</div>
+          <div style="font-size:13.5px;color:#94a3b8;margin-top:4px;">Calendário · Bloqueios · Capacidade</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <button class="btn-ghost" onclick="openModal('modal-config-horarios')" title="Configurar horários e dias de trabalho">⚙️ Configurar</button>
+          <button class="btn-ghost" onclick="openModal('modal-bloqueio')" title="Bloquear horário (almoço, congresso, etc.)">🚫 Bloqueio</button>
+          <button class="btn-primary" onclick="openNovoAgendamento()">+ Agendar</button>
+        </div>
+      </div>
+
+      <!-- KPIs auto-calculados a partir dos agendamentos -->
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px;">
+        <div class="kpi-card" style="padding:14px 16px;border-left:3px solid #3b82f6;">
+          <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Agendados</div>
+          <div style="font-size:22px;font-weight:800;color:#0f172a;" id="ag-confirmados">0</div>
+          <div style="font-size:11px;color:#94a3b8;" id="ag-confirmados-sub">no período</div>
+        </div>
+        <div class="kpi-card" style="padding:14px 16px;border-left:3px solid #10b981;">
+          <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Compareceram</div>
+          <div style="font-size:22px;font-weight:800;color:#10b981;" id="ag-compareceram">0</div>
+          <div style="font-size:11px;color:#94a3b8;" id="ag-compareceram-sub">0% confirmação</div>
+        </div>
+        <div class="kpi-card" style="padding:14px 16px;border-left:3px solid #ef4444;">
+          <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">No-show</div>
+          <div style="font-size:22px;font-weight:800;color:#ef4444;" id="ag-noshow">0</div>
+          <div style="font-size:11px;color:#94a3b8;" id="ag-noshow-sub">0% no-show</div>
+        </div>
+        <div class="kpi-card" style="padding:14px 16px;border-left:3px solid #f59e0b;">
+          <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Taxa Ocupação</div>
+          <div style="font-size:22px;font-weight:800;color:#0f172a;" id="ag-ocup">0%</div>
+          <div style="font-size:11px;color:#94a3b8;" id="ag-ocup-sub">slots usados</div>
+        </div>
+        <div class="kpi-card" style="padding:14px 16px;border-left:3px solid #8b5cf6;">
+          <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Receita Perdida</div>
+          <div style="font-size:22px;font-weight:800;color:#f59e0b;" id="ag-perdida">R$ 0</div>
+          <div style="font-size:11px;color:#94a3b8;">No-shows × ticket médio</div>
+        </div>
+      </div>
+
+      <!-- Controles de visualização -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button class="btn-ghost" onclick="agendaNavegar(-1)" title="Anterior">◀</button>
+          <button class="btn-ghost" onclick="agendaHoje()" title="Hoje">Hoje</button>
+          <button class="btn-ghost" onclick="agendaNavegar(1)" title="Próximo">▶</button>
+          <div id="ag-periodo-label" style="font-size:15px;font-weight:700;color:#0f172a;margin-left:10px;">—</div>
+        </div>
+        <div style="display:flex;background:#f1f5f9;border-radius:8px;padding:3px;gap:3px;">
+          <button id="btn-ag-dia"    onclick="setAgendaView('dia')"    class="ag-tab">Dia</button>
+          <button id="btn-ag-semana" onclick="setAgendaView('semana')" class="ag-tab">Semana</button>
+          <button id="btn-ag-mes"    onclick="setAgendaView('mes')"    class="ag-tab">Mês</button>
+        </div>
+      </div>
+
+      <!-- Container das views -->
+      <div id="ag-container" class="chart-card" style="padding:0;overflow:hidden;min-height:400px;">
+        <div style="padding:40px;text-align:center;color:#94a3b8;">Carregando…</div>
+      </div>
+
+    </div>
+
+    <!-- ===================== DESPESAS ===================== -->
+    <!-- ===================== RECEITA ===================== -->
+    <div id="page-receita" class="page">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:28px;">
+        <div>
+          <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">Controle de Receita</div>
+          <div style="font-size:13.5px;color:#94a3b8;margin-top:4px;">Quem pagou, quem deve · Visão financeira dos atendimentos</div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <select class="select" style="width:140px;" id="rec-mes-filter" onchange="renderReceita()">
+            <option value="2026-05">Maio 2026</option>
+            <option value="2026-04">Abril 2026</option>
+            <option value="2026-03">Março 2026</option>
+            <option value="2026-02">Fevereiro 2026</option>
+            <option value="todos">Todos</option>
+          </select>
+          <button class="btn-primary" onclick="openModal('modal-paciente')">+ Novo Atendimento</button>
+        </div>
+      </div>
+
+      <!-- KPIs principais -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px;">
+        <div class="kpi-card" style="border-left:3px solid #10b981;">
+          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Recebido</div>
+          <div style="font-size:24px;font-weight:800;color:#10b981;" id="rec-recebido">R$ 0</div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:4px;" id="rec-recebido-sub">0 atendimentos pagos</div>
+        </div>
+        <div class="kpi-card" style="border-left:3px solid #f59e0b;">
+          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">A receber</div>
+          <div style="font-size:24px;font-weight:800;color:#f59e0b;" id="rec-areceber">R$ 0</div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:4px;" id="rec-areceber-sub">0 pendentes</div>
+        </div>
+        <div class="kpi-card" style="border-left:3px solid #94a3b8;">
+          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Isento / Cortesia</div>
+          <div style="font-size:24px;font-weight:800;color:#64748b;" id="rec-isento">R$ 0</div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:4px;" id="rec-isento-sub">0 atendimentos</div>
+        </div>
+        <div class="kpi-card" style="border-left:3px solid #3b82f6;">
+          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Bruto Total</div>
+          <div style="font-size:24px;font-weight:800;color:#0f172a;" id="rec-bruto">R$ 0</div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:4px;" id="rec-bruto-sub">Ticket médio: R$ 0</div>
+        </div>
+      </div>
+
+      <!-- Quebras: forma de pagamento + status -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+        <div class="chart-card">
+          <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:14px;">💳 Por forma de pagamento</div>
+          <div id="rec-formas"><div style="text-align:center;color:#94a3b8;font-size:13px;padding:20px;">Sem dados</div></div>
+        </div>
+        <div class="chart-card">
+          <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:14px;">🩺 Por procedimento</div>
+          <div id="rec-procs"><div style="text-align:center;color:#94a3b8;font-size:13px;padding:20px;">Sem dados</div></div>
+        </div>
+      </div>
+
+      <!-- Filtros + busca -->
+      <div style="display:flex;gap:10px;margin-bottom:14px;">
+        <input class="input" id="rec-busca" oninput="renderReceita()" placeholder="🔍 Buscar paciente..." style="flex:1;" />
+        <select class="select" id="rec-status-filter" onchange="renderReceita()" style="width:160px;">
+          <option value="">Todos os status</option>
+          <option value="Pago">Pago</option>
+          <option value="Pendente">Pendente</option>
+          <option value="Isento">Isento</option>
+        </select>
+        <select class="select" id="rec-pgto-filter" onchange="renderReceita()" style="width:180px;">
+          <option value="">Todas as formas</option>
+          <option value="PIX">PIX</option>
+          <option value="Cartão crédito">Cartão crédito</option>
+          <option value="Cartão débito">Cartão débito</option>
+          <option value="Dinheiro">Dinheiro</option>
+          <option value="A receber">A receber</option>
+        </select>
+      </div>
+
+      <!-- Tabela detalhada -->
+      <div class="chart-card" style="padding:0;overflow:hidden;">
+        <table class="data-table">
+          <thead><tr><th>Data</th><th>Paciente</th><th>Procedimento</th><th style="text-align:right;">Valor</th><th>Pagamento</th><th>Status</th><th></th></tr></thead>
+          <tbody id="rec-tbody"><tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:48px;">Nenhum atendimento no período.</td></tr></tbody>
+          <tfoot id="rec-tfoot"></tfoot>
+        </table>
+      </div>
+    </div>
+
+    <div id="page-despesas" class="page">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:28px;">
+        <div>
+          <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">Controle de Despesas</div>
+          <div style="font-size:13.5px;color:#94a3b8;margin-top:4px;">Custos fixos e variáveis · P&L do mês</div>
+        </div>
+        <button class="btn-primary" onclick="openModal('modal-despesa')">+ Nova Despesa</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;">
+        <div class="kpi-card" style="border-left:3px solid #10b981;"><div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Receita Bruta</div><div style="font-size:24px;font-weight:800;color:#10b981;" id="pl-receita">R$ 0</div></div>
+        <div class="kpi-card" style="border-left:3px solid #ef4444;"><div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Total Despesas</div><div style="font-size:24px;font-weight:800;color:#ef4444;" id="pl-despesas">R$ 0</div></div>
+        <div class="kpi-card" style="border-left:3px solid #3b82f6;"><div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Lucro</div><div style="font-size:24px;font-weight:800;color:#3b82f6;" id="pl-lucro">R$ 0</div></div>
+        <div class="kpi-card" style="border-left:3px solid #8b5cf6;"><div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Margem</div><div style="font-size:24px;font-weight:800;color:#8b5cf6;" id="pl-margem">0%</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
+        <div class="chart-card"><div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:16px;">Por Categoria</div><div id="desp-categorias"></div></div>
+        <div class="chart-card"><canvas id="chart-desp-cat" height="200"></canvas></div>
+      </div>
+      <div class="chart-card" style="padding:0;overflow:hidden;">
+        <table class="data-table">
+          <thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Tipo</th><th>Valor</th><th>Pagamento</th><th></th></tr></thead>
+          <tbody id="desp-tbody"><tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:48px;">Nenhuma despesa registrada.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ===================== RELATÓRIO ===================== -->
+    <div id="page-relatorio" class="page">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:28px;">
+        <div>
+          <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">Relatório Mensal</div>
+          <div style="font-size:13.5px;color:#94a3b8;margin-top:4px;">Visão consolidada de gestão</div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <select class="select" id="relatorio-mes-sel" style="width:160px;" onchange="renderRelatorio(this.value)">
+            <option value="2026-05">Maio 2026</option><option value="2026-04">Abril 2026</option><option value="2026-03">Março 2026</option>
+          </select>
+          <button class="btn-primary" onclick="gerarPDF(document.getElementById('relatorio-mes-sel').value)" style="white-space:nowrap;">🖨️ Gerar PDF</button>
+        </div>
+      </div>
+      <div id="relatorio-content" style="display:flex;flex-direction:column;gap:20px;"></div>
+    </div>
+
+    <!-- ===================== TABELA DE PREÇOS ===================== -->
+    <div id="page-precos" class="page">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;">
+        <div>
+          <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">Tabela de Preços</div>
+          <div style="font-size:13.5px;color:#94a3b8;margin-top:4px;">Procedimentos e valores por forma de pagamento</div>
+        </div>
+        <button class="btn-primary" onclick="openModalProc()"><span>+</span> Novo Procedimento</button>
+      </div>
+
+      <div class="chart-card" style="padding:14px 18px;margin-bottom:16px;background:#eff6ff;border:1px solid #bfdbfe;">
+        <div style="font-size:13px;color:#1e40af;">
+          💡 <strong>Como funciona:</strong> Cadastre cada procedimento que você oferece com os valores em <strong>PIX</strong> e <strong>Cartão</strong>. Ao registrar um atendimento, o valor será preenchido automaticamente conforme a forma de pagamento escolhida. Você ainda pode ajustar manualmente se houver alguma exceção.
+        </div>
+      </div>
+
+      <div class="chart-card" style="padding:0;overflow:hidden;">
+        <table class="data-table">
+          <thead><tr><th>Procedimento</th><th style="text-align:right;">Valor PIX</th><th style="text-align:right;">Valor Cartão</th><th style="text-align:center;">Diferença</th><th></th></tr></thead>
+          <tbody id="precos-tbody"><tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:48px;">Carregando…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ===================== BACKUP ===================== -->
+    <div id="page-backup" class="page">
+      <div style="margin-bottom:28px;">
+        <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">💾 Backup de Dados</div>
+        <div style="font-size:13.5px;color:#94a3b8;margin-top:4px;">Exporte, importe e gerencie seus dados com segurança</div>
+      </div>
+
+      <!-- Resumo de dados -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:28px;" id="backup-resumo"></div>
+
+      <!-- Exportar -->
+      <div class="chart-card" style="margin-bottom:20px;">
+        <div style="font-size:15px;font-weight:700;color:#0f172a;margin-bottom:6px;">📤 Exportar</div>
+        <div style="font-size:13px;color:#64748b;margin-bottom:18px;">Faça download dos seus dados para guardar ou transferir entre dispositivos.</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;">
+          <button class="btn-primary" onclick="exportarJSON()">⬇️ Backup completo (JSON)</button>
+          <button class="btn-ghost" onclick="exportarCSV('pacientes')">📊 Atendidos (CSV)</button>
+          <button class="btn-ghost" onclick="exportarCSV('crm')">📊 CRM (CSV)</button>
+          <button class="btn-ghost" onclick="exportarCSV('despesas')">📊 Despesas (CSV)</button>
+          <button class="btn-ghost" onclick="exportarCSV('agendamentos')">📊 Agenda (CSV)</button>
+        </div>
+      </div>
+
+      <!-- Importar -->
+      <div class="chart-card" style="margin-bottom:20px;">
+        <div style="font-size:15px;font-weight:700;color:#0f172a;margin-bottom:6px;">📥 Importar Backup</div>
+        <div style="font-size:13px;color:#64748b;margin-bottom:18px;">Restaure um backup JSON anterior. <strong>Atenção:</strong> isso substitui os dados atuais.</div>
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+          <label style="cursor:pointer;display:inline-flex;align-items:center;gap:8px;background:#f1f5f9;border:1px dashed #cbd5e1;border-radius:8px;padding:10px 18px;font-size:13px;color:#475569;font-weight:600;transition:background 0.15s;" onmouseenter="this.style.background='#e2e8f0'" onmouseleave="this.style.background='#f1f5f9'">
+            📂 Escolher arquivo JSON
+            <input type="file" accept=".json" style="display:none;" onchange="importarJSON(this)">
+          </label>
+          <span style="font-size:12px;color:#94a3b8;" id="backup-import-status">Nenhum arquivo selecionado</span>
+        </div>
+      </div>
+
+      <!-- Limpar dados -->
+      <div class="chart-card" style="border:1px solid #fecaca;">
+        <div style="font-size:15px;font-weight:700;color:#dc2626;margin-bottom:6px;">🗑️ Zona de Perigo</div>
+        <div style="font-size:13px;color:#64748b;margin-bottom:18px;">Apaga permanentemente todos os dados do consultório. <strong>Faça um backup antes!</strong></div>
+        <button onclick="limparTodosDados()" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:8px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;">⚠️ Limpar todos os dados</button>
+      </div>
+    </div>
+
+    <!-- ===================== METAS ===================== -->
+    <div id="page-metas" class="page">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:28px;">
+        <div>
+          <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">Metas Anuais 2026</div>
+          <div style="font-size:13.5px;color:#94a3b8;margin-top:4px;">Metas vs. Realizado · Acompanhamento mensal</div>
+        </div>
+        <button class="btn-ghost" onclick="openModal('modal-metas')">⚙️ Editar Metas</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
+        <div class="kpi-card"><div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Meta Faturamento/Mês</div><div style="font-size:26px;font-weight:800;color:#0f172a;" id="meta-fat-val">—</div></div>
+        <div class="kpi-card"><div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Meta Pacientes/Mês</div><div style="font-size:26px;font-weight:800;color:#0f172a;" id="meta-pac-val">—</div></div>
+        <div class="kpi-card"><div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Ticket Médio Meta</div><div style="font-size:26px;font-weight:800;color:#0f172a;" id="meta-ticket-val">—</div></div>
+      </div>
+      <div class="chart-card" style="padding:0;overflow:hidden;">
+        <table class="data-table">
+          <thead><tr><th>Mês</th><th style="text-align:right;">Fat. Real</th><th style="text-align:right;">Meta</th><th style="text-align:right;">% Meta</th><th style="text-align:right;">Pac.</th><th style="text-align:right;">Meta Pac.</th><th style="text-align:right;">Lucro</th><th style="text-align:right;">Margem</th><th style="text-align:center;">Status</th></tr></thead>
+          <tbody id="metas-tbody"><tr><td colspan="9" style="text-align:center;color:#94a3b8;padding:48px;">Configure suas metas clicando em ⚙️ Editar Metas</td></tr></tbody>
+          <tfoot><tr id="metas-total"></tr></tfoot>
+        </table>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ===================== MODAIS ===================== -->
+<div id="modal-crm" class="modal-overlay" style="display:none;">
+  <div class="modal">
+    <div style="padding:24px 24px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+      <div class="modal-title" style="font-size:16px;font-weight:700;color:#0f172a;">Novo Contato</div>
+      <button onclick="closeModal('modal-crm')" style="background:none;border:none;cursor:pointer;font-size:22px;color:#94a3b8;line-height:1;">×</button>
+    </div>
+    <form style="padding:20px 24px 24px;" onsubmit="saveCrm(event)">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+        <div><label>Data Contato</label><input type="date" class="input" name="data" required /></div>
+        <div><label>Hora</label><input type="time" class="input" name="hora" /></div>
+      </div>
+      <div style="margin-bottom:14px;"><label>Nome do Paciente</label><input type="text" class="input" name="nome" placeholder="Nome completo" required /></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+        <div><label>WhatsApp</label><input type="text" class="input" name="whatsapp" placeholder="(11) 99999-9999" /></div>
+        <div><label>Idade</label><input type="number" class="input" name="idade" placeholder="72" /></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+        <div><label>Canal de Origem</label><select class="select" name="canal"><option>Indicação médica</option><option>Indicação paciente</option><option>Google</option><option>Instagram</option><option>WhatsApp</option><option>Doctoralia</option><option>Outros</option></select></div>
+        <div><label>Tipo</label><select class="select" name="tipo"><option>1ª vez</option><option>Consulta</option><option>Retorno</option><option>Cortesia</option><option>Domiciliar</option><option>Hospitalar</option></select></div>
+      </div>
+      <div style="margin-bottom:14px;"><label>Status</label><select class="select" name="status"><option>Contato feito</option><option>Em negociação</option><option>Marcou</option><option>Atendeu</option><option>Não marcou</option></select></div>
+      <div style="margin-bottom:20px;"><label>Observações</label><textarea class="input" name="obs" rows="2" placeholder="Anotações..."></textarea></div>
+      <div style="display:flex;gap:10px;">
+        <button type="submit" class="btn-primary" style="flex:1;justify-content:center;">Salvar Contato</button>
+        <button type="button" onclick="closeModal('modal-crm')" class="btn-ghost">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="modal-paciente" class="modal-overlay" style="display:none;">
+  <div class="modal">
+    <div style="padding:24px 24px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+      <div class="modal-title" style="font-size:16px;font-weight:700;color:#0f172a;">Nova Consulta</div>
+      <button onclick="closeModal('modal-paciente')" style="background:none;border:none;cursor:pointer;font-size:22px;color:#94a3b8;line-height:1;">×</button>
+    </div>
+    <form style="padding:20px 24px 24px;" onsubmit="savePaciente(event)">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+        <div><label>Data da Consulta</label><input type="date" class="input" name="data" required /></div>
+        <div><label>Procedimento</label><select class="select" name="tipo" id="pac-procedimento" onchange="atualizarValorSugerido()"></select></div>
+      </div>
+      <div style="margin-bottom:14px;"><label>Nome do Paciente</label><input type="text" class="input" name="nome" required /></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:6px;">
+        <div><label>Forma de Pagamento</label><select class="select" name="pagamento" id="pac-pagamento" onchange="atualizarValorSugerido()"><option>PIX</option><option>Cartão crédito</option><option>Cartão débito</option><option>Dinheiro</option><option>A receber</option></select></div>
+        <div><label>Valor (R$)</label><input type="number" step="0.01" class="input" name="valor" id="pac-valor" placeholder="0,00" /></div>
+      </div>
+      <div id="pac-valor-hint" style="font-size:11.5px;color:#64748b;margin-bottom:14px;min-height:16px;"></div>
+      <div style="margin-bottom:14px;"><label>Status Pagamento</label><select class="select" name="statusPgto"><option>Pago</option><option>Pendente</option><option>Isento</option></select></div>
+      <div style="margin-bottom:20px;"><label>Observações</label><textarea class="input" name="obs" rows="2"></textarea></div>
+      <div style="display:flex;gap:10px;">
+        <button type="submit" class="btn-primary" style="flex:1;justify-content:center;">Salvar Consulta</button>
+        <button type="button" onclick="closeModal('modal-paciente')" class="btn-ghost">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="modal-followup" class="modal-overlay" style="display:none;">
+  <div class="modal">
+    <div style="padding:24px 24px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+      <div class="modal-title" style="font-size:16px;font-weight:700;color:#0f172a;">Novo Follow-Up</div>
+      <button onclick="closeModal('modal-followup')" style="background:none;border:none;cursor:pointer;font-size:22px;color:#94a3b8;line-height:1;">×</button>
+    </div>
+    <form style="padding:20px 24px 24px;" onsubmit="saveFollowup(event)">
+      <div style="margin-bottom:14px;"><label>Paciente</label><input type="text" class="input" name="nome" required /></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+        <div><label>Última Consulta</label><input type="date" class="input" name="ultConsulta" /></div>
+        <div><label>Próximo Contato</label><input type="date" class="input" name="dataContato" /></div>
+      </div>
+      <div style="margin-bottom:14px;"><label>Tipo de Contato</label><select class="select" name="tipoContato"><option>WhatsApp</option><option>Ligação</option><option>E-mail</option></select></div>
+      <div style="margin-bottom:14px;"><label>Data Reavaliação</label><input type="date" class="input" name="dataReav" /></div>
+      <div style="margin-bottom:20px;"><label>Observações</label><textarea class="input" name="obs" rows="2"></textarea></div>
+      <div style="display:flex;gap:10px;">
+        <button type="submit" class="btn-primary" style="flex:1;justify-content:center;">Salvar</button>
+        <button type="button" onclick="closeModal('modal-followup')" class="btn-ghost">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===== MODAL AGENDAMENTO ===== -->
+<div id="modal-agendamento" class="modal-overlay" style="display:none;">
+  <div class="modal" style="max-width:540px;">
+    <div style="padding:24px 24px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+      <div class="modal-title" style="font-size:16px;font-weight:700;color:#0f172a;">Novo Agendamento</div>
+      <button onclick="closeModal('modal-agendamento')" style="background:none;border:none;cursor:pointer;font-size:22px;color:#94a3b8;line-height:1;">×</button>
+    </div>
+    <form style="padding:20px 24px 24px;" onsubmit="saveAgendamento(event)">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px;">
+        <div><label>Data</label><input type="date" class="input" name="data" required /></div>
+        <div><label>Hora</label><input type="time" class="input" name="hora" required /></div>
+        <div><label>Duração (min)</label><input type="number" class="input" name="duracao" value="60" min="15" step="15" /></div>
+      </div>
+      <div style="margin-bottom:14px;"><label>Paciente</label><input type="text" class="input" name="pacienteNome" required placeholder="Nome completo" /></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+        <div><label>WhatsApp</label><input type="text" class="input" name="whatsapp" placeholder="(11) 99999-9999" /></div>
+        <div><label>Procedimento</label><select class="select" name="procedimento" id="ag-procedimento"></select></div>
+      </div>
+      <div style="margin-bottom:14px;"><label>Status</label><select class="select" name="status">
+        <option value="Confirmado">Confirmado</option>
+        <option value="Compareceu">Compareceu</option>
+        <option value="No-show">No-show</option>
+        <option value="Cancelado">Cancelado</option>
+      </select></div>
+      <div style="margin-bottom:20px;"><label>Observações</label><textarea class="input" name="obs" rows="2"></textarea></div>
+      <div id="ag-conflito-aviso" style="display:none;background:#fef3c7;border:1px solid #fcd34d;color:#92400e;padding:10px 14px;border-radius:8px;font-size:12.5px;margin-bottom:14px;"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button type="submit" class="btn-primary" style="flex:1;justify-content:center;">Salvar Agendamento</button>
+        <button type="button" onclick="abrirGoogleCalendar()" class="btn-ghost" title="Abre o Google Calendar com este agendamento pré-preenchido">📅 Google Calendar</button>
+        <button type="button" onclick="closeModal('modal-agendamento')" class="btn-ghost">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===== MODAL CONFIGURAR HORÁRIOS ===== -->
+<div id="modal-config-horarios" class="modal-overlay" style="display:none;">
+  <div class="modal" style="max-width:540px;">
+    <div style="padding:24px 24px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+      <div style="font-size:16px;font-weight:700;color:#0f172a;">⚙️ Configurar Agenda</div>
+      <button onclick="closeModal('modal-config-horarios')" style="background:none;border:none;cursor:pointer;font-size:22px;color:#94a3b8;line-height:1;">×</button>
+    </div>
+    <form style="padding:20px 24px 24px;" onsubmit="saveConfigHorarios(event)">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+        <div><label>Hora Início</label><input type="time" class="input" name="horaInicio" value="08:00" required /></div>
+        <div><label>Hora Fim</label><input type="time" class="input" name="horaFim" value="18:00" required /></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+        <div><label>Almoço Início</label><input type="time" class="input" name="almocoInicio" value="12:00" /></div>
+        <div><label>Almoço Fim</label><input type="time" class="input" name="almocoFim" value="13:30" /></div>
+      </div>
+      <div style="margin-bottom:14px;"><label>Duração padrão do slot (min)</label><input type="number" class="input" name="slotDuracao" value="60" min="15" step="15" required /></div>
+      <div style="margin-bottom:20px;">
+        <label>Dias de Atendimento</label>
+        <div id="cfg-dias" style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
+          <!-- preenchido por JS -->
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button type="submit" class="btn-primary" style="flex:1;justify-content:center;">Salvar Configuração</button>
+        <button type="button" onclick="closeModal('modal-config-horarios')" class="btn-ghost">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===== MODAL BLOQUEIO ===== -->
+<div id="modal-bloqueio" class="modal-overlay" style="display:none;">
+  <div class="modal">
+    <div style="padding:24px 24px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+      <div style="font-size:16px;font-weight:700;color:#0f172a;">🚫 Bloquear horário</div>
+      <button onclick="closeModal('modal-bloqueio')" style="background:none;border:none;cursor:pointer;font-size:22px;color:#94a3b8;line-height:1;">×</button>
+    </div>
+    <form style="padding:20px 24px 24px;" onsubmit="saveBloqueio(event)">
+      <div style="margin-bottom:14px;"><label>Motivo</label><input type="text" class="input" name="motivo" required placeholder="Ex: Congresso, reunião, folga..." /></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+        <div><label>Data Início</label><input type="date" class="input" name="dataInicio" required /></div>
+        <div><label>Hora Início</label><input type="time" class="input" name="horaInicio" value="08:00" /></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+        <div><label>Data Fim</label><input type="date" class="input" name="dataFim" required /></div>
+        <div><label>Hora Fim</label><input type="time" class="input" name="horaFim" value="18:00" /></div>
+      </div>
+      <div id="bloq-list" style="margin-bottom:14px;max-height:160px;overflow-y:auto;border-top:1px solid #f1f5f9;padding-top:10px;"></div>
+      <div style="display:flex;gap:10px;">
+        <button type="submit" class="btn-primary" style="flex:1;justify-content:center;">Criar Bloqueio</button>
+        <button type="button" onclick="closeModal('modal-bloqueio')" class="btn-ghost">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="modal-despesa" class="modal-overlay" style="display:none;">
+  <div class="modal">
+    <div style="padding:24px 24px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+      <div class="modal-title" style="font-size:16px;font-weight:700;color:#0f172a;">Nova Despesa</div>
+      <button onclick="closeModal('modal-despesa')" style="background:none;border:none;cursor:pointer;font-size:22px;color:#94a3b8;line-height:1;">×</button>
+    </div>
+    <form style="padding:20px 24px 24px;" onsubmit="saveDespesa(event)">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+        <div><label>Data</label><input type="date" class="input" name="data" required /></div>
+        <div><label>Categoria</label><select class="select" name="categoria"><option>Estrutura</option><option>Pessoal</option><option>Marketing</option><option>Materiais</option><option>Profissional</option><option>Impostos</option><option>Outros</option></select></div>
+      </div>
+      <div style="margin-bottom:14px;"><label>Fornecedor / Descrição</label><input type="text" class="input" name="descricao" required /></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+        <div><label>Tipo</label><select class="select" name="tipo"><option>Fixo</option><option>Variável</option></select></div>
+        <div><label>Valor (R$)</label><input type="number" step="0.01" class="input" name="valor" required /></div>
+      </div>
+      <div style="margin-bottom:20px;"><label>Forma de Pagamento</label><select class="select" name="formaPgto"><option>PIX</option><option>Débito</option><option>Crédito</option><option>Boleto</option><option>Dinheiro</option></select></div>
+      <div style="display:flex;gap:10px;">
+        <button type="submit" class="btn-primary" style="flex:1;justify-content:center;">Salvar Despesa</button>
+        <button type="button" onclick="closeModal('modal-despesa')" class="btn-ghost">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="modal-metas" class="modal-overlay" style="display:none;">
+  <div class="modal">
+    <div style="padding:24px 24px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+      <div style="font-size:16px;font-weight:700;color:#0f172a;">Configurar Metas 2026</div>
+      <button onclick="closeModal('modal-metas')" style="background:none;border:none;cursor:pointer;font-size:22px;color:#94a3b8;line-height:1;">×</button>
+    </div>
+    <form style="padding:20px 24px 24px;" onsubmit="saveMetas(event)">
+      <div style="margin-bottom:14px;"><label>Faturamento Mensal Meta (R$)</label><input type="number" class="input" name="metaFat" id="input-meta-fat" placeholder="Ex: 50000" /></div>
+      <div style="margin-bottom:14px;"><label>Pacientes por Mês Meta</label><input type="number" class="input" name="metaPac" id="input-meta-pac" placeholder="Ex: 50" /></div>
+      <div style="margin-bottom:20px;"><label>Limite de Despesas Mensais (R$)</label><input type="number" class="input" name="metaDesp" id="input-meta-desp" placeholder="Ex: 14000" /></div>
+      <div style="display:flex;gap:10px;">
+        <button type="submit" class="btn-primary" style="flex:1;justify-content:center;">Salvar Metas</button>
+        <button type="button" onclick="closeModal('modal-metas')" class="btn-ghost">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===================== MODAL IMPORTAR WHATSAPP ===================== -->
+<!-- ===================== MODAL PROCEDIMENTO ===================== -->
+<div id="modal-proc" class="modal-overlay" style="display:none;">
+  <div class="modal">
+    <div style="padding:24px 24px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+      <div class="modal-title" style="font-size:16px;font-weight:700;color:#0f172a;">Novo Procedimento</div>
+      <button onclick="closeModal('modal-proc')" style="background:none;border:none;cursor:pointer;font-size:22px;color:#94a3b8;line-height:1;">×</button>
+    </div>
+    <form style="padding:20px 24px 24px;" onsubmit="saveProc(event)">
+      <div style="margin-bottom:14px;"><label>Nome do procedimento</label><input class="input" name="nome" required placeholder="Ex: Consulta no consultório" /></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+        <div>
+          <label>Valor PIX / Dinheiro (R$)</label>
+          <input type="number" step="0.01" class="input" name="valorPix" required placeholder="0,00" />
+        </div>
+        <div>
+          <label>Valor Cartão (R$)</label>
+          <input type="number" step="0.01" class="input" name="valorCartao" required placeholder="0,00" />
+        </div>
+      </div>
+      <div style="margin-bottom:20px;"><label>Observações (opcional)</label><input class="input" name="obs" placeholder="Ex: paciente antigo, especialização..." /></div>
+      <div style="display:flex;gap:10px;">
+        <button type="submit" class="btn-primary" style="flex:1;justify-content:center;">Salvar Procedimento</button>
+        <button type="button" onclick="closeModal('modal-proc')" class="btn-ghost">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="modal-importar-wa" class="modal-overlay" style="display:none;">
+  <div class="modal" style="max-width:560px;">
+    <div style="padding:24px 24px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <div style="font-size:16px;font-weight:700;color:#0f172a;">💬 Importar contato do WhatsApp</div>
+        <div style="font-size:12px;color:#94a3b8;margin-top:2px;">Cole texto OU print da conversa — a Sofia extrai os dados</div>
+      </div>
+      <button onclick="closeImportarWA()" style="background:none;border:none;cursor:pointer;font-size:22px;color:#94a3b8;line-height:1;">×</button>
+    </div>
+
+    <!-- Etapa 1: colar -->
+    <div id="wa-step-paste" style="padding:20px 24px 24px;" onpaste="handleWAPaste(event)">
+      <label style="font-size:12px;color:#64748b;font-weight:600;">Cole texto ou imagem (Ctrl+V) — aceita print do WhatsApp</label>
+      <textarea id="wa-textarea" class="input" rows="6" placeholder="Cole a conversa em texto OU clique aqui e dê Ctrl+V para colar um print..." style="margin-top:6px;font-family:monospace;font-size:12.5px;resize:vertical;"></textarea>
+
+      <!-- Preview da imagem colada -->
+      <div id="wa-image-preview" style="display:none;margin-top:12px;border:1.5px dashed #86efac;border-radius:10px;padding:10px;background:#f0fdf4;position:relative;">
+        <div style="font-size:11px;font-weight:700;color:#15803d;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">📷 Imagem colada</div>
+        <img id="wa-image-thumb" style="max-width:100%;max-height:240px;border-radius:6px;display:block;" />
+        <button onclick="removerImagemWA()" style="position:absolute;top:8px;right:8px;background:#fee2e2;color:#991b1b;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">✕ Remover</button>
+      </div>
+
+      <!-- Input arquivo (fallback) -->
+      <div style="margin-top:10px;font-size:11.5px;color:#94a3b8;">
+        Sem cópia? <label style="color:#10b981;font-weight:600;cursor:pointer;text-decoration:underline;">selecione um arquivo<input type="file" accept="image/*" onchange="handleWAFile(event)" style="display:none;" /></label>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:14px;">
+        <button onclick="processarImportWA()" class="btn-primary" style="flex:1;justify-content:center;" id="wa-process-btn">🔍 Analisar com Sofia</button>
+        <button onclick="closeImportarWA()" class="btn-ghost">Cancelar</button>
+      </div>
+    </div>
+
+    <!-- Etapa 2: loading -->
+    <div id="wa-step-loading" style="display:none;padding:40px 24px;text-align:center;">
+      <div style="font-size:32px;margin-bottom:8px;">🔍</div>
+      <div style="color:#64748b;font-size:13.5px;">Sofia está analisando a conversa...</div>
+    </div>
+
+    <!-- Etapa 3: preview -->
+    <div id="wa-step-preview" style="display:none;padding:20px 24px 24px;">
+      <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:14px;margin-bottom:14px;">
+        <div style="font-size:11px;font-weight:700;color:#15803d;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">✓ Dados extraídos</div>
+        <div id="wa-preview-content" style="font-size:13px;color:#0f172a;"></div>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button onclick="confirmarImportWA()" class="btn-primary" style="flex:1;justify-content:center;">✓ Adicionar ao CRM</button>
+        <button onclick="resetImportWA()" class="btn-ghost">Voltar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SOFIA — IA CHAT WIDGET ===================== -->
+<div id="chat-widget" style="position:fixed;bottom:24px;right:24px;z-index:999;display:flex;flex-direction:column;align-items:flex-end;gap:12px;">
+
+  <!-- Painel do chat -->
+  <div id="chat-panel" style="display:none;flex-direction:column;width:370px;height:520px;background:#fff;border-radius:20px;box-shadow:0 24px 64px rgba(0,0,0,0.18);border:1px solid #e2e8f0;overflow:hidden;animation:fadeIn 0.2s ease;">
+
+    <!-- Header -->
+    <div style="background:linear-gradient(135deg,#10b981,#059669);padding:14px 18px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:38px;height:38px;background:rgba(255,255,255,0.18);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;">🤖</div>
+        <div>
+          <div style="font-weight:700;color:#fff;font-size:14px;line-height:1.2;">Sofia</div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.8);">IA do consultório · sempre disponível</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button onclick="clearChatHistory()" title="Apagar histórico" style="background:rgba(255,255,255,0.15);border:none;border-radius:8px;width:32px;height:32px;cursor:pointer;color:#fff;font-size:14px;">🗑️</button>
+        <button onclick="openChatSettings()" title="Configurações" style="background:rgba(255,255,255,0.15);border:none;border-radius:8px;width:32px;height:32px;cursor:pointer;color:#fff;font-size:14px;">⚙️</button>
+        <button onclick="toggleChat()" style="background:rgba(255,255,255,0.15);border:none;border-radius:8px;width:32px;height:32px;cursor:pointer;color:#fff;font-size:20px;line-height:1;">×</button>
+      </div>
+    </div>
+
+    <!-- Setup: configurar chave -->
+    <div id="gemini-setup" style="display:flex;flex-direction:column;padding:24px 20px;gap:12px;flex:1;justify-content:center;">
+      <div style="text-align:center;font-size:36px;">🔑</div>
+      <div style="text-align:center;font-weight:700;color:#0f172a;font-size:16px;">Configure a Sofia</div>
+      <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:12px 14px;font-size:12.5px;color:#15803d;line-height:1.6;">
+        <strong>Groq — 100% gratuito, sem cartão:</strong><br>
+        1. Acesse <a href="https://console.groq.com/keys" target="_blank" style="color:#059669;font-weight:700;text-decoration:underline;">console.groq.com/keys</a><br>
+        2. Faça login com Google<br>
+        3. Clique em <strong>"Create API Key"</strong><br>
+        4. Cole a chave abaixo
+      </div>
+      <input id="gemini-key-input" type="password" class="input" placeholder="gsk_..." style="margin-top:2px;" />
+      <button onclick="saveGeminiKey()" class="btn-primary" style="justify-content:center;">✓ Salvar e Ativar</button>
+    </div>
+
+    <!-- Chat principal -->
+    <div id="chat-main" style="display:none;flex-direction:column;flex:1;overflow:hidden;">
+
+      <!-- Mensagens -->
+      <div id="chat-body" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;"></div>
+
+      <!-- Sugestões rápidas -->
+      <div style="padding:0 12px 8px;display:flex;gap:6px;overflow-x:auto;flex-shrink:0;">
+        <button class="chat-suggest" onclick="quickMsg('Resumo do dia')">📊 Resumo</button>
+        <button class="chat-suggest" onclick="quickMsg('Quais follow-ups estão pendentes hoje?')">📞 Follow-ups</button>
+        <button class="chat-suggest" onclick="quickMsg('Como estou em relação à meta de faturamento?')">🎯 Meta</button>
+        <button class="chat-suggest" onclick="quickMsg('Quantos pacientes atendi esse mês?')">👥 Pacientes</button>
+      </div>
+
+      <!-- Input -->
+      <div style="padding:10px 14px;border-top:1px solid #f1f5f9;display:flex;gap:8px;flex-shrink:0;">
+        <input id="chat-input-el" type="text" style="flex:1;border:1.5px solid #e2e8f0;border-radius:10px;padding:9px 13px;font-size:13px;font-family:'Inter',sans-serif;" placeholder="Digite ou fale…" onkeydown="if(event.key==='Enter')sendAIMessage();" />
+        <button id="mic-btn" onclick="toggleVoiceInput()" title="Falar" style="background:#f1f5f9;color:#475569;border:none;border-radius:10px;padding:9px 12px;cursor:pointer;font-size:17px;flex-shrink:0;transition:all 0.2s;">🎤</button>
+        <button onclick="sendAIMessage()" style="background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;border-radius:10px;padding:9px 14px;cursor:pointer;font-size:17px;flex-shrink:0;">➤</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Botão flutuante -->
+  <button onclick="toggleChat()" id="chat-fab" style="width:58px;height:58px;background:linear-gradient(135deg,#10b981,#059669);border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:26px;box-shadow:0 6px 24px rgba(16,185,129,0.45);transition:transform 0.2s,box-shadow 0.2s;" onmouseover="this.style.transform='scale(1.1)';this.style.boxShadow='0 8px 30px rgba(16,185,129,0.55)'" onmouseout="this.style.transform='scale(1)';this.style.boxShadow='0 6px 24px rgba(16,185,129,0.45)'">🤖</button>
+
+</div>
+
+<!-- ========= LOGIN PAGE ========= -->
+<div id="login-page" style="position:fixed;inset:0;background:#f5f6f8;display:flex;align-items:center;justify-content:center;z-index:9999;">
+  <div style="background:#fff;border:1px solid #e8eaed;border-radius:16px;padding:44px 40px;width:380px;box-shadow:0 8px 40px rgba(0,0,0,0.10);">
+    <!-- Logo -->
+    <div style="text-align:center;margin-bottom:32px;">
+      <div style="width:48px;height:48px;background:#0f172a;border-radius:12px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;box-shadow:0 4px 12px rgba(15,23,42,0.25);">
+        <span style="color:#10b981;font-size:17px;font-weight:700;letter-spacing:-0.5px;">RD</span>
+      </div>
+      <div style="font-size:18px;font-weight:700;color:#0f172a;letter-spacing:-0.4px;line-height:1.2;">Dr. Rafael Duncan</div>
+      <div style="font-size:12.5px;color:#9ca3af;margin-top:4px;font-weight:400;">Consultório de Geriatria</div>
+    </div>
+
+    <!-- Error banner -->
+    <div id="login-error" style="display:none;background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;padding:10px 13px;font-size:12.5px;color:#9f1239;margin-bottom:16px;"></div>
+
+    <!-- Email -->
+    <div style="margin-bottom:14px;">
+      <label style="display:block;font-size:12px;font-weight:500;color:#374151;margin-bottom:5px;">E-mail</label>
+      <input id="login-email" type="email" placeholder="seu@email.com"
+        style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:10px 13px;font-size:13.5px;outline:none;font-family:'Inter',sans-serif;color:#0f172a;transition:border-color 0.15s;"
+        onfocus="this.style.borderColor='#0f172a'" onblur="this.style.borderColor='#e5e7eb'"
+        onkeydown="if(event.key==='Enter')document.getElementById('login-password').focus()" />
+    </div>
+
+    <!-- Password -->
+    <div style="margin-bottom:22px;">
+      <label style="display:block;font-size:12px;font-weight:500;color:#374151;margin-bottom:5px;">Senha</label>
+      <input id="login-password" type="password" placeholder="••••••••"
+        style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:10px 13px;font-size:13.5px;outline:none;font-family:'Inter',sans-serif;color:#0f172a;transition:border-color 0.15s;"
+        onfocus="this.style.borderColor='#0f172a'" onblur="this.style.borderColor='#e5e7eb'"
+        onkeydown="if(event.key==='Enter')doLogin()" />
+    </div>
+
+    <!-- Submit -->
+    <button onclick="doLogin()" id="login-btn"
+      style="width:100%;background:#0f172a;color:#fff;border:none;border-radius:9px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;transition:background 0.15s;letter-spacing:-0.2px;">
+      Entrar
+    </button>
+
+    <div style="text-align:center;margin-top:18px;font-size:11.5px;color:#c4c9d4;">
+      Acesso restrito · Consultório Dr. Rafael Duncan
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
