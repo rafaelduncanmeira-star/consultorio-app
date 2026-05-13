@@ -770,7 +770,7 @@ async function processarImportWA() {
   if (!temImagem && texto.length < 20) { toast('Conversa muito curta — cole mais contexto ou um print'); return; }
 
   const key = localStorage.getItem('consult_gemini_key');
-  if (!key) { toast('Configure a chave da Sofia (⚙️ no chat) primeiro'); return; }
+  if (!key) { toast('Configure a chave da MaestrIA (⚙️ no chat) primeiro'); return; }
 
   document.getElementById('wa-step-paste').style.display = 'none';
   document.getElementById('wa-step-loading').style.display = 'block';
@@ -1888,7 +1888,7 @@ function renderDespesas() {
 // ====================== DASHBOARD ======================
 // ====================== TOGGLE DE SEÇÕES DO DASHBOARD ======================
 const SECTION_LABELS = {
-  insights:   '🧠 Insights da Sofia',
+  insights:   '🧠 Insights da MaestrIA',
   retencao:   '💎 Retenção e LTV',
   marketing:  '📣 Aquisição e Marketing',
   financeiro: '💰 Inteligência Financeira',
@@ -2081,7 +2081,7 @@ function renderGraficos(mes) {
   }
 }
 
-// ====================== PACOTE 5: INSIGHTS DA SOFIA ======================
+// ====================== PACOTE 5: INSIGHTS DA MAESTRIA ======================
 const INSIGHTS_CACHE_KEY = 'consult_insights_cache';
 const INSIGHTS_TTL_HORAS = 24; // re-geração automática após 24h
 
@@ -2145,7 +2145,7 @@ async function gerarInsightsSofia(force = false) {
 
   const key = localStorage.getItem('consult_gemini_key');
   if (!key) {
-    renderInsightCards([{ tipo:'info', titulo:'Configure a Sofia', descricao:'Clique no botão flutuante 🤖 no canto inferior direito e configure a chave da Sofia para gerar insights automáticos.', acao:'' }]);
+    renderInsightCards([{ tipo:'info', titulo:'Configure a MaestrIA', descricao:'Clique no botão flutuante no canto inferior direito e configure a chave da MaestrIA para gerar insights automáticos.', acao:'' }]);
     return;
   }
 
@@ -2165,7 +2165,7 @@ async function gerarInsightsSofia(force = false) {
 
   try {
     const ctx = buildContext();
-    const prompt = `Você é a Sofia, analista do consultório do Dr. Rafael (geriatria).
+    const prompt = `Você é a MaestrIA, analista do consultório do Dr. Rafael (geriatria).
 Analise os dados abaixo e gere EXATAMENTE 5 insights acionáveis e específicos sobre o consultório.
 Cada insight DEVE ter: tipo (uma de: "oportunidade", "alerta", "critico", "parabens", "info"), titulo (máx 5 palavras), descricao (1-2 frases com NÚMEROS REAIS dos dados), acao (sugestão de até 8 palavras, obrigatória).
 
@@ -2230,8 +2230,8 @@ Responda APENAS com JSON válido:
     salvarInsightsCache(insights);
     renderInsightCards(insights, new Date().toISOString());
   } catch (e) {
-    console.error('Insights Sofia:', e);
-    renderInsightCards([{ tipo:'info', titulo:'Erro ao gerar insights', descricao:`Não consegui consultar a Sofia agora. ${e.message}`, acao:'Tente novamente em alguns segundos' }]);
+    console.error('Insights MaestrIA:', e);
+    renderInsightCards([{ tipo:'info', titulo:'Erro ao gerar insights', descricao:`Não consegui consultar a MaestrIA agora. ${e.message}`, acao:'Tente novamente em alguns segundos' }]);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '🔄 Atualizar'; }
   }
@@ -3346,7 +3346,7 @@ function renderUltimasConsultas() {
     </tr>`).join('');
 }
 
-// ====================== SOFIA — IA ASSISTENTE ======================
+// ====================== MAESTRIA — IA ASSISTENTE ======================
 let chatHistory = JSON.parse(localStorage.getItem('consult_chat_history') || '[]');
 
 function saveChatHistory() {
@@ -3356,7 +3356,7 @@ function saveChatHistory() {
 }
 
 function clearChatHistory() {
-  if (!confirm('Apagar todo o histórico da Sofia?')) return;
+  if (!confirm('Apagar todo o histórico da MaestrIA?')) return;
   chatHistory = [];
   localStorage.removeItem('consult_chat_history');
   document.getElementById('chat-body').innerHTML = '';
@@ -3451,7 +3451,7 @@ function buildContext() {
 }
 
 function buildSystemPrompt(ctx) {
-  return `Você é a Sofia, assistente inteligente do consultório de geriatria do Dr. Rafael Duncan.
+  return `Você é a MaestrIA, assistente inteligente do consultório de geriatria do Dr. Rafael Duncan.
 Fala em português brasileiro, direta, amigável, OBJETIVA E CONCISA.
 
 ⚠️ NÃO USE markdown decorativo (sem **negrito**, sem títulos com #, sem listas com -). O chat mostra texto puro.
@@ -3461,13 +3461,13 @@ Escreva UMA frase curta + o bloco action. NADA MAIS.
 
 Exemplo CORRETO:
 Usuário: "registra consulta da Dona Ana hoje, PIX, 1000, pago"
-Sofia: Registrando consulta da Dona Ana.
+MaestrIA: Registrando consulta da Dona Ana.
 \`\`\`action
 {"tipo":"criar_paciente","dados":{"nome":"Ana","data":"${ctx.hoje}","tipo":"Consulta","valor":1000,"pagamento":"PIX","statusPgto":"Pago","obs":""}}
 \`\`\`
 
 Exemplo ERRADO (NUNCA faça isso):
-Sofia: Paciente atendido: Nome: Ana, Valor: 1000... Ação registrada: ✅
+MaestrIA: Paciente atendido: Nome: Ana, Valor: 1000... Ação registrada: ✅
 (isso é errado porque NÃO executa nada — é só texto)
 
 
@@ -3562,7 +3562,7 @@ async function sendAIMessage() {
 
   const key = localStorage.getItem('consult_gemini_key');
   if (!key) {
-    appendChatMsg('sofia', 'Preciso da chave Gemini para funcionar. Clique em ⚙️ acima.');
+    appendChatMsg('sofia', 'Preciso da chave para funcionar. Clique em ⚙️ acima.');
     return;
   }
 
@@ -3877,7 +3877,7 @@ function toggleChat() {
         if (ctx.followupHoje > 0) msgs.push(`📞 ${ctx.followupHoje} follow-up(s) vencido(s) hoje`);
         if (ctx.crmMarcouPendente > 0) msgs.push(`📋 ${ctx.crmMarcouPendente} paciente(s) marcados sem registro de atendimento`);
         const alertas = msgs.length ? '\n\n⚠️ ' + msgs.join('\n⚠️ ') : '';
-        setTimeout(() => appendChatMsg('sofia', `${saudacao}! 👋 Sou a Sofia. Posso registrar atendimentos, despesas, follow-ups e responder qualquer dúvida sobre o consultório.${alertas}\n\nComo posso ajudar?`), 200);
+        setTimeout(() => appendChatMsg('sofia', `${saudacao}! 👋 Sou a MaestrIA. Posso registrar atendimentos, despesas, follow-ups e responder qualquer dúvida sobre o consultório.${alertas}\n\nComo posso ajudar?`), 200);
       }
     } else {
       document.getElementById('gemini-setup').style.display = 'flex';
@@ -3893,7 +3893,7 @@ function saveGeminiKey() {
   document.getElementById('gemini-setup').style.display = 'none';
   document.getElementById('chat-main').style.display = 'flex';
   chatHistory = [];
-  setTimeout(() => appendChatMsg('sofia', '🎉 Chave configurada! Agora pode me perguntar qualquer coisa ou pedir pra registrar atendimentos, despesas e follow-ups.'), 200);
+  setTimeout(() => appendChatMsg('sofia', '🎉 Chave configurada! Agora pode me perguntar qualquer coisa ou pedir pra registrar atendimentos, despesas e follow-ups. Sou a MaestrIA, sua assistente de consultório.'), 200);
 }
 
 // ---- Voz ----
