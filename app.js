@@ -202,7 +202,7 @@ function showPage(page) {
   if (page === 'despesas') renderDespesas();
   if (page === 'precos') renderPrecos();
   if (page === 'relatorio') renderRelatorio('2026-05');
-  if (page === 'metas') renderMetas();
+  if (page === 'metas') { renderMetas(); renderMetasProc(); }
   if (page === 'backup') renderBackup();
 }
 
@@ -290,14 +290,32 @@ function atualizarValorSugerido() {
   const procs = getProcedimentos();
   const p = procs.find(x => x.nome === sel.value);
   if (!p) { hint.textContent = ''; return; }
-  // Mostra ambos os preços do procedimento como referência
   hint.innerHTML = `💡 ${p.nome}: PIX/Dinheiro <strong>${BRL(p.valorPix)}</strong> · Cartão <strong>${BRL(p.valorCartao)}</strong>`;
-  // Só auto-preenche se o valor estiver vazio ou for igual ao outro preço (usuário ainda não ajustou)
   const sug = valorSugerido(sel.value, pag.value);
   const atual = parseFloat(valor.value) || 0;
   if (!atual || atual === p.valorPix || atual === p.valorCartao) {
     valor.value = sug || '';
   }
+  // Mostra/oculta campo de parcelas conforme forma de pagamento
+  const parcelasRow = document.getElementById('pac-parcelas-row');
+  if (parcelasRow) {
+    const isCredito = (pag.value === 'Cartão crédito');
+    parcelasRow.style.display = isCredito ? 'block' : 'none';
+    if (!isCredito) { const ps = document.getElementById('pac-parcelas'); if (ps) ps.value = '1'; }
+  }
+  atualizarPreviewParcelas();
+}
+
+function atualizarPreviewParcelas() {
+  const valorEl = document.getElementById('pac-valor');
+  const parcelasEl = document.getElementById('pac-parcelas');
+  const previewEl = document.getElementById('pac-parcelas-preview');
+  if (!valorEl || !parcelasEl || !previewEl) return;
+  const valor = parseFloat(valorEl.value) || 0;
+  const n = parseInt(parcelasEl.value) || 1;
+  if (n <= 1 || !valor) { previewEl.textContent = ''; return; }
+  const parcela = valor / n;
+  previewEl.textContent = `= ${n}× de ${BRL(parcela)}`;
 }
 
 function renderPrecos() {
@@ -956,7 +974,35 @@ function convertAtendidoToFollowup(pacIdx) {
 function savePaciente(e) {
   e.preventDefault();
   const fd = new FormData(e.target);
-  const item = { data: fd.get('data'), nome: fd.get('nome'), tipo: fd.get('tipo'), valor: parseFloat(fd.get('valor')) || 0, pagamento: fd.get('pagamento'), statusPgto: fd.get('statusPgto'), obs: fd.get('obs') };
+  const valorTotal = parseFloat(fd.get('valor')) || 0;
+  const pagamento  = fd.get('pagamento');
+  const parcelas   = pagamento === 'Cartão crédito' ? (parseInt(fd.get('parcelas')) || 1) : 1;
+  const dataConsulta = fd.get('data') || new Date().toISOString().split('T')[0];
+
+  // Gera recebimentos futuros se parcelado
+  let recebimentos = null;
+  if (parcelas > 1) {
+    const valorParcela = valorTotal / parcelas;
+    recebimentos = [];
+    const [ano, mes, dia] = dataConsulta.split('-').map(Number);
+    for (let i = 0; i < parcelas; i++) {
+      const d = new Date(ano, mes - 1 + i, 1);
+      const mesStr = d.toISOString().substring(0, 7);
+      recebimentos.push({ numero: i + 1, mes: mesStr, valor: Math.round(valorParcela * 100) / 100, recebido: i === 0 });
+    }
+  }
+
+  const item = {
+    data: dataConsulta,
+    nome: fd.get('nome'),
+    tipo: fd.get('tipo'),
+    valor: valorTotal,
+    pagamento,
+    parcelas,
+    recebimentos,
+    statusPgto: fd.get('statusPgto'),
+    obs: fd.get('obs')
+  };
   const data = DB.get('pacientes');
   if (editState.col === 'pacientes' && editState.idx !== null) {
     data[editState.idx] = item;
@@ -1033,7 +1079,7 @@ function renderPacientes() {
   const data = DB.get('pacientes');
   const tbody = document.getElementById('pac-tbody');
   if (!data.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-12 text-gray-400">Nenhuma consulta registrada.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center py-12 text-gray-400">Nenhuma consulta registrada.</td></tr>';
     return;
   }
   tbody.innerHTML = data.map((r, i) => `
@@ -1044,6 +1090,9 @@ function renderPacientes() {
       <td class="px-4 py-3 font-semibold text-gray-900">${BRL(r.valor)}</td>
       <td class="px-4 py-3 text-gray-600">${r.pagamento}</td>
       <td class="px-4 py-3">${pgtoSelect(r.statusPgto, i)}</td>
+      <td class="px-4 py-3">
+        <button onclick="abrirPerfilPaciente('${encodeURIComponent(r.nome)}')" style="background:#f1f5f9;border:none;border-radius:6px;padding:4px 9px;font-size:11.5px;cursor:pointer;color:#475569;font-weight:600;" title="Ver perfil completo" onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f1f5f9'">👤 Ver</button>
+      </td>
       <td class="px-4 py-3" style="white-space:nowrap;">
         <button onclick="editRow('pacientes',${i})" class="text-blue-400 hover:text-blue-600 text-xs mr-2" title="Editar">✏️</button>
         <button onclick="deleteRow('pacientes',${i})" class="text-red-400 hover:text-red-600 text-xs" title="Excluir">🗑️</button>
@@ -1820,6 +1869,9 @@ function renderReceita() {
         <td colspan="3"></td>
       </tr>`;
   }
+
+  // Renderiza fluxo de caixa
+  renderFluxoCaixa(mes === 'todos' ? new Date().toISOString().substring(0,7) : mes);
 }
 
 function renderDespesas() {
@@ -2479,22 +2531,46 @@ function renderMarketing(mesAtual) {
   }
 }
 
-// Cria follow-up de reativação pré-preenchido
+// Cria follow-up de reativação automaticamente (salva direto, sem modal)
 function criarFollowupReativacao(nomeEnc, ultData) {
   const nome = decodeURIComponent(nomeEnc);
-  const modal = document.getElementById('modal-followup');
-  const form = modal.querySelector('form');
+
+  // Verifica se já existe follow-up pendente para esse paciente
+  const followups = DB.get('followup');
+  const jaExiste = followups.some(f => (f.nome||'').toLowerCase().trim() === nome.toLowerCase().trim() && !f.feito);
+  if (jaExiste) {
+    toast(`Follow-up de ${nome} já existe na lista!`);
+    return;
+  }
+
+  // Calcula próximo dia útil
   const amanha = new Date(); amanha.setDate(amanha.getDate() + 1);
   const ajustado = proximoDiaUtil(amanha);
-  form.nome.value = nome;
-  form.ultConsulta.value = ultData;
-  form.dataContato.value = ajustado.toISOString().split('T')[0];
-  form.tipoContato.value = 'WhatsApp';
-  form.dataReav.value = '';
-  form.obs.value = 'Reativação — paciente sem consulta há mais de 6 meses';
-  editState = { col: null, idx: null, crmIdx: null, pacIdx: null };
-  modal.querySelector('.modal-title').textContent = 'Reativar Paciente';
-  modal.style.display = 'flex';
+  const dataContato = ajustado.toISOString().split('T')[0];
+
+  // Cria o follow-up direto
+  const item = {
+    nome,
+    ultConsulta: ultData,
+    dataContato,
+    tipoContato: 'WhatsApp',
+    feito: false,
+    dataReav: '',
+    obs: 'Reativação — paciente sem consulta há mais de 6 meses'
+  };
+  followups.unshift(item);
+  DB.set('followup', followups);
+
+  toast(`✅ Follow-up criado para ${nome} — contato em ${dataContato}`);
+
+  // Atualiza dashboard se estiver nele
+  if (document.getElementById('page-dashboard').classList.contains('active')) {
+    renderDashboard();
+  }
+  // Atualiza follow-up se estiver aberto
+  if (document.getElementById('page-followup').classList.contains('active')) {
+    renderFollowup();
+  }
 }
 
 // ====================== PACOTE 1: INTELIGÊNCIA FINANCEIRA ======================
@@ -2689,6 +2765,52 @@ function renderFinanceiro(mes) {
   }
 }
 
+function renderProcBreakdown(pacs) {
+  const el = document.getElementById('dash-proc-breakdown');
+  if (!el) return;
+
+  const corPorTipo = {
+    '1ª vez':     { bg: '#dbeafe', cor: '#1d4ed8', icon: '🆕' },
+    'Consulta':   { bg: '#d1fae5', cor: '#065f46', icon: '🩺' },
+    'Retorno':    { bg: '#ede9fe', cor: '#5b21b6', icon: '🔄' },
+    'Domiciliar': { bg: '#fef3c7', cor: '#92400e', icon: '🏠' },
+    'Hospitalar': { bg: '#fee2e2', cor: '#991b1b', icon: '🏥' },
+    'Telemedicina':{ bg: '#e0f2fe', cor: '#0c4a6e', icon: '💻' },
+    'Cortesia':   { bg: '#f1f5f9', cor: '#475569', icon: '🎁' },
+  };
+
+  const todos = DB.get('pacientes');
+  const totalHist = todos.length;
+
+  const contagem = {};
+  pacs.forEach(p => { const k = p.tipo || 'Consulta'; contagem[k] = (contagem[k]||0) + 1; });
+
+  const sorted = Object.entries(contagem).sort((a,b) => b[1]-a[1]);
+
+  if (!sorted.length) {
+    el.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#94a3b8;font-size:13px;padding:20px;">Sem consultas registradas neste mês</div>';
+    return;
+  }
+
+  el.innerHTML = sorted.map(([tipo, qtd]) => {
+    const c = corPorTipo[tipo] || { bg:'#f1f5f9', cor:'#374151', icon:'📋' };
+    const pctMes = pacs.length ? Math.round((qtd / pacs.length) * 100) : 0;
+    const qtdHist = todos.filter(p => (p.tipo||'Consulta') === tipo).length;
+    return `
+      <div class="kpi-card" style="padding:14px 16px;cursor:default;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <div style="width:30px;height:30px;background:${c.bg};border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;">${c.icon}</div>
+          <div style="font-size:11.5px;font-weight:600;color:#374151;line-height:1.2;">${tipo}</div>
+        </div>
+        <div style="font-size:26px;font-weight:800;color:${c.cor};letter-spacing:-1px;line-height:1;">${qtd}</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px;">${pctMes}% do mês · ${qtdHist} total</div>
+        <div style="height:3px;background:#f1f5f9;border-radius:999px;margin-top:8px;overflow:hidden;">
+          <div style="height:100%;width:${pctMes}%;background:${c.cor};border-radius:999px;opacity:0.6;transition:width 0.5s;"></div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
 function renderDashboard(mes = '2026-05') {
   const pacs = DB.get('pacientes').filter(p => getMes(p.data) === mes);
   const desps = DB.get('despesas').filter(d => getMes(d.data) === mes);
@@ -2728,6 +2850,8 @@ function renderDashboard(mes = '2026-05') {
   setText('kpi-conv', PCT(conv));
   setText('kpi-conv-sub', `${atend} de ${crm.length} contatos`);
 
+  // Breakdown por procedimento
+  renderProcBreakdown(pacs);
   // Pacote 3 — Retenção e LTV (independe do mês: usa todo o histórico)
   renderRetencao();
   // Pacote 2 — Aquisição e Marketing (CAC/ROI usam mês atual; canais/funil usam histórico)
@@ -3306,6 +3430,139 @@ function renderMetas() {
     <td class="px-4 py-3 text-center">—</td>`;
 }
 
+// ====================== METAS POR PROCEDIMENTO ======================
+function saveMetasProc(e) {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const mp = {
+    '1ª vez':      parseInt(fd.get('meta_1vez'))        || 0,
+    'Consulta':    parseInt(fd.get('meta_consulta'))    || 0,
+    'Retorno':     parseInt(fd.get('meta_retorno'))     || 0,
+    'Domiciliar':  parseInt(fd.get('meta_domiciliar'))  || 0,
+    'Hospitalar':  parseInt(fd.get('meta_hospitalar'))  || 0,
+    'Telemedicina':parseInt(fd.get('meta_telemedicina'))|| 0,
+  };
+  DB.setObj('metas_proc', mp);
+  closeModal('modal-metas-proc');
+  renderMetasProc();
+}
+
+function renderMetasProc() {
+  const el = document.getElementById('metas-proc-grid');
+  if (!el) return;
+
+  const mp = DB.getObj('metas_proc', {});
+  const mesAtual = new Date().toISOString().substring(0, 7);
+  const pacs = DB.get('pacientes').filter(p => getMes(p.data) === mesAtual);
+
+  const corPorTipo = {
+    '1ª vez':     { bg:'#dbeafe', cor:'#1d4ed8', icon:'🆕' },
+    'Consulta':   { bg:'#d1fae5', cor:'#065f46', icon:'🩺' },
+    'Retorno':    { bg:'#ede9fe', cor:'#5b21b6', icon:'🔄' },
+    'Domiciliar': { bg:'#fef3c7', cor:'#92400e', icon:'🏠' },
+    'Hospitalar': { bg:'#fee2e2', cor:'#991b1b', icon:'🏥' },
+    'Telemedicina':{ bg:'#e0f2fe', cor:'#0c4a6e', icon:'💻' },
+  };
+
+  const tipos = Object.keys(corPorTipo);
+  const temMeta = tipos.some(t => (mp[t] || 0) > 0);
+
+  if (!temMeta) {
+    el.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#94a3b8;font-size:13px;padding:32px;">Clique em ⚙️ Editar para definir metas por procedimento</div>';
+    return;
+  }
+
+  el.innerHTML = tipos.filter(t => (mp[t] || 0) > 0).map(tipo => {
+    const meta = mp[tipo] || 0;
+    const real = pacs.filter(p => (p.tipo||'Consulta') === tipo).length;
+    const pct  = meta ? Math.min((real / meta) * 100, 100) : 0;
+    const c    = corPorTipo[tipo];
+    const cor  = real >= meta ? '#10b981' : real >= meta * 0.7 ? '#f59e0b' : c.cor;
+    return `
+      <div class="kpi-card" style="padding:16px 18px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+          <div style="width:30px;height:30px;background:${c.bg};border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;">${c.icon}</div>
+          <div style="font-size:12px;font-weight:600;color:#374151;">${tipo}</div>
+        </div>
+        <div style="display:flex;align-items:baseline;gap:4px;margin-bottom:4px;">
+          <span style="font-size:28px;font-weight:800;color:${cor};letter-spacing:-1px;">${real}</span>
+          <span style="font-size:13px;color:#94a3b8;">/ ${meta}</span>
+        </div>
+        <div style="height:4px;background:#f1f5f9;border-radius:999px;margin-bottom:6px;overflow:hidden;">
+          <div style="height:100%;width:${pct}%;background:${cor};border-radius:999px;transition:width 0.5s;"></div>
+        </div>
+        <div style="font-size:11px;color:${cor};font-weight:600;">${Math.round(pct)}% da meta · mês atual</div>
+      </div>`;
+  }).join('');
+
+  // Preenche campos do modal ao abrir
+  const openMetasProc = () => {
+    tipos.forEach(t => {
+      const key = t.replace('ª','').replace(' ','_').toLowerCase();
+      const id = `mp-${key === '1_vez' ? '1vez' : key}`;
+      const input = document.getElementById(id);
+      if (input) input.value = mp[t] || '';
+    });
+  };
+  window._openMetasProc = openMetasProc;
+}
+
+// ====================== FLUXO DE CAIXA ======================
+function renderFluxoCaixa(mesAtual) {
+  const el = document.getElementById('fluxo-caixa-body');
+  if (!el) return;
+
+  const pacs = DB.get('pacientes');
+  const hoje = mesAtual || new Date().toISOString().substring(0, 7);
+  const [anoH, mesH] = hoje.split('-').map(Number);
+
+  // Monta mapa de recebimentos por mês (parcelas + à vista)
+  const mapaRecebimentos = {};
+
+  pacs.forEach(p => {
+    if (!p.data) return;
+    if (p.recebimentos && p.recebimentos.length > 0) {
+      // Parcelado: distribui pelas parcelas
+      p.recebimentos.forEach(r => {
+        if (!mapaRecebimentos[r.mes]) mapaRecebimentos[r.mes] = { previsto: 0, competencia: 0 };
+        mapaRecebimentos[r.mes].previsto += r.valor;
+      });
+    } else {
+      // À vista: entra no mês da consulta
+      const mes = getMes(p.data);
+      if (!mapaRecebimentos[mes]) mapaRecebimentos[mes] = { previsto: 0, competencia: 0 };
+      mapaRecebimentos[mes].previsto += (p.valor || 0);
+    }
+    // Regime de competência: sempre no mês da consulta
+    const mes = getMes(p.data);
+    if (!mapaRecebimentos[mes]) mapaRecebimentos[mes] = { previsto: 0, competencia: 0 };
+    mapaRecebimentos[mes].competencia += (p.valor || 0);
+  });
+
+  // Mostra os próximos 6 meses a partir do mês atual
+  const mesesNomes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  const linhas = [];
+  for (let i = -1; i <= 5; i++) {
+    const d = new Date(anoH, mesH - 1 + i, 1);
+    const key = d.toISOString().substring(0, 7);
+    const nome = `${mesesNomes[d.getMonth()]}/${d.getFullYear()}`;
+    const dados = mapaRecebimentos[key] || { previsto: 0, competencia: 0 };
+    const diff = dados.previsto - dados.competencia;
+    const isAtual = key === hoje;
+    linhas.push({ key, nome, ...dados, diff, isAtual });
+  }
+
+  el.innerHTML = linhas.map(l => `
+    <tr style="${l.isAtual ? 'background:#f0fdf4;font-weight:600;' : ''}">
+      <td style="padding:10px 16px;font-size:13px;color:${l.isAtual ? '#065f46' : '#374151'};">
+        ${l.isAtual ? '▶ ' : ''}${l.nome}
+      </td>
+      <td style="padding:10px 16px;text-align:right;font-size:13px;color:#0f172a;">${l.competencia > 0 ? BRL(l.competencia) : '<span style="color:#cbd5e1;">—</span>'}</td>
+      <td style="padding:10px 16px;text-align:right;font-size:13px;color:${l.previsto > 0 ? '#059669' : '#94a3b8'};">${l.previsto > 0 ? BRL(l.previsto) : '<span style="color:#cbd5e1;">—</span>'}</td>
+      <td style="padding:10px 16px;text-align:right;font-size:12px;color:${l.diff > 0 ? '#f59e0b' : l.diff < 0 ? '#3b82f6' : '#94a3b8'};">${l.diff !== 0 ? (l.diff > 0 ? '+' : '') + BRL(l.diff) : '—'}</td>
+    </tr>`).join('');
+}
+
 // ====================== FUNIL DASHBOARD ======================
 function renderFunilDashboard() {
   const crm = DB.get('crm');
@@ -3709,7 +3966,23 @@ function executeAIAction(action) {
       return;
     }
     const ags = getAgendamentos(); ags.push(item); DB.set('agendamentos', ags);
-    appendChatMsg('system-ok', `✅ ${item.pacienteNome} agendado para ${item.data} às ${item.hora} (${item.procedimento || 'sem procedimento'})`);
+
+    // Atualiza CRM: se o paciente estava como Lead/Contato feito/Em negociação → muda para Marcou
+    const nomeAlvo = item.pacienteNome.toLowerCase().trim();
+    if (nomeAlvo) {
+      const crm = DB.get('crm');
+      const crmIdx = crm.findIndex(c => (c.nome||'').toLowerCase().trim().includes(nomeAlvo) || nomeAlvo.includes((c.nome||'').toLowerCase().trim()));
+      if (crmIdx >= 0 && !['Marcou','Atendeu'].includes(crm[crmIdx].status)) {
+        crm[crmIdx].status = 'Marcou';
+        DB.set('crm', crm);
+        item.crmIdx = crmIdx;
+        appendChatMsg('system-ok', `✅ ${item.pacienteNome} agendado para ${item.data} às ${item.hora} · CRM atualizado para "Marcou"`);
+      } else {
+        appendChatMsg('system-ok', `✅ ${item.pacienteNome} agendado para ${item.data} às ${item.hora} (${item.procedimento || 'sem procedimento'})`);
+      }
+    } else {
+      appendChatMsg('system-ok', `✅ ${item.pacienteNome} agendado para ${item.data} às ${item.hora} (${item.procedimento || 'sem procedimento'})`);
+    }
     if (document.getElementById('page-agenda').classList.contains('active')) renderAgenda();
 
   } else if (tipo === 'cancelar_agendamento') {
@@ -3963,6 +4236,237 @@ function openChatSettings() {
   document.getElementById('chat-main').style.display = 'none';
   const existingKey = localStorage.getItem('consult_gemini_key') || '';
   document.getElementById('gemini-key-input').value = existingKey;
+}
+
+// ====================== PERFIL DO PACIENTE ======================
+
+function buscaGlobal(query) {
+  const el = document.getElementById('sidebar-search-results');
+  if (!el) return;
+
+  const q = (query || '').toLowerCase().trim();
+  if (!q || q.length < 2) { el.style.display = 'none'; return; }
+
+  // Coleta nomes únicos de pacientes, CRM e agenda
+  const nomes = new Set();
+  DB.get('pacientes').forEach(p => { if (p.nome) nomes.add(p.nome); });
+  DB.get('crm').forEach(c => { if (c.nome) nomes.add(c.nome); });
+  getAgendamentos().forEach(a => { if (a.pacienteNome) nomes.add(a.pacienteNome); });
+
+  const matches = Array.from(nomes)
+    .filter(n => n.toLowerCase().includes(q))
+    .sort()
+    .slice(0, 8);
+
+  if (!matches.length) { el.style.display = 'none'; return; }
+
+  const todosAtend = DB.get('pacientes');
+  el.innerHTML = matches.map(nome => {
+    const pacs = todosAtend.filter(p => (p.nome||'').toLowerCase().trim() === nome.toLowerCase().trim())
+      .sort((a, b) => b.data.localeCompare(a.data));
+    const sub = pacs.length
+      ? `${pacs.length} consulta${pacs.length !== 1 ? 's' : ''} · última: ${formatDate(pacs[0].data)}`
+      : 'Sem atendimento registrado';
+    const initials = nome.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
+    return `
+      <div onclick="abrirPerfilPaciente('${encodeURIComponent(nome)}')"
+           style="display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.05);transition:background 0.15s;"
+           onmouseover="this.style.background='rgba(255,255,255,0.07)'"
+           onmouseout="this.style.background='transparent'">
+        <div style="width:28px;height:28px;background:#1e293b;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#10b981;flex-shrink:0;">${initials}</div>
+        <div>
+          <div style="font-size:12.5px;font-weight:600;color:#f1f5f9;">${nome}</div>
+          <div style="font-size:10.5px;color:#94a3b8;">${sub}</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  el.style.display = 'block';
+}
+
+function abrirPerfilPaciente(nomeEnc) {
+  const nome = decodeURIComponent(nomeEnc);
+
+  // Fecha busca
+  const searchEl = document.getElementById('sidebar-search-results');
+  if (searchEl) searchEl.style.display = 'none';
+  const searchInput = document.getElementById('sidebar-search');
+  if (searchInput) searchInput.value = '';
+
+  // Coleta dados por módulo
+  const pacs = DB.get('pacientes')
+    .filter(p => (p.nome||'').toLowerCase().trim() === nome.toLowerCase().trim())
+    .sort((a, b) => b.data.localeCompare(a.data));
+  const followups = DB.get('followup')
+    .filter(f => (f.nome||'').toLowerCase().trim() === nome.toLowerCase().trim());
+  const crm = DB.get('crm')
+    .filter(c => (c.nome||'').toLowerCase().trim() === nome.toLowerCase().trim());
+  const agenda = getAgendamentos()
+    .filter(a => (a.pacienteNome||'').toLowerCase().trim() === nome.toLowerCase().trim())
+    .sort((a, b) => b.data.localeCompare(a.data));
+
+  // KPIs
+  const ltv      = pacs.reduce((s, p) => s + (p.valor || 0), 0);
+  const totalCons = pacs.length;
+  const ultima    = pacs.length ? pacs[0].data : null;
+  const ticket    = totalCons ? ltv / totalCons : 0;
+
+  // Header
+  const initials = nome.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
+  const avatarEl = document.getElementById('perfil-avatar');
+  const nomeEl   = document.getElementById('perfil-nome');
+  const subEl    = document.getElementById('perfil-sub');
+  if (avatarEl) avatarEl.textContent = initials;
+  if (nomeEl)   nomeEl.textContent   = nome;
+
+  // Subtítulo: 1ª visita + status CRM
+  const primeiraCons = pacs.length ? pacs[pacs.length - 1].data : null;
+  const crmStatus    = crm.length ? crm[crm.length - 1].status : null;
+  const subParts = [];
+  if (primeiraCons) subParts.push(`1ª visita: ${formatDate(primeiraCons)}`);
+  if (crmStatus)    subParts.push(`CRM: ${crmStatus}`);
+  if (subEl) subEl.textContent = subParts.join(' · ') || 'Sem dados';
+
+  // KPI elements
+  setText('perfil-ltv',        BRL(ltv));
+  setText('perfil-total-cons', totalCons);
+  setText('perfil-ultima',     ultima ? formatDate(ultima) : '—');
+  setText('perfil-ticket',     BRL(ticket));
+
+  // Tab: Consultas
+  const tabCons = document.getElementById('perfil-tab-consultas');
+  if (tabCons) {
+    if (!pacs.length) {
+      tabCons.innerHTML = '<div style="text-align:center;color:#94a3b8;padding:32px;font-size:13px;">Nenhuma consulta registrada.</div>';
+    } else {
+      tabCons.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead>
+            <tr style="border-bottom:2px solid #f1f5f9;">
+              <th style="text-align:left;padding:8px 0;color:#64748b;font-weight:600;font-size:11.5px;">Data</th>
+              <th style="text-align:left;padding:8px 0;color:#64748b;font-weight:600;font-size:11.5px;">Tipo</th>
+              <th style="text-align:right;padding:8px 0;color:#64748b;font-weight:600;font-size:11.5px;">Valor</th>
+              <th style="text-align:left;padding:8px 0;color:#64748b;font-weight:600;font-size:11.5px;">Pagamento</th>
+              <th style="text-align:center;padding:8px 0;color:#64748b;font-weight:600;font-size:11.5px;">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${pacs.map(p => `
+              <tr style="border-bottom:1px solid #f8fafc;">
+                <td style="padding:9px 0;color:#374151;">${formatDate(p.data)}</td>
+                <td style="padding:9px 0;"><span style="background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;">${p.tipo}</span></td>
+                <td style="padding:9px 0;text-align:right;font-weight:700;color:#0f172a;">${BRL(p.valor)}</td>
+                <td style="padding:9px 0;color:#64748b;font-size:12px;">${p.pagamento}</td>
+                <td style="padding:9px 0;text-align:center;">${statusBadge(p.statusPgto)}</td>
+              </tr>`).join('')}
+          </tbody>
+          <tfoot>
+            <tr style="border-top:2px solid #e2e8f0;background:#f8fafc;">
+              <td colspan="2" style="padding:9px 0;font-weight:700;color:#0f172a;">Total (${totalCons} consulta${totalCons !== 1 ? 's' : ''})</td>
+              <td style="padding:9px 0;text-align:right;font-weight:800;color:#10b981;">${BRL(ltv)}</td>
+              <td colspan="2"></td>
+            </tr>
+          </tfoot>
+        </table>`;
+    }
+  }
+
+  // Tab: Follow-Up
+  const tabFup = document.getElementById('perfil-tab-followup');
+  if (tabFup) {
+    if (!followups.length) {
+      tabFup.innerHTML = '<div style="text-align:center;color:#94a3b8;padding:32px;font-size:13px;">Nenhum follow-up para este paciente.</div>';
+    } else {
+      tabFup.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead><tr style="border-bottom:2px solid #f1f5f9;">
+            <th style="text-align:left;padding:8px 0;color:#64748b;font-weight:600;font-size:11.5px;">Data Contato</th>
+            <th style="text-align:left;padding:8px 0;color:#64748b;font-weight:600;font-size:11.5px;">Tipo</th>
+            <th style="text-align:left;padding:8px 0;color:#64748b;font-weight:600;font-size:11.5px;">Observação</th>
+            <th style="text-align:center;padding:8px 0;color:#64748b;font-weight:600;font-size:11.5px;">Status</th>
+          </tr></thead>
+          <tbody>
+            ${followups.map(f => `
+              <tr style="border-bottom:1px solid #f8fafc;">
+                <td style="padding:9px 0;color:#374151;">${formatDate(f.dataContato)}</td>
+                <td style="padding:9px 0;color:#64748b;">${f.tipoContato || '—'}</td>
+                <td style="padding:9px 0;color:#64748b;font-size:12px;">${f.obs || '—'}</td>
+                <td style="padding:9px 0;text-align:center;">${statusBadge(f.feito ? 'Feito' : 'Pendente')}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+    }
+  }
+
+  // Tab: CRM
+  const tabCrm = document.getElementById('perfil-tab-crm');
+  if (tabCrm) {
+    if (!crm.length) {
+      tabCrm.innerHTML = '<div style="text-align:center;color:#94a3b8;padding:32px;font-size:13px;">Paciente não encontrado no CRM.</div>';
+    } else {
+      tabCrm.innerHTML = crm.map(c => `
+        <div style="border:1px solid #f1f5f9;border-radius:10px;padding:14px 16px;margin-bottom:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+            <span style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;">${c.canal || '—'}</span>
+            ${statusBadge(c.status || '—')}
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:12px;color:#374151;">
+            <div>📅 ${formatDate(c.data)}</div>
+            ${c.whatsapp ? `<div>📱 ${c.whatsapp}</div>` : ''}
+            ${c.idade    ? `<div>🎂 ${c.idade} anos</div>` : ''}
+            ${c.tipo     ? `<div>🩺 ${c.tipo}</div>` : ''}
+          </div>
+          ${c.obs ? `<div style="margin-top:8px;font-size:12px;color:#64748b;font-style:italic;">${c.obs}</div>` : ''}
+        </div>`).join('');
+    }
+  }
+
+  // Tab: Agenda
+  const tabAg = document.getElementById('perfil-tab-agenda');
+  if (tabAg) {
+    if (!agenda.length) {
+      tabAg.innerHTML = '<div style="text-align:center;color:#94a3b8;padding:32px;font-size:13px;">Nenhum agendamento encontrado.</div>';
+    } else {
+      const today = new Date().toISOString().split('T')[0];
+      tabAg.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead><tr style="border-bottom:2px solid #f1f5f9;">
+            <th style="text-align:left;padding:8px 0;color:#64748b;font-weight:600;font-size:11.5px;">Data / Hora</th>
+            <th style="text-align:left;padding:8px 0;color:#64748b;font-weight:600;font-size:11.5px;">Procedimento</th>
+            <th style="text-align:center;padding:8px 0;color:#64748b;font-weight:600;font-size:11.5px;">Status</th>
+          </tr></thead>
+          <tbody>
+            ${agenda.map(a => `
+              <tr style="border-bottom:1px solid #f8fafc;${a.data >= today ? 'background:#f0fdf4;' : ''}">
+                <td style="padding:9px 0;color:#374151;font-weight:${a.data >= today ? '600' : '400'};">${formatDate(a.data)} ${a.hora}</td>
+                <td style="padding:9px 0;color:#64748b;">${a.procedimento || '—'}</td>
+                <td style="padding:9px 0;text-align:center;">${statusBadge(a.status || 'Confirmado')}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+    }
+  }
+
+  // Ativa aba Consultas
+  switchPerfilTab('consultas', document.querySelector('#modal-perfil .perfil-tab'));
+
+  // Abre modal
+  document.getElementById('modal-perfil').style.display = 'flex';
+}
+
+function switchPerfilTab(tab, btn) {
+  ['consultas', 'followup', 'crm', 'agenda'].forEach(t => {
+    const el = document.getElementById('perfil-tab-' + t);
+    if (el) el.style.display = t === tab ? 'block' : 'none';
+  });
+  document.querySelectorAll('#modal-perfil .perfil-tab').forEach(b => {
+    b.style.borderBottomColor = 'transparent';
+    b.style.color = '#94a3b8';
+  });
+  if (btn) {
+    btn.style.borderBottomColor = '#0f172a';
+    btn.style.color = '#0f172a';
+  }
 }
 
 // ====================== INIT ======================
