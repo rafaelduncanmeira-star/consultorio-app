@@ -224,6 +224,7 @@ function openModal(id) {
   }
   if (id === 'modal-config-horarios') openModalConfigHorarios();
   if (id === 'modal-bloqueio')        openModalBloqueio();
+  if (id === 'modal-metas-proc' && window._openMetasProc) window._openMetasProc();
 }
 function closeModal(id) {
   document.getElementById(id).style.display = 'none';
@@ -2770,45 +2771,83 @@ function renderProcBreakdown(pacs) {
   if (!el) return;
 
   const corPorTipo = {
-    '1ª vez':     { bg: '#dbeafe', cor: '#1d4ed8', icon: '🆕' },
-    'Consulta':   { bg: '#d1fae5', cor: '#065f46', icon: '🩺' },
-    'Retorno':    { bg: '#ede9fe', cor: '#5b21b6', icon: '🔄' },
-    'Domiciliar': { bg: '#fef3c7', cor: '#92400e', icon: '🏠' },
-    'Hospitalar': { bg: '#fee2e2', cor: '#991b1b', icon: '🏥' },
+    '1ª vez':      { bg: '#dbeafe', cor: '#1d4ed8', icon: '🆕' },
+    'Consulta':    { bg: '#d1fae5', cor: '#065f46', icon: '🩺' },
+    'Retorno':     { bg: '#ede9fe', cor: '#5b21b6', icon: '🔄' },
+    'Domiciliar':  { bg: '#fef3c7', cor: '#92400e', icon: '🏠' },
+    'Hospitalar':  { bg: '#fee2e2', cor: '#991b1b', icon: '🏥' },
     'Telemedicina':{ bg: '#e0f2fe', cor: '#0c4a6e', icon: '💻' },
-    'Cortesia':   { bg: '#f1f5f9', cor: '#475569', icon: '🎁' },
+    'Cortesia':    { bg: '#f1f5f9', cor: '#475569', icon: '🎁' },
   };
 
-  const todos = DB.get('pacientes');
-  const totalHist = todos.length;
-
-  const contagem = {};
-  pacs.forEach(p => { const k = p.tipo || 'Consulta'; contagem[k] = (contagem[k]||0) + 1; });
-
-  const sorted = Object.entries(contagem).sort((a,b) => b[1]-a[1]);
-
-  if (!sorted.length) {
-    el.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#94a3b8;font-size:13px;padding:20px;">Sem consultas registradas neste mês</div>';
+  if (!pacs.length) {
+    el.innerHTML = '<div style="text-align:center;color:#94a3b8;font-size:13px;padding:20px;">Sem consultas registradas neste mês</div>';
     return;
   }
 
-  el.innerHTML = sorted.map(([tipo, qtd]) => {
-    const c = corPorTipo[tipo] || { bg:'#f1f5f9', cor:'#374151', icon:'📋' };
-    const pctMes = pacs.length ? Math.round((qtd / pacs.length) * 100) : 0;
-    const qtdHist = todos.filter(p => (p.tipo||'Consulta') === tipo).length;
-    return `
-      <div class="kpi-card" style="padding:14px 16px;cursor:default;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-          <div style="width:30px;height:30px;background:${c.bg};border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;">${c.icon}</div>
-          <div style="font-size:11.5px;font-weight:600;color:#374151;line-height:1.2;">${tipo}</div>
-        </div>
-        <div style="font-size:26px;font-weight:800;color:${c.cor};letter-spacing:-1px;line-height:1;">${qtd}</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px;">${pctMes}% do mês · ${qtdHist} total</div>
-        <div style="height:3px;background:#f1f5f9;border-radius:999px;margin-top:8px;overflow:hidden;">
-          <div style="height:100%;width:${pctMes}%;background:${c.cor};border-radius:999px;opacity:0.6;transition:width 0.5s;"></div>
-        </div>
-      </div>`;
-  }).join('');
+  // Agrupa por tipo: qtd + receita
+  const mapa = {};
+  pacs.forEach(p => {
+    const k = p.tipo || 'Consulta';
+    if (!mapa[k]) mapa[k] = { qtd: 0, total: 0 };
+    mapa[k].qtd++;
+    mapa[k].total += (p.valor || 0);
+  });
+
+  const fat = pacs.reduce((s, p) => s + (p.valor || 0), 0);
+  const sorted = Object.entries(mapa).sort((a, b) => b[1].total - a[1].total);
+
+  el.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead>
+        <tr style="border-bottom:2px solid #f1f5f9;">
+          <th style="text-align:left;padding:8px 12px;color:#64748b;font-weight:600;font-size:11.5px;">Procedimento</th>
+          <th style="text-align:center;padding:8px 12px;color:#64748b;font-weight:600;font-size:11.5px;">Qtd</th>
+          <th style="text-align:right;padding:8px 12px;color:#64748b;font-weight:600;font-size:11.5px;">Receita</th>
+          <th style="text-align:right;padding:8px 12px;color:#64748b;font-weight:600;font-size:11.5px;">% do mês</th>
+          <th style="text-align:right;padding:8px 12px;color:#64748b;font-weight:600;font-size:11.5px;">Ticket</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${sorted.map(([tipo, s]) => {
+          const c = corPorTipo[tipo] || { bg:'#f1f5f9', cor:'#374151', icon:'📋' };
+          const pct = fat ? (s.total / fat) * 100 : 0;
+          const ticket = s.qtd ? s.total / s.qtd : 0;
+          const barW = Math.round(pct);
+          return `
+            <tr style="border-bottom:1px solid #f8fafc;">
+              <td style="padding:9px 12px;">
+                <div style="display:flex;align-items:center;gap:7px;">
+                  <div style="width:24px;height:24px;background:${c.bg};border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;">${c.icon}</div>
+                  <span style="font-weight:600;color:#0f172a;font-size:13px;">${tipo}</span>
+                </div>
+              </td>
+              <td style="padding:9px 12px;text-align:center;">
+                <span style="background:${c.bg};color:${c.cor};padding:2px 9px;border-radius:999px;font-size:12px;font-weight:700;">${s.qtd}</span>
+              </td>
+              <td style="padding:9px 12px;text-align:right;font-weight:700;color:#0f172a;">${BRL(s.total)}</td>
+              <td style="padding:9px 12px;text-align:right;">
+                <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;">
+                  <div style="width:48px;height:5px;background:#f1f5f9;border-radius:999px;overflow:hidden;">
+                    <div style="height:100%;width:${barW}%;background:${c.cor};border-radius:999px;opacity:0.7;"></div>
+                  </div>
+                  <span style="color:#64748b;font-size:12px;">${pct.toFixed(1)}%</span>
+                </div>
+              </td>
+              <td style="padding:9px 12px;text-align:right;color:#64748b;font-size:12.5px;">${BRL(ticket)}</td>
+            </tr>`;
+        }).join('')}
+      </tbody>
+      <tfoot>
+        <tr style="border-top:2px solid #e2e8f0;background:#f8fafc;">
+          <td style="padding:9px 12px;font-weight:700;color:#0f172a;">Total</td>
+          <td style="padding:9px 12px;text-align:center;font-weight:700;color:#0f172a;">${pacs.length}</td>
+          <td style="padding:9px 12px;text-align:right;font-weight:800;color:#10b981;">${BRL(fat)}</td>
+          <td style="padding:9px 12px;text-align:right;color:#64748b;font-size:12px;">100%</td>
+          <td style="padding:9px 12px;text-align:right;font-weight:700;color:#0f172a;">${BRL(fat / pacs.length)}</td>
+        </tr>
+      </tfoot>
+    </table>`;
 }
 
 function renderDashboard(mes = '2026-05') {
@@ -3998,7 +4037,22 @@ function executeAIAction(action) {
       const dt   = ags[idx].data;
       ags[idx].status = 'Cancelado';
       DB.set('agendamentos', ags);
-      appendChatMsg('system-ok', `✅ Agendamento de ${nome} em ${dt} cancelado`);
+
+      // Atualiza CRM: reverte "Marcou" → "Em negociação"
+      const crm = DB.get('crm');
+      const nomeAlvo = nome.toLowerCase().trim();
+      const crmIdx = crm.findIndex(c =>
+        (c.nome||'').toLowerCase().trim().includes(nomeAlvo) ||
+        nomeAlvo.includes((c.nome||'').toLowerCase().trim())
+      );
+      if (crmIdx >= 0 && crm[crmIdx].status === 'Marcou') {
+        crm[crmIdx].status = 'Em negociação';
+        DB.set('crm', crm);
+        appendChatMsg('system-ok', `✅ Agendamento de ${nome} em ${dt} cancelado · CRM revertido para "Em negociação"`);
+        if (document.getElementById('page-crm').classList.contains('active')) renderCrm();
+      } else {
+        appendChatMsg('system-ok', `✅ Agendamento de ${nome} em ${dt} cancelado`);
+      }
       if (document.getElementById('page-agenda').classList.contains('active')) renderAgenda();
     } else {
       appendChatMsg('system-ok', `⚠️ Não achei agendamento ativo para "${dados.pacienteNome || dados.nome}". Verifique na agenda.`);
