@@ -1941,6 +1941,7 @@ function renderDespesas() {
 // ====================== DASHBOARD ======================
 // ====================== TOGGLE DE SEÇÕES DO DASHBOARD ======================
 const SECTION_LABELS = {
+  procedimentos: '📊 Receita por Procedimento',
   insights:   '🧠 Insights da MaestrIA',
   retencao:   '💎 Retenção e LTV',
   marketing:  '📣 Aquisição e Marketing',
@@ -1966,9 +1967,9 @@ function toggleSection(id) {
 
 function applySectionVisibility() {
   const hidden = getHiddenSections();
-  Object.keys(SECTION_LABELS).forEach(id => {
-    const section = document.querySelector(`[data-section="${id}"]`);
-    if (!section) return;
+  // Aplica para TODAS as seções com data-section (não depende de SECTION_LABELS)
+  document.querySelectorAll('[data-section]').forEach(section => {
+    const id = section.getAttribute('data-section');
     const body = section.querySelector(`[data-section-body="${id}"]`);
     const btn = section.querySelector('.btn-section-toggle');
     if (hidden.includes(id)) {
