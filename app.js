@@ -135,15 +135,27 @@ function _iniciarApp() {
   if (window.lucide) lucide.createIcons();
   renderDashboard();
   saudacaoDiaria();
+  // Sincroniza UI mobile com página inicial
+  _mobSync('dashboard');
 }
 
 function _atualizarSidebar() {
+  const eMedico = currentRole === 'medico';
+  const nomeFormatado = eMedico ? `Dr. ${currentNome}` : currentNome;
+
+  // Footer da sidebar (avatar + nome + role)
   const nomeEl   = document.getElementById('sidebar-nome');
   const roleEl   = document.getElementById('sidebar-role');
   const avatarEl = document.getElementById('sidebar-avatar');
-  if (nomeEl)   nomeEl.textContent   = currentNome;
-  if (roleEl)   roleEl.textContent   = currentRole === 'medico' ? 'Médico' : 'Secretária';
+  if (nomeEl)   nomeEl.textContent = nomeFormatado;
+  if (roleEl)   roleEl.textContent = eMedico ? 'Médico · Geriatria' : 'Secretária';
   if (avatarEl) avatarEl.textContent = currentNome.charAt(0).toUpperCase();
+
+  // Header da sidebar (logo)
+  const headerNome = document.getElementById('sidebar-header-nome');
+  const headerEsp  = document.getElementById('sidebar-header-esp');
+  if (headerNome) headerNome.textContent = nomeFormatado;
+  if (headerEsp)  headerEsp.textContent  = eMedico ? 'Geriatria' : 'Secretária';
 }
 
 // Páginas restritas à secretária
@@ -183,15 +195,79 @@ let charts = {};
 let editState = { col: null, idx: null, crmIdx: null, pacIdx: null };
 let agendaView = 'diario';
 
-// ====================== NAVEGAÇÃO ======================
+// ====================== NAVEGAÇÃO + MOBILE ======================
+const _MOB_TITLES = {
+  dashboard: 'Dashboard',   crm: 'CRM',          pacientes: 'Atendidos',
+  followup:  'Follow-Up',   agenda: 'Agenda',     receita: 'Receita',
+  despesas:  'Despesas',    precos: 'Preços',      relatorio: 'Relatório',
+  metas:     'Metas',       backup:  'Backup'
+};
+// CTA config per page (label → modal to open, or null to hide)
+const _MOB_CTA = {
+  dashboard:  { label: '+ Novo',      modal: 'modal-paciente' },
+  pacientes:  { label: '+ Consulta',  modal: 'modal-paciente' },
+  crm:        { label: '+ Contato',   modal: 'modal-crm'      },
+  agenda:     { label: '+ Horário',   modal: 'modal-agenda'   },
+  despesas:   { label: '+ Despesa',   modal: 'modal-despesa'  },
+  precos:     { label: '+ Preço',     modal: 'modal-preco'    },
+};
+// Bottom nav pages (buttons that exist in mob bottom nav)
+const _MOB_NAV_PAGES = ['dashboard','agenda','pacientes'];
+
+function _mobSync(page) {
+  // Title
+  const titleEl = document.getElementById('mob-page-title');
+  if (titleEl) titleEl.textContent = _MOB_TITLES[page] || page;
+
+  // CTA button
+  const cta = document.getElementById('mob-cta-btn');
+  if (cta) {
+    const cfg = _MOB_CTA[page];
+    if (cfg) {
+      cta.textContent = cfg.label;
+      cta.onclick = () => openModal(cfg.modal);
+      cta.style.display = '';
+    } else {
+      cta.style.display = 'none';
+    }
+  }
+
+  // Bottom nav active state
+  document.querySelectorAll('.mob-nav-btn').forEach(b => b.classList.remove('active'));
+  const mobBtn = document.getElementById('mob-nav-' + page);
+  if (mobBtn) mobBtn.classList.add('active');
+}
+
+function toggleMobileSidebar() {
+  const aside   = document.getElementById('sidebar-aside');
+  const overlay = document.getElementById('mob-overlay');
+  if (!aside) return;
+  const isOpen = aside.classList.contains('mob-open');
+  aside.classList.toggle('mob-open', !isOpen);
+  if (overlay) overlay.style.display = isOpen ? 'none' : 'block';
+}
+
+function closeMobileSidebar() {
+  const aside   = document.getElementById('sidebar-aside');
+  const overlay = document.getElementById('mob-overlay');
+  if (aside) aside.classList.remove('mob-open');
+  if (overlay) overlay.style.display = 'none';
+}
+
 function showPage(page) {
   // Bloqueia acesso financeiro para secretária
   if (currentRole !== 'medico' && _PAGES_FINANCEIRO.includes(page)) return;
+
+  // Close sidebar on mobile when navigating
+  closeMobileSidebar();
 
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('page-' + page).classList.add('active');
   document.getElementById('nav-' + page).classList.add('active');
+
+  // Sync mobile UI
+  _mobSync(page);
 
   if (page === 'dashboard') renderDashboard();
   if (page === 'crm') renderCrm();
@@ -210,10 +286,26 @@ function showPage(page) {
 function openModal(id) {
   document.getElementById(id).style.display = 'flex';
   if (id === 'modal-metas') {
-    const metas = DB.getObj('metas', { fat: 0, pac: 0, desp: 0 });
-    document.getElementById('input-meta-fat').value = metas.fat || '';
-    document.getElementById('input-meta-pac').value = metas.pac || '';
+    const metas  = DB.getObj('metas', { fat: 0, pac: 0, desp: 0 });
+    const mp     = DB.getObj('metas_proc', {});
+    const mpVal  = DB.getObj('metas_proc_valor', {});
+    const procs  = getProcedimentos();
+    const chaves = ['1ª vez','Consulta','Retorno','Domiciliar','Hospitalar','Telemedicina'];
+    const ids    = ['1vez','consulta','retorno','domiciliar','hospitalar','telemedicina'];
+
+    chaves.forEach((tipo, i) => {
+      const qtdEl = document.getElementById(`mm-${ids[i]}-qtd`);
+      const valEl = document.getElementById(`mm-${ids[i]}-val`);
+      if (qtdEl) qtdEl.value = mp[tipo] || '';
+      if (valEl) {
+        // Usa valor salvo anteriormente; se não houver, busca da tabela de preços
+        const valorSalvo = mpVal[tipo];
+        const proc = procs.find(p => p.nome === tipo || p.nome.toLowerCase().includes(tipo.toLowerCase().split(' ')[0]));
+        valEl.value = valorSalvo || (proc ? proc.valorPix : '') || '';
+      }
+    });
     document.getElementById('input-meta-desp').value = metas.desp || '';
+    atualizarPreviewMetas();
   }
   if (id === 'modal-paciente') {
     popularProcedimentoSelect();
@@ -502,11 +594,50 @@ function pgtoSelect(status, idx) {
 
 function updatePacStatus(idx, newStatus) {
   const data = DB.get('pacientes');
-  data[idx].statusPgto = newStatus;
+  const entrada = data[idx];
+
+  // Se estava "A receber" e agora vai ser "Pago", perguntar a forma real de pagamento
+  if (newStatus === 'Pago' && entrada.pagamento === 'A receber') {
+    openModalPagtoReal(idx, newStatus);
+    return; // espera o modal confirmar
+  }
+
+  entrada.statusPgto = newStatus;
   DB.set('pacientes', data);
+
+  // Toast de feedback
+  const val = BRL(entrada.valor || 0);
+  const labels = { 'Pago': '✅ Pago', 'Pendente': '🕐 Pendente', 'Isento': '🎁 Isento' };
+  toast(`${labels[newStatus] || newStatus} · ${entrada.nome} · ${val}`);
+
   renderPacientes();
   renderDashboard();
-  // Se a página Receita estiver aberta, re-renderiza pra atualizar KPIs/quebras
+  if (document.getElementById('page-receita')?.classList.contains('active')) renderReceita();
+}
+
+// Modal rápido para capturar forma de pagamento real quando "A receber" → "Pago"
+function openModalPagtoReal(idx, newStatus) {
+  document.getElementById('modal-pgto-real').style.display = 'flex';
+  document.getElementById('modal-pgto-real').dataset.idx = idx;
+  document.getElementById('modal-pgto-real').dataset.status = newStatus;
+}
+
+function confirmarPagtoReal(forma) {
+  const modal = document.getElementById('modal-pgto-real');
+  const idx    = parseInt(modal.dataset.idx);
+  const newStatus = modal.dataset.status;
+  modal.style.display = 'none';
+
+  const data = DB.get('pacientes');
+  data[idx].statusPgto = newStatus;
+  if (forma) data[idx].pagamento = forma; // atualiza forma de pagamento real
+  DB.set('pacientes', data);
+
+  const val = BRL(data[idx].valor || 0);
+  toast(`✅ Pago via ${forma || 'A receber'} · ${data[idx].nome} · ${val} registrado!`);
+
+  renderPacientes();
+  renderDashboard();
   if (document.getElementById('page-receita')?.classList.contains('active')) renderReceita();
 }
 
@@ -610,11 +741,8 @@ function saveCrm(e) {
 }
 
 function filterCrmStatus(val) {
-  const rows = document.querySelectorAll('#crm-tbody tr[data-search]');
-  rows.forEach(row => {
-    if (!val || row.getAttribute('data-status') === val) row.style.display = '';
-    else row.style.display = 'none';
-  });
+  // Delegated to unified filterCrmAll
+  filterCrmAll();
 }
 
 function renderCrm() {
@@ -629,42 +757,350 @@ function renderCrm() {
     return r;
   });
   if (changed) DB.set('crm', data);
+
   const tbody = document.getElementById('crm-tbody');
   if (!data.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-12 text-gray-400">Nenhum contato registrado.<br><span class="text-sm">Clique em "+ Novo Contato" para começar.</span></td></tr>';
-    document.getElementById('funil-contatos').textContent = 0;
-    document.getElementById('funil-negoc').textContent = 0;
-    document.getElementById('funil-marc').textContent = 0;
-    document.getElementById('funil-atend').textContent = 0;
-    document.getElementById('funil-conv').textContent = '0%';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:48px;">Nenhum contato registrado. <button class="btn-primary" style="margin-left:12px;" onclick="openModal(\'modal-crm\')">+ Novo</button></td></tr>';
+    _atualizarFunilCrm([]);
     return;
   }
-  tbody.innerHTML = data.map((r, i) => `
-    <tr data-search="${r.nome} ${r.canal} ${r.status}" data-status="${r.status}" class="border-b border-gray-50 hover:bg-gray-50">
-      <td class="px-4 py-3 text-gray-600">${formatDate(r.data)}</td>
-      <td class="px-4 py-3 font-medium text-gray-900">${r.nome}</td>
-      <td class="px-4 py-3">
-        ${r.whatsapp ? `<a href="https://wa.me/55${r.whatsapp.replace(/\D/g,'')}" target="_blank" class="text-green-600 hover:underline">${r.whatsapp}</a>` : '-'}
-      </td>
-      <td class="px-4 py-3 text-gray-600">${r.canal}</td>
-      <td class="px-4 py-3 text-gray-600">${r.tipo}</td>
-      <td class="px-4 py-3">${statusSelect(r.status, i)}</td>
-      <td class="px-4 py-3" style="white-space:nowrap;">
-        <button onclick="editRow('crm',${i})" class="text-blue-400 hover:text-blue-600 text-xs mr-2" title="Editar dados">✏️</button>
-        <button onclick="deleteRow('crm',${i})" class="text-red-400 hover:text-red-600 text-xs" title="Excluir">🗑️</button>
-      </td>
-    </tr>`).join('');
 
-  // Funil
-  const contatos = data.length;
-  const negoc = data.filter(r => r.status === 'Em negociação' || r.status === 'Marcou' || r.status === 'Atendeu').length;
-  const marc = data.filter(r => r.status === 'Marcou' || r.status === 'Atendeu').length;
-  const atend = data.filter(r => r.status === 'Atendeu').length;
-  document.getElementById('funil-contatos').textContent = contatos;
-  document.getElementById('funil-negoc').textContent = negoc;
-  document.getElementById('funil-marc').textContent = marc;
-  document.getElementById('funil-atend').textContent = atend;
-  document.getElementById('funil-conv').textContent = contatos ? PCT((atend / contatos) * 100) : '0%';
+  if (tbody) {
+    tbody.innerHTML = data.map((r, i) => `
+      <tr data-search="${r.nome} ${r.canal||''} ${r.status||''} ${r.tipo||''}" data-status="${r.status}">
+        <td>${formatDate(r.data)}</td>
+        <td style="font-weight:600;color:#0f172a;">${r.nome}</td>
+        <td>${r.whatsapp ? `<a href="https://wa.me/55${r.whatsapp.replace(/\D/g,'')}" target="_blank" style="color:#10b981;font-weight:600;">${r.whatsapp}</a>` : '—'}</td>
+        <td style="color:#475569;">${r.canal||'—'}</td>
+        <td style="color:#475569;">${r.tipo||'—'}</td>
+        <td>${statusSelect(r.status, i)}</td>
+        <td style="white-space:nowrap;">
+          <button onclick="editRow('crm',${i})" title="Editar" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;">✏️</button>
+          <button onclick="deleteRow('crm',${i})" title="Excluir" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;">🗑️</button>
+        </td>
+      </tr>`).join('');
+  }
+
+  _atualizarFunilCrm(data);
+
+  // Restaura view preferida (kanban ou lista)
+  const savedView = DB.getObj('crm_view', 'lista');
+  setCrmView(savedView);
+}
+
+// ====================== CRM KANBAN ======================
+const KANBAN_COLUNAS = [
+  { status: 'Contato feito', label: '📞 Contato feito', cor: '#3b82f6', headerBg: '#dbeafe' },
+  { status: 'Em negociação', label: '💬 Em negociação',  cor: '#8b5cf6', headerBg: '#ede9fe' },
+  { status: 'Marcou',        label: '📅 Marcou',          cor: '#f59e0b', headerBg: '#fef3c7' },
+  { status: 'Atendeu',       label: '✅ Atendeu',         cor: '#10b981', headerBg: '#d1fae5' },
+  { status: 'Não marcou',    label: '❌ Não marcou',       cor: '#94a3b8', headerBg: '#f1f5f9' },
+];
+
+let _crmKanbanFiltro = '';
+let _kanbanDragIdx   = null;
+
+function setCrmView(view) {
+  const lista  = document.getElementById('crm-lista-view');
+  const kanban = document.getElementById('crm-kanban-view');
+  const tabL   = document.getElementById('crm-tab-lista');
+  const tabK   = document.getElementById('crm-tab-kanban');
+  if (!lista || !kanban) return;
+  lista.style.display  = view === 'lista'  ? '' : 'none';
+  kanban.style.display = view === 'kanban' ? 'block' : 'none';
+  if (tabL) tabL.classList.toggle('active', view === 'lista');
+  if (tabK) tabK.classList.toggle('active', view === 'kanban');
+  if (view === 'kanban') renderKanban(_crmKanbanFiltro);
+  DB.setObj('crm_view', view);
+}
+
+function filterCrmAll(val) {
+  // Store current search value
+  if (val !== undefined) _crmKanbanFiltro = val;
+  const searchVal  = _crmKanbanFiltro || '';
+  const statusVal  = (document.getElementById('crm-status-filter') || {}).value || '';
+  const kanbanView = (document.getElementById('crm-kanban-view') || {}).style?.display !== 'none';
+
+  if (kanbanView) {
+    renderKanban(searchVal);
+  } else {
+    // Filter lista rows
+    const rows = document.querySelectorAll('#crm-tbody tr[data-search]');
+    rows.forEach(row => {
+      const text   = (row.getAttribute('data-search') || '').toLowerCase();
+      const status = row.getAttribute('data-status') || '';
+      const matchText   = !searchVal  || text.includes(searchVal.toLowerCase());
+      const matchStatus = !statusVal  || status === statusVal;
+      row.style.display = matchText && matchStatus ? '' : 'none';
+    });
+  }
+}
+
+function renderKanban(filtro) {
+  if (filtro !== undefined) _crmKanbanFiltro = filtro;
+  const container = document.getElementById('crm-kanban-view');
+  if (!container) return;
+
+  const data         = DB.get('crm');
+  const termo        = (_crmKanbanFiltro || '').toLowerCase().trim();
+  const statusFiltro = (document.getElementById('crm-status-filter') || {}).value || '';
+
+  const colsHtml = KANBAN_COLUNAS.map(col => {
+    const cards = data
+      .map((r, i) => ({ ...r, _idx: i }))
+      .filter(r => r.status === col.status)
+      .filter(r => !termo || (r.nome + ' ' + (r.canal||'') + ' ' + (r.tipo||'')).toLowerCase().includes(termo))
+      .filter(r => !statusFiltro || r.status === statusFiltro);
+
+    return `
+      <div class="kanban-col" style="border-top-color:${col.cor};"
+           ondragover="event.preventDefault();this.classList.add('kanban-drop-target')"
+           ondragleave="this.classList.remove('kanban-drop-target')"
+           ondrop="_kanbanDrop(event,'${col.status.replace(/'/g,"\\'")}',this)">
+
+        <div style="padding:11px 14px;display:flex;align-items:center;justify-content:space-between;background:${col.headerBg};border-bottom:1px solid rgba(0,0,0,0.07);">
+          <span style="font-size:12.5px;font-weight:700;color:#0f172a;">${col.label}</span>
+          <span style="font-size:11px;font-weight:700;background:${col.cor}22;color:${col.cor};padding:2px 9px;border-radius:999px;">${cards.length}</span>
+        </div>
+
+        <div class="kanban-col-body">
+          ${cards.length === 0
+            ? `<div style="text-align:center;padding:28px 10px;color:#94a3b8;font-size:12px;">Sem contatos</div>`
+            : cards.map(r => _kanbanCardHtml(r, col)).join('')}
+        </div>
+
+        ${col.status === 'Contato feito' ? `
+          <div style="padding:8px 10px;border-top:1px solid #e2e8f0;">
+            <button onclick="openModal('modal-crm')"
+              style="width:100%;background:transparent;border:1px dashed #cbd5e1;border-radius:8px;padding:7px;font-size:12px;color:#94a3b8;cursor:pointer;font-family:'Inter',sans-serif;transition:all 0.15s;"
+              onmouseover="this.style.borderColor='#10b981';this.style.color='#10b981'"
+              onmouseout="this.style.borderColor='#cbd5e1';this.style.color='#94a3b8'">
+              + Novo contato
+            </button>
+          </div>` : ''}
+      </div>`;
+  }).join('');
+
+  const dotsHtml = KANBAN_COLUNAS.map((col, i) =>
+    `<div class="kanban-dot${i === 0 ? ' active' : ''}" onclick="_kanbanScrollTo(${i})" title="${col.label}"></div>`
+  ).join('');
+
+  container.innerHTML = `
+    <div class="kanban-wrap">
+      <div class="kanban-fade-l hidden" id="kanban-fade-l"></div>
+      <div class="kanban-fade-r hidden" id="kanban-fade-r"></div>
+      <button class="kanban-arrow kanban-arrow-left hidden" id="kanban-arr-left"  onclick="_kanbanNav(-1)">&#8249;</button>
+      <div class="kanban-board" id="kanban-board-scroll" onscroll="_kanbanOnScroll()">
+        ${colsHtml}
+      </div>
+      <button class="kanban-arrow kanban-arrow-right hidden" id="kanban-arr-right" onclick="_kanbanNav(1)">&#8250;</button>
+      <div class="kanban-dots" id="kanban-dots" style="display:none;">${dotsHtml}</div>
+    </div>`;
+
+  // Calcula estado inicial das setas após o browser ter feito o layout
+  requestAnimationFrame(() => requestAnimationFrame(_kanbanOnScroll));
+}
+
+/* ── Retorna largura real de uma coluna + gap ── */
+function _kanbanColW() {
+  const board = document.getElementById('kanban-board-scroll');
+  if (!board) return 208;
+  const col = board.querySelector('.kanban-col');
+  return col ? col.offsetWidth + 13 : 208;
+}
+
+function _kanbanNav(dir) {
+  const board = document.getElementById('kanban-board-scroll');
+  if (!board) return;
+  board.scrollBy({ left: dir * _kanbanColW(), behavior: 'smooth' });
+}
+
+function _kanbanScrollTo(idx) {
+  const board = document.getElementById('kanban-board-scroll');
+  if (!board) return;
+  board.scrollTo({ left: idx * _kanbanColW(), behavior: 'smooth' });
+}
+
+function _kanbanOnScroll() {
+  const board = document.getElementById('kanban-board-scroll');
+  if (!board) return;
+  const sl        = board.scrollLeft;
+  const maxScroll = board.scrollWidth - board.clientWidth;
+  const hasScroll = maxScroll > 8;
+
+  // Elementos de UI
+  const leftArr  = document.getElementById('kanban-arr-left');
+  const rightArr = document.getElementById('kanban-arr-right');
+  const fadeL    = document.getElementById('kanban-fade-l');
+  const fadeR    = document.getElementById('kanban-fade-r');
+  const dotsEl   = document.getElementById('kanban-dots');
+
+  if (!hasScroll) {
+    // Tela larga o suficiente: sem scroll → esconde tudo
+    if (leftArr)  leftArr.classList.add('hidden');
+    if (rightArr) rightArr.classList.add('hidden');
+    if (fadeL)    fadeL.classList.add('hidden');
+    if (fadeR)    fadeR.classList.add('hidden');
+    if (dotsEl)   dotsEl.style.display = 'none';
+    return;
+  }
+
+  // Há scroll — mostra controles conforme posição
+  if (dotsEl) dotsEl.style.display = '';
+
+  const atStart = sl < 8;
+  const atEnd   = sl >= maxScroll - 8;
+
+  if (leftArr)  leftArr.classList.toggle('hidden',  atStart);
+  if (rightArr) rightArr.classList.toggle('hidden',  atEnd);
+  if (fadeL)    fadeL.classList.toggle('hidden',  atStart);
+  if (fadeR)    fadeR.classList.toggle('hidden',  atEnd);
+
+  // Atualiza dot ativo
+  const idx = Math.round(sl / _kanbanColW());
+  document.querySelectorAll('.kanban-dot').forEach((d, i) =>
+    d.classList.toggle('active', i === idx)
+  );
+}
+
+function _kanbanCardHtml(r, col) {
+  const idx      = r._idx;
+  const colIdx   = KANBAN_COLUNAS.findIndex(c => c.status === r.status);
+  const nextCol  = KANBAN_COLUNAS[colIdx + 1];
+  const badge    = _canalBadge(r.canal);
+  const dias     = _diasDesde(r.data);
+  const whatsBtn = r.whatsapp
+    ? `<a href="https://wa.me/55${r.whatsapp.replace(/\D/g,'')}" target="_blank"
+          style="display:inline-flex;align-items:center;gap:3px;font-size:11.5px;color:#10b981;font-weight:600;text-decoration:none;margin-bottom:9px;">
+          💬 ${r.whatsapp}
+       </a>`
+    : '';
+
+  const nextLabel = nextCol ? nextCol.label.replace(/^[^\s]+\s/, '') : ''; // strip emoji
+
+  return `
+    <div class="kanban-card"
+         draggable="true"
+         ondragstart="_kanbanDragStart(event,${idx})"
+         ondragend="document.querySelectorAll('.kanban-card').forEach(c=>c.classList.remove('kanban-dragging'))">
+
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;margin-bottom:6px;">
+        <div style="font-size:13px;font-weight:700;color:#0f172a;line-height:1.3;">${r.nome}</div>
+        ${badge}
+      </div>
+
+      ${(r.tipo && r.tipo.trim().toLowerCase() !== col.status.toLowerCase())
+          ? `<div style="font-size:11.5px;color:#475569;margin-bottom:2px;">${r.tipo}</div>`
+          : ''}
+      <div style="font-size:11px;color:#94a3b8;margin-bottom:8px;">
+        ${formatDate(r.data)} · <span style="font-weight:600;color:${dias.cor};">${dias.texto}</span>
+      </div>
+      ${whatsBtn}
+
+      <div style="border-top:1px solid #f1f5f9;padding-top:8px;">
+
+        <!-- Linha 1: botão de avançar (largura total) -->
+        ${nextCol ? `
+          <button onclick="moverKanbanCard(${idx},'${nextCol.status.replace(/'/g,"\\'")}',event)"
+            style="width:100%;background:${col.cor}18;color:${col.cor};border:1px solid ${col.cor}35;border-radius:6px;padding:5px 8px;font-size:11.5px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;margin-bottom:6px;transition:background 0.15s;text-align:center;"
+            onmouseover="this.style.background='${col.cor}30'"
+            onmouseout="this.style.background='${col.cor}18'">
+            → ${nextLabel}
+          </button>`
+        : `<div style="font-size:11px;color:#10b981;font-weight:700;margin-bottom:6px;">✅ Concluído</div>`}
+
+        <!-- Linha 2: ações secundárias -->
+        <div style="display:flex;align-items:center;gap:5px;justify-content:flex-end;">
+          ${r.status === 'Marcou' ? `
+            <button onclick="convertCrmToAtendidoKanban(${idx},event)"
+              title="Registrar atendimento"
+              style="background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;">
+              ✓ Atendeu
+            </button>` : ''}
+
+          <button onclick="editRow('crm',${idx})" title="Editar"
+            style="background:#f8fafc;color:#64748b;border:1px solid #e2e8f0;border-radius:6px;padding:4px 7px;font-size:11px;cursor:pointer;">✏️</button>
+
+          <button onclick="deleteRow('crm',${idx})" title="Excluir"
+            style="background:#fff1f2;color:#dc2626;border:1px solid #fecdd3;border-radius:6px;padding:4px 7px;font-size:11px;cursor:pointer;">🗑️</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function _canalBadge(canal) {
+  const map = {
+    'Indicação médica':   '#eff6ff:#1d4ed8',
+    'Indicação paciente': '#f0fdf4:#15803d',
+    'Google':             '#fff7ed:#c2410c',
+    'Instagram':          '#fdf4ff:#7e22ce',
+    'WhatsApp':           '#f0fdf4:#15803d',
+    'Doctoralia':         '#eff6ff:#1e40af',
+    'Outros':             '#f8fafc:#475569',
+  };
+  const [bg, color] = (map[canal] || '#f8fafc:#475569').split(':');
+  const short = (canal || '').replace('Indicação ','Ind. ');
+  return `<span style="font-size:10px;font-weight:700;background:${bg};color:${color};padding:2px 7px;border-radius:4px;white-space:nowrap;flex-shrink:0;">${short}</span>`;
+}
+
+function _diasDesde(dataStr) {
+  const diff = Math.floor((Date.now() - new Date(dataStr)) / 86400000);
+  if (diff <= 0) return { texto: 'hoje',        cor: '#10b981' };
+  if (diff <= 3) return { texto: `${diff}d`,     cor: '#10b981' };
+  if (diff <= 14)return { texto: `${diff}d`,     cor: '#f59e0b' };
+  return           { texto: `${diff}d atrás`,    cor: '#ef4444' };
+}
+
+function moverKanbanCard(idx, novoStatus, evt) {
+  if (evt) evt.stopPropagation();
+  const data = DB.get('crm');
+  if (!data[idx]) return;
+  data[idx].status = novoStatus;
+  DB.set('crm', data);
+  const labelMap = {
+    'Em negociação': '💬', 'Marcou': '📅', 'Atendeu': '✅', 'Não marcou': '❌', 'Contato feito': '📞'
+  };
+  toast(`${labelMap[novoStatus] || ''} ${novoStatus} · ${data[idx].nome}`);
+  renderKanban();
+  // Atualiza funil no topo
+  _atualizarFunilCrm(data);
+}
+
+function _atualizarFunilCrm(data) {
+  if (!data) data = DB.get('crm');
+  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  const negoc   = data.filter(r => ['Em negociação','Marcou','Atendeu'].includes(r.status)).length;
+  const marc    = data.filter(r => ['Marcou','Atendeu'].includes(r.status)).length;
+  const atend   = data.filter(r => r.status === 'Atendeu').length;
+  setText('funil-contatos', data.length);
+  setText('funil-negoc',    negoc);
+  setText('funil-marc',     marc);
+  setText('funil-atend',    atend);
+  setText('funil-conv',     data.length ? PCT((atend / data.length) * 100) : '0%');
+}
+
+function convertCrmToAtendidoKanban(idx, evt) {
+  if (evt) evt.stopPropagation();
+  moverKanbanCard(idx, 'Atendeu');
+  // trigger the same convert modal/action
+  setTimeout(() => convertCrmToAtendido(idx), 80);
+}
+
+function _kanbanDragStart(evt, idx) {
+  _kanbanDragIdx = idx;
+  evt.target.classList.add('kanban-dragging');
+  evt.dataTransfer.effectAllowed = 'move';
+}
+
+function _kanbanDrop(evt, novoStatus, colEl) {
+  evt.preventDefault();
+  colEl.classList.remove('kanban-drop-target');
+  if (_kanbanDragIdx === null) return;
+  const data = DB.get('crm');
+  if (data[_kanbanDragIdx] && data[_kanbanDragIdx].status !== novoStatus) {
+    moverKanbanCard(_kanbanDragIdx, novoStatus);
+  }
+  _kanbanDragIdx = null;
 }
 
 // ====================== INTEGRAÇÃO CRM → ATENDIDOS ======================
@@ -1747,10 +2183,10 @@ function renderReceita() {
   const fStatus = statusEl?.value || '';
   const fPgto = pgtoEl?.value || '';
 
-  let pacs = DB.get('pacientes');
-  if (mes !== 'todos') pacs = pacs.filter(p => getMes(p.data) === mes);
-  // Mantém índice original pra editar/excluir corretamente
+  // Carrega UMA vez — mesma instância para indexOf funcionar corretamente
   const todosOriginais = DB.get('pacientes');
+  let pacs = todosOriginais;
+  if (mes !== 'todos') pacs = todosOriginais.filter(p => getMes(p.data) === mes);
   const indices = pacs.map(p => todosOriginais.indexOf(p));
 
   // ===== KPIs (sempre sobre todo o período selecionado, ignorando filtros de tabela) =====
@@ -1769,10 +2205,11 @@ function renderReceita() {
   setText('rec-bruto', BRL(bruto));
   setText('rec-bruto-sub', `Ticket médio: ${BRL(ticket)} · ${pacs.length} atendimento(s)`);
 
-  // ===== Quebra por forma de pagamento =====
+  // ===== Quebra por forma de pagamento (só pagos) =====
+  const pagosPorForma = pacs.filter(p => p.statusPgto === 'Pago');
   const formas = ['PIX','Cartão crédito','Cartão débito','Dinheiro','A receber'];
   const formasStats = formas.map(f => {
-    const lista = pacs.filter(p => p.pagamento === f);
+    const lista = pagosPorForma.filter(p => p.pagamento === f);
     return { forma: f, qtd: lista.length, total: lista.reduce((s, p) => s + (p.valor || 0), 0) };
   }).filter(s => s.qtd > 0).sort((a, b) => b.total - a.total);
 
@@ -1784,7 +2221,7 @@ function renderReceita() {
     const cores = { 'PIX': '#10b981', 'Cartão crédito': '#3b82f6', 'Cartão débito': '#06b6d4', 'Dinheiro': '#f59e0b', 'A receber': '#94a3b8' };
     formasEl.innerHTML = formasStats.map(s => {
       const pctBar = (s.total / max) * 100;
-      const pctTotal = bruto ? (s.total / bruto) * 100 : 0;
+      const pctTotal = recebido ? (s.total / recebido) * 100 : 0;
       const cor = cores[s.forma] || '#64748b';
       return `
         <div style="margin-bottom:10px;">
@@ -1860,13 +2297,21 @@ function renderReceita() {
         <button onclick="deleteRow('pacientes',${idx})" class="text-red-400 hover:text-red-600 text-xs" title="Excluir">🗑️</button>
       </td>
     </tr>`).join('');
-  // Rodapé com totais filtrados
+  // Rodapé com totais filtrados — discrimina Pago / Pendente / Isento
+  const totPago     = linhasFiltradas.filter(({p}) => p.statusPgto === 'Pago').reduce((s, {p}) => s + (p.valor || 0), 0);
+  const totPendente = linhasFiltradas.filter(({p}) => p.statusPgto === 'Pendente').reduce((s, {p}) => s + (p.valor || 0), 0);
   const totFiltrado = linhasFiltradas.reduce((s, { p }) => s + (p.valor || 0), 0);
   if (tfoot) {
     tfoot.innerHTML = `
       <tr style="background:#f8fafc;border-top:2px solid #e2e8f0;">
-        <td colspan="3" style="font-weight:700;color:#475569;padding:12px 16px;">Total filtrado (${linhasFiltradas.length} de ${pacs.length})</td>
-        <td style="text-align:right;font-weight:800;color:#0f172a;font-size:14px;">${BRL(totFiltrado)}</td>
+        <td colspan="2" style="font-weight:600;color:#475569;padding:10px 16px;font-size:12px;">
+          ${linhasFiltradas.length} de ${pacs.length} atendimentos
+        </td>
+        <td style="padding:10px 12px;text-align:right;">
+          ${totPago > 0 ? `<span style="background:#d1fae5;color:#065f46;padding:3px 8px;border-radius:6px;font-size:11.5px;font-weight:700;">✅ ${BRL(totPago)} pago</span>` : ''}
+          ${totPendente > 0 ? `<span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:6px;font-size:11.5px;font-weight:700;margin-left:4px;">🕐 ${BRL(totPendente)} pendente</span>` : ''}
+        </td>
+        <td style="text-align:right;font-weight:800;color:#0f172a;font-size:14px;padding:10px 16px;">${BRL(totFiltrado)}</td>
         <td colspan="3"></td>
       </tr>`;
   }
@@ -1983,18 +2428,7 @@ function applySectionVisibility() {
     }
   });
 
-  // Barra inferior com chips das ocultas (clica pra reativar)
-  const bar = document.getElementById('sections-hidden-bar');
-  const listEl = document.getElementById('sections-hidden-list');
-  if (!bar || !listEl) return;
-  if (!hidden.length) {
-    bar.style.display = 'none';
-  } else {
-    bar.style.display = 'block';
-    listEl.innerHTML = hidden.map(id =>
-      `<button class="btn-section-chip" onclick="toggleSection('${id}')" title="Mostrar de novo">${SECTION_LABELS[id]} <span style="opacity:0.6;">+</span></button>`
-    ).join('');
-  }
+  // Seções ocultas: cabeçalho permanece visível com botão "+" para reativar
 }
 
 // ====================== PACOTE 5: GRÁFICOS DE TENDÊNCIA ======================
@@ -2852,43 +3286,119 @@ function renderProcBreakdown(pacs) {
 }
 
 function renderDashboard(mes = '2026-05') {
-  const pacs = DB.get('pacientes').filter(p => getMes(p.data) === mes);
+  const pacs  = DB.get('pacientes').filter(p => getMes(p.data) === mes);
   const desps = DB.get('despesas').filter(d => getMes(d.data) === mes);
-  const crm = DB.get('crm').filter(c => getMes(c.data) === mes);
+  const crm   = DB.get('crm').filter(c => getMes(c.data) === mes);
   const agenda = DB.get('agenda').filter(a => getMes(a.data) === mes);
 
-  const fat = pacs.reduce((s, p) => s + p.valor, 0);
+  const fat       = pacs.reduce((s, p) => s + p.valor, 0);
   const totalDesp = desps.reduce((s, d) => s + d.valor, 0);
-  const lucro = fat - totalDesp;
-  const margem = fat ? (lucro / fat) * 100 : 0;
-  const ticket = pacs.length ? fat / pacs.length : 0;
-  const inad = pacs.filter(p => p.statusPgto === 'Pendente').reduce((s, p) => s + p.valor, 0);
-  const inadPct = fat ? (inad / fat) * 100 : 0;
+  const lucro     = fat - totalDesp;
+  const margem    = fat ? (lucro / fat) * 100 : 0;
+  const ticket    = pacs.length ? fat / pacs.length : 0;
+  const inad      = pacs.filter(p => p.statusPgto === 'Pendente').reduce((s, p) => s + p.valor, 0);
+  const inadPct   = fat ? (inad / fat) * 100 : 0;
 
-  const totVagas = agenda.reduce((s, a) => s + a.vagas, 0);
-  const totOcup = agenda.reduce((s, a) => s + a.ocupadas, 0);
-  const ocup = totVagas ? (totOcup / totVagas) * 100 : 0;
-  const noshow = agenda.reduce((s, a) => s + a.noshow, 0);
+  // ===== Comparativo mês anterior =====
+  const [anoN, mesN] = mes.split('-').map(Number);
+  const prevDate  = new Date(anoN, mesN - 2, 1);
+  const prevMes   = prevDate.toISOString().substring(0, 7);
+  const prevLabel = MESES[prevDate.getMonth()];
+  const prevPacs   = DB.get('pacientes').filter(p => getMes(p.data) === prevMes);
+  const prevDesps  = DB.get('despesas').filter(d => getMes(d.data) === prevMes);
+  const prevAgenda = DB.get('agenda').filter(a => getMes(a.data) === prevMes);
+  const prevCrm    = DB.get('crm').filter(c => getMes(c.data) === prevMes);
+  const prevFat    = prevPacs.reduce((s, p) => s + p.valor, 0);
+  const prevDesp   = prevDesps.reduce((s, d) => s + d.valor, 0);
+  const prevPacN   = prevPacs.length;
+  const prevLucro  = prevFat - prevDesp;
+  const prevTotVagas = prevAgenda.reduce((s, a) => s + a.vagas, 0);
+  const prevTotOcup  = prevAgenda.reduce((s, a) => s + a.ocupadas, 0);
+  const prevOcup     = prevTotVagas ? (prevTotOcup / prevTotVagas) * 100 : 0;
+  const prevAtend    = prevCrm.filter(c => c.status === 'Atendeu').length;
+  const prevConv     = prevCrm.length ? (prevAtend / prevCrm.length) * 100 : 0;
+
+  // Helper: HTML de variação (↑/↓/—) com cor semântica
+  function varHtml(curr, prev, invertido = false) {
+    if (!prev) return `<span style="font-size:11px;color:#94a3b8;">— sem dado anterior</span>`;
+    const pct    = ((curr - prev) / prev) * 100;
+    const absPct = Math.abs(pct);
+    const fmtStr = absPct.toFixed(1); // ex: "0.0", "1.2", "12.5"
+    // Neutro se variação < 1% OU se o valor formatado seria "0.0" (evita "↑ 0.0%")
+    if (absPct < 1 || fmtStr === '0.0') {
+      return `<span style="font-size:11.5px;font-weight:600;color:#64748b;">= estável</span> <span style="font-size:10.5px;color:#94a3b8;">vs ${prevLabel}</span>`;
+    }
+    const positivo = invertido ? pct < 0 : pct > 0; // despesas: subir é ruim
+    const cor  = positivo ? '#10b981' : '#ef4444';
+    const seta = pct > 0 ? '↑' : '↓';
+    return `<span style="font-size:11.5px;font-weight:700;color:${cor};">${seta} ${fmtStr}%</span> <span style="font-size:10.5px;color:#94a3b8;">vs ${prevLabel}</span>`;
+  }
+
+  const totVagas  = agenda.reduce((s, a) => s + a.vagas, 0);
+  const totOcup   = agenda.reduce((s, a) => s + a.ocupadas, 0);
+  const ocup      = totVagas ? (totOcup / totVagas) * 100 : 0;
+  const noshow    = agenda.reduce((s, a) => s + a.noshow, 0);
   const noshowPct = totVagas ? (noshow / totVagas) * 100 : 0;
 
   const atend = crm.filter(c => c.status === 'Atendeu').length;
-  const conv = crm.length ? (atend / crm.length) * 100 : 0;
+  const conv  = crm.length ? (atend / crm.length) * 100 : 0;
 
+  // ===== Popula KPIs =====
   setText('kpi-fat', BRL(fat));
-  setText('kpi-fat-sub', fat ? `${pacs.filter(p => p.statusPgto === 'Pago').length} pagos` : 'Sem lançamentos');
+
+  // Trend faturamento: variação real vs mês anterior (nunca "↑ 0%")
+  const trendEl = document.getElementById('kpi-fat-trend');
+  if (trendEl) trendEl.innerHTML = varHtml(fat, prevFat);
+
+  // Sub-linha faturamento: pagos + inadimplência (se houver)
+  const nPagos = pacs.filter(p => p.statusPgto === 'Pago').length;
+  let fatSub = fat ? `${nPagos} pago${nPagos !== 1 ? 's' : ''}` : 'Sem lançamentos';
+  if (inadPct > 0) fatSub += ` · <span style="color:#f59e0b;font-weight:600;">${inadPct.toFixed(1)}% inadimp.</span>`;
+  const fatSubEl = document.getElementById('kpi-fat-sub');
+  if (fatSubEl) fatSubEl.innerHTML = fatSub;
+
   setText('kpi-lucro', BRL(lucro));
   setText('kpi-margem', `Margem: ${PCT(margem)}`);
   setText('kpi-pac', pacs.length);
   setText('kpi-ticket', `Ticket médio: ${BRL(ticket)}`);
+
+  // Sub-linha pacientes: variação real
+  const pacSubEl = document.getElementById('kpi-pac-sub');
+  if (pacSubEl) pacSubEl.innerHTML = varHtml(pacs.length, prevPacN);
+
   setText('kpi-ocup', PCT(ocup));
   const bar = document.getElementById('kpi-ocup-bar');
   if (bar) bar.style.width = Math.min(ocup, 100) + '%';
+  // Cor dinâmica da barra: verde >75%, amarelo >50%, vermelho <50%
+  if (bar) bar.style.background = ocup >= 75 ? 'linear-gradient(90deg,#10b981,#34d399)' : ocup >= 50 ? 'linear-gradient(90deg,#f59e0b,#fcd34d)' : 'linear-gradient(90deg,#ef4444,#fca5a5)';
+  // Cor dinâmica: valor + ícone (verde ≥75%, âmbar ≥50%, vermelho <50%)
+  const ocupEl   = document.getElementById('kpi-ocup');
+  const ocupIcon = document.getElementById('kpi-ocup-icon');
+  if (ocupEl)   ocupEl.style.color       = ocup >= 75 ? '#10b981' : ocup >= 50 ? '#f59e0b' : '#ef4444';
+  if (ocupIcon) ocupIcon.style.background = ocup >= 75 ? '#d1fae5' : ocup >= 50 ? '#fef3c7' : '#fee2e2';
   setText('kpi-noshow', `No-show: ${PCT(noshowPct)}`);
+
+  // Lucro Líquido: trend vs mês anterior
+  const lucroTrendEl = document.getElementById('kpi-lucro-trend');
+  if (lucroTrendEl) lucroTrendEl.innerHTML = varHtml(lucro, prevLucro);
+
+  // Despesas: variação real (invertido=true: subir é ruim)
   setText('kpi-desp', BRL(totalDesp));
-  setText('kpi-inad', PCT(inadPct));
-  setText('kpi-inad-val', `${BRL(inad)} em aberto`);
+  const despSubEl = document.getElementById('kpi-desp-sub');
+  if (despSubEl) despSubEl.innerHTML = varHtml(totalDesp, prevDesp, true);
+
+  // Inadimplência: exibida no sub-texto do card de Faturamento (kpi-fat-sub acima)
+
   setText('kpi-conv', PCT(conv));
   setText('kpi-conv-sub', `${atend} de ${crm.length} contatos`);
+
+  // Ocupação: trend vs mês anterior
+  const ocupTrendEl = document.getElementById('kpi-ocup-trend');
+  if (ocupTrendEl) ocupTrendEl.innerHTML = varHtml(ocup, prevOcup);
+
+  // Conversão CRM: trend vs mês anterior
+  const convTrendEl = document.getElementById('kpi-conv-trend');
+  if (convTrendEl) convTrendEl.innerHTML = varHtml(conv, prevConv);
 
   // Breakdown por procedimento
   renderProcBreakdown(pacs);
@@ -2898,6 +3408,17 @@ function renderDashboard(mes = '2026-05') {
   renderMarketing(mes);
   // Pacote 1 — Inteligência financeira (projeção/DRE/runway)
   renderFinanceiro(mes);
+  // Timestamp de última atualização
+  const tsEl = document.getElementById('dash-last-update');
+  if (tsEl) {
+    const agora = new Date();
+    const hhmm  = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    tsEl.textContent = `Atualizado às ${hhmm}`;
+  }
+
+  // Sprint 4 — Alertas proativos automáticos (sem IA)
+  renderAlertasProativos({ fat, totalDesp, lucro, ocup, noshowPct, inadPct, inad, conv, crm, pacs, mes });
+
   // Pacote 5 — Insights Sofia (carrega do cache; só chama API se botão for clicado)
   const cacheInsights = carregarInsightsCache();
   if (cacheInsights) renderInsightCards(cacheInsights.insights, cacheInsights.ts);
@@ -2973,6 +3494,134 @@ function updateDashboard(val) {
   renderDashboard(val);
 }
 
+// ====================== SPRINT 4: ALERTAS PROATIVOS ======================
+function renderAlertasProativos({ fat, totalDesp, lucro, ocup, noshowPct, inadPct, inad, conv, crm, pacs, mes }) {
+  const container = document.getElementById('alertas-proativos-cards');
+  if (!container) return;
+
+  const metas  = DB.getObj('metas', { fat: 0, pac: 0, desp: 0 });
+  const alertas = [];
+
+  // ── 1. No-show alto (≥ 20%) ──
+  if (noshowPct >= 20) {
+    alertas.push({
+      tipo: 'danger',
+      icone: '📵',
+      titulo: `No-show alto: ${PCT(noshowPct)} este mês`,
+      descricao: 'Taxa de ausência acima de 20%. Ative lembretes automáticos por WhatsApp 24h antes das consultas.'
+    });
+  }
+
+  // ── 2. Ocupação baixa (> 0% agenda registrada, mas < 60%) ──
+  if (ocup > 0 && ocup < 60) {
+    const cor = ocup < 40 ? 'danger' : 'warning';
+    alertas.push({
+      tipo: cor,
+      icone: '📅',
+      titulo: `Ocupação baixa: ${PCT(ocup)}`,
+      descricao: ocup < 40
+        ? 'Agenda muito subutilizada. Verifique horários disponíveis e acione reativação de pacientes.'
+        : 'Agenda abaixo de 60%. Considere abrir encaixes ou contatar pacientes inativos.'
+    });
+  }
+
+  // ── 3. Meta de faturamento em risco ──
+  if (metas.fat > 0 && fat > 0) {
+    const [anoN, mesN] = mes.split('-').map(Number);
+    const hoje    = new Date();
+    // Usar data do mês filtrado, não necessariamente hoje
+    const diasTotal   = new Date(anoN, mesN, 0).getDate();
+    const diaRef      = (anoN === hoje.getFullYear() && mesN === hoje.getMonth() + 1)
+                          ? hoje.getDate()
+                          : diasTotal; // mês passado = completo
+    const progressoReal    = fat / metas.fat * 100;
+    const progressoEsperado = (diaRef / diasTotal) * 100;
+    if (diaRef >= 10 && progressoReal < progressoEsperado * 0.70) {
+      alertas.push({
+        tipo: 'danger',
+        icone: '🎯',
+        titulo: `Meta em risco: ${progressoReal.toFixed(0)}% atingido`,
+        descricao: `${BRL(fat)} faturado de ${BRL(metas.fat)} meta. Ritmo atual está 30%+ abaixo do necessário para bater a meta.`
+      });
+    }
+  }
+
+  // ── 4. Inadimplência alta (≥ 15%) ──
+  if (inadPct >= 15) {
+    alertas.push({
+      tipo: 'warning',
+      icone: '💸',
+      titulo: `Inadimplência: ${PCT(inadPct)} (${BRL(inad)})`,
+      descricao: `Pagamentos pendentes acima de 15% do faturamento. Entre em contato com os pacientes devedores antes do fechamento do mês.`
+    });
+  }
+
+  // ── 5. Pacientes sumidos (última visita > 6 meses atrás) ──
+  const todos = DB.get('pacientes');
+  const seisMesesAtras = new Date();
+  seisMesesAtras.setMonth(seisMesesAtras.getMonth() - 6);
+  const ultimaVisita = {};
+  todos.forEach(p => {
+    if (!p.nome) return;
+    const d = new Date(p.data);
+    if (!ultimaVisita[p.nome] || d > ultimaVisita[p.nome]) ultimaVisita[p.nome] = d;
+  });
+  const sumidos = Object.entries(ultimaVisita)
+    .filter(([, d]) => d < seisMesesAtras)
+    .map(([nome]) => nome);
+  if (sumidos.length > 0) {
+    const preview = sumidos.slice(0, 3).join(', ') + (sumidos.length > 3 ? ` e mais ${sumidos.length - 3}` : '');
+    alertas.push({
+      tipo: 'info',
+      icone: '👤',
+      titulo: `${sumidos.length} paciente${sumidos.length > 1 ? 's' : ''} sem retorno há +6 meses`,
+      descricao: `${preview}. Oportunidade de reativação: um contato proativo pode recuperar esses pacientes.`
+    });
+  }
+
+  // ── 6. Conversão CRM baixa (< 40% com mínimo 5 contatos) ──
+  if (crm.length >= 5 && conv < 40) {
+    const atend = crm.filter(c => c.status === 'Atendeu').length;
+    alertas.push({
+      tipo: 'warning',
+      icone: '📊',
+      titulo: `Conversão CRM baixa: ${PCT(conv)}`,
+      descricao: `Apenas ${atend} de ${crm.length} contatos converteram em consulta. Revise o processo de follow-up no funil.`
+    });
+  }
+
+  // ── Renderiza ──
+  if (alertas.length === 0) {
+    container.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:#f0fdf4;border-radius:10px;border:1px solid #bbf7d0;">
+        <span style="font-size:22px;">✅</span>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#166534;">Tudo sob controle</div>
+          <div style="font-size:12px;color:#15803d;margin-top:2px;">Nenhum alerta crítico identificado para este período.</div>
+        </div>
+      </div>`;
+    return;
+  }
+
+  const cores = {
+    danger:  { bg: '#fff1f2', border: '#ef4444', titleColor: '#9f1239', bodyBorder: 'rgba(239,68,68,0.15)' },
+    warning: { bg: '#fffbeb', border: '#f59e0b', titleColor: '#78350f', bodyBorder: 'rgba(245,158,11,0.15)' },
+    info:    { bg: '#eff6ff', border: '#3b82f6', titleColor: '#1e3a8a', bodyBorder: 'rgba(59,130,246,0.15)' }
+  };
+
+  container.innerHTML = alertas.map(a => {
+    const c = cores[a.tipo] || cores.info;
+    return `
+      <div style="display:flex;align-items:flex-start;gap:12px;padding:14px 18px;background:${c.bg};border-radius:10px;border:1px solid ${c.bodyBorder};border-left:3px solid ${c.border};">
+        <span style="font-size:20px;flex-shrink:0;line-height:1.4;">${a.icone}</span>
+        <div style="flex:1;">
+          <div style="font-size:13px;font-weight:700;color:${c.titleColor};">${a.titulo}</div>
+          <div style="font-size:12px;color:#64748b;margin-top:3px;line-height:1.5;">${a.descricao}</div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
 // ====================== RELATÓRIO ======================
 // Taxas estimadas de mercado (Brasil 2026) — usadas pra calcular "receita perdida em taxas"
 const TAXA_PAGAMENTO = {
@@ -3040,7 +3689,7 @@ function gerarPDF(mes) {
   const agora    = new Date().toLocaleString('pt-BR');
 
   const pct = (v) => isFinite(v) ? v.toFixed(1) + '%' : '—';
-  const brl = (v) => 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const brl = BRL; // formatação global: sem centavos, com separador de milhar
 
   const html = `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -3401,12 +4050,57 @@ function renderRelatorio(mes) {
 function updateRelatorio(val) { renderRelatorio(val); }
 
 // ====================== METAS ======================
+function atualizarPreviewMetas() {
+  const chaves = ['1ª vez','Consulta','Retorno','Domiciliar','Hospitalar','Telemedicina'];
+  const ids    = ['1vez','consulta','retorno','domiciliar','hospitalar','telemedicina'];
+  let totalFat = 0, totalPac = 0;
+
+  chaves.forEach((tipo, i) => {
+    const qtd = parseInt(document.getElementById(`mm-${ids[i]}-qtd`)?.value) || 0;
+    const val = parseFloat(document.getElementById(`mm-${ids[i]}-val`)?.value) || 0;
+    const subtotal = qtd * val;
+    totalFat += subtotal;
+    totalPac += qtd;
+    const el = document.getElementById(`mm-${ids[i]}-total`);
+    if (el) el.textContent = subtotal > 0 ? BRL(subtotal) : '—';
+  });
+
+  const fatEl = document.getElementById('mm-total-fat');
+  const pacEl = document.getElementById('mm-total-pac-label');
+  if (fatEl) fatEl.textContent = BRL(totalFat);
+  if (pacEl) pacEl.textContent = `${totalPac} paciente${totalPac !== 1 ? 's' : ''}/mês`;
+}
+
 function saveMetas(e) {
   e.preventDefault();
   const fd = new FormData(e.target);
-  DB.setObj('metas', { fat: parseFloat(fd.get('metaFat')) || 0, pac: parseInt(fd.get('metaPac')) || 0, desp: parseFloat(fd.get('metaDesp')) || 0 });
+  const chaves = ['1ª vez','Consulta','Retorno','Domiciliar','Hospitalar','Telemedicina'];
+  const ids    = ['1vez','consulta','retorno','domiciliar','hospitalar','telemedicina'];
+
+  // Lê qtd e valor por procedimento
+  const mp = {}, mpVal = {};
+  let totalFat = 0, totalPac = 0;
+  chaves.forEach((tipo, i) => {
+    const qtd = parseInt(fd.get(`meta_${ids[i]}`)) || 0;
+    const val = parseFloat(fd.get(`valor_${ids[i]}`)) || 0;
+    if (qtd > 0) { mp[tipo] = qtd; mpVal[tipo] = val; }
+    totalFat += qtd * val;
+    totalPac += qtd;
+  });
+
+  // Salva metas integradas
+  DB.setObj('metas', {
+    fat:  totalFat,
+    pac:  totalPac,
+    desp: parseFloat(fd.get('metaDesp')) || 0
+  });
+  DB.setObj('metas_proc', mp);
+  DB.setObj('metas_proc_valor', mpVal);
+
   closeModal('modal-metas');
   renderMetas();
+  renderMetasProc();
+  toast('✅ Metas salvas!');
 }
 
 function renderMetas() {
@@ -3492,15 +4186,15 @@ function renderMetasProc() {
   if (!el) return;
 
   const mp = DB.getObj('metas_proc', {});
+  const allPacs = DB.get('pacientes');
   const mesAtual = new Date().toISOString().substring(0, 7);
-  const pacs = DB.get('pacientes').filter(p => getMes(p.data) === mesAtual);
 
   const corPorTipo = {
-    '1ª vez':     { bg:'#dbeafe', cor:'#1d4ed8', icon:'🆕' },
-    'Consulta':   { bg:'#d1fae5', cor:'#065f46', icon:'🩺' },
-    'Retorno':    { bg:'#ede9fe', cor:'#5b21b6', icon:'🔄' },
-    'Domiciliar': { bg:'#fef3c7', cor:'#92400e', icon:'🏠' },
-    'Hospitalar': { bg:'#fee2e2', cor:'#991b1b', icon:'🏥' },
+    '1ª vez':      { bg:'#dbeafe', cor:'#1d4ed8', icon:'🆕' },
+    'Consulta':    { bg:'#d1fae5', cor:'#065f46', icon:'🩺' },
+    'Retorno':     { bg:'#ede9fe', cor:'#5b21b6', icon:'🔄' },
+    'Domiciliar':  { bg:'#fef3c7', cor:'#92400e', icon:'🏠' },
+    'Hospitalar':  { bg:'#fee2e2', cor:'#991b1b', icon:'🏥' },
     'Telemedicina':{ bg:'#e0f2fe', cor:'#0c4a6e', icon:'💻' },
   };
 
@@ -3508,35 +4202,84 @@ function renderMetasProc() {
   const temMeta = tipos.some(t => (mp[t] || 0) > 0);
 
   if (!temMeta) {
-    el.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#94a3b8;font-size:13px;padding:32px;">Clique em ⚙️ Editar para definir metas por procedimento</div>';
+    el.innerHTML = '<div style="text-align:center;color:#94a3b8;font-size:13px;padding:32px;">Clique em ⚙️ Editar para definir metas por procedimento</div>';
+    // Preenche modal
+    window._openMetasProc = () => {
+      tipos.forEach(t => {
+        const key = t.replace('ª','').replace(' ','_').toLowerCase();
+        const id = `mp-${key === '1_vez' ? '1vez' : key}`;
+        const input = document.getElementById(id);
+        if (input) input.value = mp[t] || '';
+      });
+    };
     return;
   }
 
-  el.innerHTML = tipos.filter(t => (mp[t] || 0) > 0).map(tipo => {
-    const meta = mp[tipo] || 0;
-    const real = pacs.filter(p => (p.tipo||'Consulta') === tipo).length;
-    const pct  = meta ? Math.min((real / meta) * 100, 100) : 0;
-    const c    = corPorTipo[tipo];
-    const cor  = real >= meta ? '#10b981' : real >= meta * 0.7 ? '#f59e0b' : c.cor;
-    return `
-      <div class="kpi-card" style="padding:16px 18px;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-          <div style="width:30px;height:30px;background:${c.bg};border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;">${c.icon}</div>
-          <div style="font-size:12px;font-weight:600;color:#374151;">${tipo}</div>
-        </div>
-        <div style="display:flex;align-items:baseline;gap:4px;margin-bottom:4px;">
-          <span style="font-size:28px;font-weight:800;color:${cor};letter-spacing:-1px;">${real}</span>
-          <span style="font-size:13px;color:#94a3b8;">/ ${meta}</span>
-        </div>
-        <div style="height:4px;background:#f1f5f9;border-radius:999px;margin-bottom:6px;overflow:hidden;">
-          <div style="height:100%;width:${pct}%;background:${cor};border-radius:999px;transition:width 0.5s;"></div>
-        </div>
-        <div style="font-size:11px;color:${cor};font-weight:600;">${Math.round(pct)}% da meta · mês atual</div>
-      </div>`;
-  }).join('');
+  const mesesNomes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  const tiposAtivos = tipos.filter(t => (mp[t] || 0) > 0);
+
+  // Monta colunas: só meses que têm dado OU até o mês atual
+  const [anoAtual, mesIdxAtual] = mesAtual.split('-').map(Number);
+  const colunas = Array.from({ length: mesIdxAtual }, (_, i) => {
+    const mes = `${anoAtual}-${String(i + 1).padStart(2, '0')}`;
+    return { mes, label: mesesNomes[i], isAtual: mes === mesAtual };
+  });
+
+  el.innerHTML = `
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+        <thead>
+          <tr style="border-bottom:2px solid #f1f5f9;">
+            <th style="text-align:left;padding:9px 12px;color:#64748b;font-weight:600;font-size:11.5px;min-width:140px;">Procedimento</th>
+            <th style="text-align:center;padding:9px 12px;color:#64748b;font-weight:600;font-size:11.5px;">Meta/mês</th>
+            ${colunas.map(c => `<th style="text-align:center;padding:9px 10px;color:${c.isAtual ? '#0f172a' : '#64748b'};font-weight:${c.isAtual ? '700' : '600'};font-size:11.5px;${c.isAtual ? 'background:#f0fdf4;' : ''}">${c.label}${c.isAtual ? ' ▶' : ''}</th>`).join('')}
+            <th style="text-align:center;padding:9px 12px;color:#64748b;font-weight:600;font-size:11.5px;">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tiposAtivos.map(tipo => {
+            const meta = mp[tipo] || 0;
+            const c = corPorTipo[tipo];
+            const totAnual = allPacs.filter(p => getMes(p.data).startsWith(String(anoAtual)) && (p.tipo||'Consulta') === tipo).length;
+            return `
+              <tr style="border-bottom:1px solid #f8fafc;">
+                <td style="padding:9px 12px;">
+                  <div style="display:flex;align-items:center;gap:7px;">
+                    <div style="width:22px;height:22px;background:${c.bg};border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;">${c.icon}</div>
+                    <span style="font-weight:600;color:#0f172a;">${tipo}</span>
+                  </div>
+                </td>
+                <td style="padding:9px 12px;text-align:center;">
+                  <span style="background:${c.bg};color:${c.cor};padding:2px 9px;border-radius:999px;font-size:12px;font-weight:700;">${meta}</span>
+                </td>
+                ${colunas.map(col => {
+                  const real = allPacs.filter(p => getMes(p.data) === col.mes && (p.tipo||'Consulta') === tipo).length;
+                  const pct = meta ? (real / meta) * 100 : 0;
+                  const cor = real === 0 ? '#d1d5db' : real >= meta ? '#10b981' : real >= meta * 0.7 ? '#f59e0b' : '#ef4444';
+                  const bg  = col.isAtual ? '#f0fdf4' : '';
+                  const label = real === 0 ? '<span style="color:#d1d5db;">—</span>' : `<strong style="color:${cor};">${real}</strong><span style="color:#94a3b8;font-size:10.5px;"> /${meta}</span>`;
+                  return `<td style="padding:9px 10px;text-align:center;${bg ? 'background:' + bg + ';' : ''}">${label}</td>`;
+                }).join('')}
+                <td style="padding:9px 12px;text-align:center;font-weight:700;color:#0f172a;">${totAnual}</td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+        <tfoot>
+          <tr style="border-top:2px solid #e2e8f0;background:#f8fafc;">
+            <td style="padding:9px 12px;font-weight:700;color:#0f172a;" colspan="2">Total consultas</td>
+            ${colunas.map(col => {
+              const total = allPacs.filter(p => getMes(p.data) === col.mes).length;
+              const bg = col.isAtual ? 'background:#f0fdf4;' : '';
+              return `<td style="padding:9px 10px;text-align:center;font-weight:700;color:#0f172a;${bg}">${total || '—'}</td>`;
+            }).join('')}
+            <td style="padding:9px 12px;text-align:center;font-weight:800;color:#10b981;">${allPacs.filter(p => getMes(p.data).startsWith(String(anoAtual))).length}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>`;
 
   // Preenche campos do modal ao abrir
-  const openMetasProc = () => {
+  window._openMetasProc = () => {
     tipos.forEach(t => {
       const key = t.replace('ª','').replace(' ','_').toLowerCase();
       const id = `mp-${key === '1_vez' ? '1vez' : key}`;
@@ -3544,7 +4287,6 @@ function renderMetasProc() {
       if (input) input.value = mp[t] || '';
     });
   };
-  window._openMetasProc = openMetasProc;
 }
 
 // ====================== FLUXO DE CAIXA ======================
@@ -4632,6 +5374,403 @@ function limparTodosDados() {
   setTimeout(() => location.reload(), 2500);
 }
 
+// ====================== IMPORTAR PLANILHA ======================
+
+// Sinônimos de colunas por campo — cobre iClinic, Doctoralia, Nuvem Saúde,
+// MedKey, Tasy, MV, Nexodata, Dr. Consulta, Amplimed, sistemas em inglês, etc.
+const IMP_CAMPOS = [
+  {
+    key:'nome', label:'Nome do paciente', req:true,
+    syns:[
+      'paciente','nome','patient','name','nome completo','nome do paciente',
+      'nome paciente','patient name','full name','nome_paciente','paciente nome',
+      'nome do cliente','cliente','beneficiario','beneficiário','titular',
+    ],
+  },
+  {
+    key:'data', label:'Data da consulta', req:true,
+    syns:[
+      'data','date','data da consulta','data do atendimento','data consulta',
+      'dt consulta','dt. consulta','appointment date','data agendamento',
+      'data visita','data_consulta','data_atendimento','data do agendamento',
+      'data marcada','dt atendimento','dt. atendimento','data realizacao',
+      'data realização','data procedimento','data do procedimento',
+      'inicio','início','start','start date','appointment','scheduled date',
+    ],
+  },
+  {
+    key:'tipo', label:'Tipo de consulta', req:false,
+    syns:[
+      'tipo','type','procedimento','procedure','tipo de consulta',
+      'tipo de atendimento','tipo atendimento','classificação','classificacao',
+      'especialidade','specialty','motivo','motivo da consulta','servico',
+      'serviço','service','appointment type','visit type','modalidade',
+      'categoria','categoria do atendimento','tipo_consulta',
+    ],
+  },
+  {
+    key:'valor', label:'Valor (R$)', req:false,
+    syns:[
+      'valor','value','preço','preco','honorarios','honorários','fee',
+      'valor pago','valor total','valor da consulta','total','amount',
+      'total pago','preco consulta','preço consulta','valor consulta',
+      'valor cobrado','valor recebido','receita','preco do atendimento',
+      'preço do atendimento','valor_consulta','custo','cost','price',
+    ],
+  },
+  {
+    key:'status', label:'Status pagamento', req:false,
+    syns:[
+      'status','situacao','situação','pagamento','pago','payment',
+      'status financeiro','financeiro','situação pagamento','status pagamento',
+      'status_pagamento','situacao_financeira','quitado','liquidado',
+      'status do pagamento','payment status','financial status','recebido',
+      'cobrança','cobranca','status cobrança',
+    ],
+  },
+  {
+    key:'whatsapp', label:'WhatsApp / Telefone', req:false,
+    syns:[
+      'celular','whatsapp','telefone','fone','tel','phone','mobile',
+      'contato','telefone celular','ddd + celular','cel','telefone1',
+      'telefone 1','tel1','tel celular','fone celular','phone number',
+      'mobile number','numero celular','número celular','celular_paciente',
+      'telefone_paciente','contact','numero','número',
+    ],
+  },
+];
+
+let _impRawData = [];
+let _impHeaders = [];
+
+/* ── Abre modal e reseta estado ── */
+function impAbrir() {
+  _impRawData = [];
+  _impHeaders = [];
+  impGoStep(1);
+  openModal('modal-imp-planilha');
+}
+
+/* ── Troca de step com animação do stepper ── */
+function impGoStep(n) {
+  [1, 2, 3].forEach(i => {
+    const stepEl = document.getElementById(`imp-step-${i}`);
+    if (stepEl) stepEl.classList.toggle('active', i === n);
+
+    const dot = document.getElementById(`imp-dot-${i}`);
+    if (dot) {
+      dot.classList.remove('active','done');
+      if (i < n)  dot.classList.add('done');
+      if (i === n) dot.classList.add('active');
+    }
+
+    const line = document.getElementById(`imp-line-${i}`);
+    if (line) line.classList.toggle('done', i < n);
+  });
+}
+
+/* ── Detecta mapeamento automático ── */
+function impDetectMapping(headers) {
+  const norm = s => s.toLowerCase().trim().replace(/[^\w\sáàâãéèêíîóôõúûçÁÀÂÃÉÈÊÍÎÓÔÕÚÛÇ]/g,'').replace(/\s+/g,' ').trim();
+  const mapping = {};
+  IMP_CAMPOS.forEach(campo => {
+    const found = headers.find(h => campo.syns.includes(norm(h)));
+    mapping[campo.key] = found || '';
+  });
+  return mapping;
+}
+
+/* ── Parser CSV inteligente (vírgula ou ponto-e-vírgula, aspas) ── */
+function impParseCSV(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) return null;
+
+  const first = lines[0];
+  const delim = (first.match(/;/g)||[]).length >= (first.match(/,/g)||[]).length ? ';' : ',';
+
+  const parseLine = line => {
+    const res = []; let inQ = false; let cur = '';
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === delim && !inQ) { res.push(cur.trim()); cur = ''; }
+      else { cur += ch; }
+    }
+    res.push(cur.trim());
+    return res;
+  };
+
+  const headers = parseLine(lines[0]);
+  const rows = lines.slice(1)
+    .map(l => { const v = parseLine(l); const o = {}; headers.forEach((h,i) => o[h] = v[i]||''); return o; })
+    .filter(r => Object.values(r).some(v => v));
+
+  return { headers, rows };
+}
+
+/* ── Parser XLSX via SheetJS ── */
+function impParseXLSX(buffer) {
+  if (!window.XLSX) { toast('⚠️ Biblioteca XLSX não carregou. Recarregue a página.', 4000); return null; }
+  const wb = XLSX.read(buffer, { type:'array', cellDates:true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { defval:'' });
+  const headers = rows.length ? Object.keys(rows[0]) : [];
+  return { headers, rows };
+}
+
+/* ── Recebe arquivo (input ou drop) ── */
+function impHandleFile(file) {
+  if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (!['csv','xlsx','xls'].includes(ext)) {
+    toast('⚠️ Use um arquivo .xlsx, .xls ou .csv', 3000); return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    let parsed;
+    try {
+      if (ext === 'csv') {
+        // Tenta UTF-8; se tiver caracteres estranhos, tenta re-ler como latin1
+        parsed = impParseCSV(e.target.result);
+      } else {
+        parsed = impParseXLSX(new Uint8Array(e.target.result));
+      }
+    } catch(err) {
+      toast('❌ Erro ao ler arquivo: ' + err.message, 4000); return;
+    }
+
+    if (!parsed || !parsed.rows.length) {
+      toast('⚠️ Arquivo vazio ou sem dados reconhecidos', 3000); return;
+    }
+
+    _impHeaders = parsed.headers;
+    _impRawData = parsed.rows;
+    impBuildStep2(file.name);
+    impGoStep(2);
+  };
+
+  if (ext === 'csv') reader.readAsText(file, 'UTF-8');
+  else               reader.readAsArrayBuffer(file);
+}
+
+/* ── Constrói o Step 2 (mapeamento + prévia) ── */
+function impBuildStep2(filename) {
+  const total   = _impRawData.length;
+  const mapping = impDetectMapping(_impHeaders);
+  const detected = IMP_CAMPOS.filter(c => mapping[c.key]).length;
+
+  // Info bar
+  document.getElementById('imp-file-info').innerHTML = `
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px 18px;display:flex;align-items:center;gap:12px;margin-bottom:22px;">
+      <span style="font-size:28px;">📄</span>
+      <div style="flex:1;">
+        <div style="font-size:13.5px;font-weight:700;color:#0f172a;">${filename}</div>
+        <div style="font-size:12px;color:#059669;margin-top:2px;">${total} linhas · ${_impHeaders.length} colunas · ${detected} campos detectados automaticamente</div>
+      </div>
+    </div>`;
+
+  // Mapping table
+  const rowsHtml = IMP_CAMPOS.map(campo => {
+    const sel = mapping[campo.key];
+    const opts = `<option value="">— ignorar —</option>` +
+      _impHeaders.map(h => `<option value="${h.replace(/"/g,'&quot;')}"${h === sel ? ' selected' : ''}>${h}</option>`).join('');
+    return `
+      <tr>
+        <td style="font-size:13px;font-weight:${campo.req?'600':'400'};color:#0f172a;">
+          ${campo.label}${campo.req ? ' <span style="color:#ef4444;font-size:11px;">obrigatório</span>' : ''}
+        </td>
+        <td>
+          <select id="imp-map-${campo.key}" class="select" style="width:100%;font-size:12.5px;" onchange="impRefreshPreview()">
+            ${opts}
+          </select>
+        </td>
+        <td style="font-size:11.5px;white-space:nowrap;color:${sel?'#059669':'#94a3b8'};" id="imp-map-ok-${campo.key}">
+          ${sel ? '✓ auto' : campo.req ? '⚠️ selecione' : 'opcional'}
+        </td>
+      </tr>`;
+  }).join('');
+
+  document.getElementById('imp-mapping-area').innerHTML = `
+    <div style="margin-bottom:20px;">
+      <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:4px;">Mapeamento de colunas</div>
+      <div style="font-size:12.5px;color:#64748b;margin-bottom:14px;">O app detectou os campos automaticamente. Ajuste se necessário.</div>
+      <table class="imp-map-table">
+        <thead><tr><th>Campo do app</th><th>Coluna da planilha</th><th></th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>`;
+
+  impRefreshPreview();
+
+  const btn = document.getElementById('imp-btn-executar');
+  if (btn) btn.textContent = `Importar ${total} registros →`;
+}
+
+/* ── Lê mapeamento atual dos selects ── */
+function impGetMapping() {
+  const m = {};
+  IMP_CAMPOS.forEach(c => { const el = document.getElementById(`imp-map-${c.key}`); m[c.key] = el ? el.value : ''; });
+  return m;
+}
+
+/* ── Atualiza prévia (chamada ao mudar qualquer select) ── */
+function impRefreshPreview() {
+  const m = impGetMapping();
+
+  // Atualiza indicadores de status
+  IMP_CAMPOS.forEach(c => {
+    const el = document.getElementById(`imp-map-ok-${c.key}`);
+    if (!el) return;
+    if (m[c.key]) { el.textContent = '✓'; el.style.color = '#059669'; }
+    else { el.textContent = c.req ? '⚠️ selecione' : 'opcional'; el.style.color = c.req ? '#f59e0b' : '#94a3b8'; }
+  });
+
+  const cols = IMP_CAMPOS.filter(c => m[c.key]);
+  const prev = _impRawData.slice(0, 6);
+
+  if (!cols.length || !prev.length) {
+    document.getElementById('imp-preview-area').innerHTML = ''; return;
+  }
+
+  const thead = cols.map(c =>
+    `<th style="padding:7px 10px;font-size:11px;color:#64748b;font-weight:600;text-align:left;border-bottom:1px solid #e2e8f0;white-space:nowrap;">${c.label}</th>`
+  ).join('');
+
+  const tbody = prev.map(row =>
+    `<tr>${cols.map(c => `<td style="padding:7px 10px;font-size:12px;color:#0f172a;border-bottom:1px solid #f1f5f9;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${row[m[c.key]] || '—'}</td>`).join('')}</tr>`
+  ).join('');
+
+  document.getElementById('imp-preview-area').innerHTML = `
+    <div style="margin-bottom:20px;">
+      <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:10px;">Prévia (6 primeiras linhas)</div>
+      <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:8px;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead><tr style="background:#f8fafc;">${thead}</tr></thead>
+          <tbody>${tbody}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+/* ── Normaliza data (DD/MM/YYYY, serial Excel, YYYY-MM-DD) ── */
+function impNormDate(s) {
+  if (!s) return '';
+  s = String(s).trim();
+  // Date object (SheetJS com cellDates:true)
+  if (s instanceof Date) return s.toISOString().slice(0,10);
+  // Excel serial
+  if (/^\d{5}$/.test(s)) {
+    const d = new Date(Date.UTC(1899,11,30) + parseInt(s)*86400000);
+    return d.toISOString().slice(0,10);
+  }
+  // DD/MM/YYYY ou DD-MM-YYYY
+  const m1 = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (m1) return `${m1[3]}-${m1[2].padStart(2,'0')}-${m1[1].padStart(2,'0')}`;
+  // YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  return '';
+}
+
+/* ── Normaliza valor monetário ── */
+function impNormValor(s) {
+  if (!s && s !== 0) return 0;
+  if (typeof s === 'number') return Math.round(s * 100) / 100;
+  const n = parseFloat(String(s).replace(/[R$\s\.]/g,'').replace(',','.'));
+  return isNaN(n) ? 0 : Math.round(n * 100) / 100;
+}
+
+/* ── Normaliza status de pagamento ── */
+function impNormStatus(s) {
+  const lc = (s||'').toLowerCase();
+  if (/pago|recebi|paid|quit|ok|sim|yes/.test(lc)) return 'Pago';
+  if (/parcel/.test(lc)) return 'Parcelado';
+  return 'Pendente';
+}
+
+/* ── Normaliza tipo de consulta ── */
+function impNormTipo(s) {
+  const lc = (s||'').toLowerCase();
+  if (/1[aª°]?\s*vez|primeira|first|new|inicial/.test(lc)) return '1ª vez';
+  if (/retorno|return|follow|sequencia|continuação/.test(lc)) return 'Retorno';
+  if (/domicil/.test(lc)) return 'Domiciliar';
+  if (/telemed|online|remota|virtual/.test(lc)) return 'Telemedicina';
+  return s ? s : 'Consulta';
+}
+
+/* ── Executa a importação ── */
+function impExecute() {
+  const m = impGetMapping();
+
+  if (!m.nome) { toast('⚠️ Selecione a coluna com o nome do paciente', 3000); return; }
+  if (!m.data) { toast('⚠️ Selecione a coluna com a data da consulta',  3000); return; }
+
+  const existentes = DB.get('pacientes');
+
+  // Índice de chaves existentes (nome+data) para dedup
+  const existSet = new Set(existentes.map(p => `${p.nome.toLowerCase().trim()}|${p.data}`));
+
+  let nImportados = 0, nPulados = 0, nSemNome = 0, nSemData = 0;
+  const novos = [];
+
+  _impRawData.forEach(row => {
+    const nome = String(row[m.nome] || '').trim();
+    if (!nome) { nSemNome++; return; }
+
+    const data = impNormDate(row[m.data] || '');
+    if (!data) { nSemData++; return; }
+
+    const key = `${nome.toLowerCase()}|${data}`;
+    if (existSet.has(key)) { nPulados++; return; }
+
+    existSet.add(key); // evita dups dentro do próprio arquivo
+    novos.push({
+      nome,
+      data,
+      tipo:     impNormTipo(m.tipo     ? row[m.tipo]     : ''),
+      valor:    impNormValor(m.valor   ? row[m.valor]   : 0),
+      status:   impNormStatus(m.status ? row[m.status]  : ''),
+      whatsapp: m.whatsapp ? String(row[m.whatsapp]||'').replace(/\D/g,'').slice(-11) : '',
+      obs:      'Importado de planilha',
+    });
+    nImportados++;
+  });
+
+  if (novos.length) {
+    DB.set('pacientes', [...existentes, ...novos]);
+    BACKUP_KEYS.includes('pacientes') || null;
+  }
+
+  // Monta tela de resultado
+  const cards = [
+    { n: nImportados, label: 'consultas importadas',  bg: '#d1fae5', cor: '#059669', cort: '#065f46' },
+    { n: nPulados,    label: 'duplicatas ignoradas',   bg: '#fef3c7', cor: '#d97706', cort: '#92400e' },
+    ...(nSemNome || nSemData ? [{ n: nSemNome + nSemData, label: 'linhas inválidas', bg: '#fee2e2', cor: '#dc2626', cort: '#991b1b' }] : []),
+  ].map(c => `
+    <div style="background:${c.bg};border-radius:14px;padding:18px 28px;text-align:center;min-width:120px;">
+      <div style="font-size:34px;font-weight:800;color:${c.cor};">${c.n}</div>
+      <div style="font-size:11.5px;color:${c.cort};font-weight:600;margin-top:2px;">${c.label}</div>
+    </div>`).join('');
+
+  document.getElementById('imp-result-area').innerHTML = `
+    <div style="text-align:center;padding:16px 0 8px;">
+      <div style="font-size:48px;margin-bottom:10px;">${nImportados ? '✅' : '⚠️'}</div>
+      <div style="font-size:19px;font-weight:800;color:#0f172a;margin-bottom:18px;">
+        ${nImportados ? 'Importação concluída!' : 'Nenhum registro novo importado'}
+      </div>
+      <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-bottom:20px;">${cards}</div>
+      ${nImportados ? `<div style="font-size:13px;color:#64748b;">Acesse <strong>Atendidos</strong> para ver os ${nImportados} registros importados.</div>` : ''}
+      ${nSemNome ? `<div style="font-size:12px;color:#94a3b8;margin-top:8px;">${nSemNome} linha(s) puladas por não ter nome do paciente</div>` : ''}
+      ${nSemData ? `<div style="font-size:12px;color:#94a3b8;">${nSemData} linha(s) puladas por data não reconhecida</div>` : ''}
+    </div>`;
+
+  impGoStep(3);
+  if (nImportados) {
+    renderBackup();
+    toast(`✅ ${nImportados} consultas importadas com sucesso!`, 3500);
+  }
+}
+
 // ====================== PACOTE 5.3 — GRÁFICOS + SAUDAÇÃO PROATIVA ======================
 
 let _chartReceitaMeta = null;
@@ -4670,7 +5809,13 @@ function renderChartReceitaMeta() {
 
   // Linha de meta (horizontal)
   const metaLinha = Array(diasNoMes).fill(meta);
-  const labels = Array.from({length: diasNoMes}, (_, i) => i + 1);
+  // Labels: mostra só dias 1, 7, 14, 21, 28 e último dia (padrão semanal)
+  const mesNome = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][mes];
+  const labelsDias = [1, 7, 14, 21, 28, diasNoMes].filter((d, i, a) => a.indexOf(d) === i && d <= diasNoMes);
+  const labels = Array.from({length: diasNoMes}, (_, i) => {
+    const d = i + 1;
+    return labelsDias.includes(d) ? `${d}/${mesNome}` : '';
+  });
 
   if (_chartReceitaMeta) _chartReceitaMeta.destroy();
   _chartReceitaMeta = new Chart(canvas, {
@@ -4722,8 +5867,16 @@ function renderChartReceitaMeta() {
         }
       },
       scales: {
-        x: { grid: { display: false }, ticks: { font: { size: 10 }, maxTicksLimit: 10 } },
-        y: { ticks: { font: { size: 10 }, callback: v => 'R$' + (v/1000).toFixed(0) + 'k' }, grid: { color: '#f1f5f9' } },
+        x: {
+          grid: { display: false },
+          ticks: { font: { size: 10 }, maxRotation: 0, autoSkip: false },
+          title: { display: true, text: `Dias de ${mesNome}`, font: { size: 10 }, color: '#94a3b8', padding: { top: 4 } }
+        },
+        y: {
+          ticks: { font: { size: 10 }, callback: v => 'R$' + (v/1000).toFixed(0) + 'k' },
+          grid: { color: '#f1f5f9' },
+          title: { display: true, text: 'Receita acumulada (R$)', font: { size: 10 }, color: '#94a3b8' }
+        },
       },
     },
   });
@@ -4772,8 +5925,17 @@ function renderChartOcupacao() {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false } },
       scales: {
-        x: { grid: { display: false }, ticks: { font: { size: 11 } } },
-        y: { beginAtZero: true, ticks: { font: { size: 10 }, stepSize: 1 }, grid: { color: '#f1f5f9' } },
+        x: {
+          grid: { display: false },
+          ticks: { font: { size: 11 } },
+          title: { display: true, text: 'Dia da semana (média histórica)', font: { size: 10 }, color: '#94a3b8', padding: { top: 4 } }
+        },
+        y: {
+          beginAtZero: true,
+          ticks: { font: { size: 10 }, stepSize: 1 },
+          grid: { color: '#f1f5f9' },
+          title: { display: true, text: 'Média de consultas/semana', font: { size: 10 }, color: '#94a3b8' }
+        },
       },
     },
   });
