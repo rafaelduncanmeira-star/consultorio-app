@@ -2022,6 +2022,47 @@ function deleteBloqueio(id) {
   renderAgenda();
 }
 
+// ===== Drag-and-drop de agendamentos =====
+let _agDragId = null;
+
+function _agDragStart(e, id) {
+  _agDragId = id;
+  e.dataTransfer.effectAllowed = 'move';
+  // Visual: opacidade reduzida durante o arrasto
+  setTimeout(() => { if (e.target) e.target.style.opacity = '0.4'; }, 0);
+}
+
+function _agDragEnd(e) {
+  if (e.target) e.target.style.opacity = '';
+}
+
+function _agDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('ag-drop-hover');
+}
+
+function _agDragLeave(e) {
+  e.currentTarget.classList.remove('ag-drop-hover');
+}
+
+function _agDrop(e, ds, hora) {
+  e.preventDefault();
+  e.stopPropagation();
+  e.currentTarget.classList.remove('ag-drop-hover');
+  if (!_agDragId) return;
+  const ags = getAgendamentos();
+  const idx = ags.findIndex(a => a.id === _agDragId);
+  if (idx === -1) { _agDragId = null; return; }
+  // Só re-renderiza se realmente mudou algo
+  if (ags[idx].data === ds && ags[idx].hora === hora) { _agDragId = null; return; }
+  ags[idx].data = ds;
+  ags[idx].hora = hora;
+  DB.set('agendamentos', ags);
+  _agDragId = null;
+  renderAgenda();
+}
+
 // ===== Render principal =====
 function renderAgenda() {
   // Atualiza KPIs
@@ -2170,9 +2211,17 @@ function _viewWeekOrDay(numDias) {
       const onclick = (naoUtil || bloqueado) ? '' : `onclick="openNovoAgendamento({data:'${ds}', hora:'${hora}'})"`;
       const evtHtml = eventos.map(a => {
         const ec = (a.status || 'confirmado').toLowerCase().replace('no-show', 'noshow');
-        return `<div class="week-evt ${ec}" onclick="event.stopPropagation();editAgendamento('${a.id}')" title="${a.pacienteNome} — ${a.procedimento || ''} (${a.duracao}min)"><strong>${a.pacienteNome}</strong><br><span style="font-size:10px;opacity:0.8;">${a.procedimento || '—'}</span></div>`;
+        return `<div class="week-evt ${ec}" draggable="true"
+          ondragstart="_agDragStart(event,'${a.id}')"
+          ondragend="_agDragEnd(event)"
+          onclick="event.stopPropagation();editAgendamento('${a.id}')"
+          title="${a.pacienteNome} — ${a.procedimento || ''} (${a.duracao}min)"
+          style="cursor:grab;"><strong>${a.pacienteNome}</strong><br><span style="font-size:10px;opacity:0.8;">${a.procedimento || '—'}</span></div>`;
       }).join('');
-      rows += `<div class="${cls}" ${onclick}>${evtHtml}</div>`;
+      rows += `<div class="${cls}" ${onclick}
+        ondragover="_agDragOver(event)"
+        ondragleave="_agDragLeave(event)"
+        ondrop="_agDrop(event,'${ds}','${hora}')">${evtHtml}</div>`;
     }
   });
 
