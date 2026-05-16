@@ -461,7 +461,7 @@ function _vigenciaDias(vigencia) {
 
 function getProgramas() {
   let arr = DB.get('programas');
-  if (!arr.length && !localStorage.getItem('consult_progs_seeded_v2')) {
+  if (!localStorage.getItem('consult_progs_seeded_v2')) {
     arr = [
       {
         id: 'pg_compagni',
