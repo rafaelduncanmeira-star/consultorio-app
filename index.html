@@ -1589,6 +1589,78 @@
       <div id="metas-proc-grid" class="chart-card" style="padding:0;overflow:hidden;"></div>
     </div>
 
+    <!-- ===================== CONFIGURAÇÕES ===================== -->
+    <div id="page-configuracoes" class="page">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:28px;">
+        <div>
+          <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">⚙️ Configurações</div>
+          <div style="font-size:13.5px;color:#94a3b8;margin-top:4px;">Integrações e preferências do sistema</div>
+        </div>
+      </div>
+
+      <!-- Z-API Card -->
+      <div class="chart-card" style="margin-bottom:20px;">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div style="font-size:30px;line-height:1;">💬</div>
+          <div style="flex:1;">
+            <div style="font-size:15px;font-weight:700;color:#0f172a;">Integração WhatsApp (Z-API)</div>
+            <div style="font-size:12.5px;color:#64748b;margin-top:3px;">Receba contatos no CRM e responda mensagens de dentro do sistema</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:12px;color:#64748b;" id="zapi-toggle-label">Desativado</span>
+            <label class="zapi-toggle-wrap">
+              <input type="checkbox" id="zapi-enabled-toggle" onchange="_zapiToggleChange(this.checked)">
+              <div class="zapi-track" id="zapi-track" onclick="document.getElementById('zapi-enabled-toggle').click()"></div>
+              <div class="zapi-thumb" id="zapi-thumb"></div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Campos — aparecem quando ativado -->
+        <div id="zapi-fields" style="display:none;margin-top:20px;padding-top:20px;border-top:1px solid #f1f5f9;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+            <div>
+              <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Instance ID</label>
+              <input type="text" id="zapi-instance-id" class="input" placeholder="Ex: 3ABC1234…" />
+            </div>
+            <div>
+              <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Token</label>
+              <input type="password" id="zapi-token" class="input" placeholder="Token do Z-API…" />
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <button onclick="saveZapiConfig()" class="btn-primary">Salvar</button>
+            <button onclick="testZapiConnection()" class="btn-ghost">Testar conexão</button>
+            <span id="zapi-status" style="font-size:12.5px;color:#94a3b8;"></span>
+          </div>
+        </div>
+
+        <!-- Badge conectado -->
+        <div id="zapi-connected-badge" style="display:none;margin-top:16px;">
+          <div style="display:flex;align-items:center;gap:9px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;">
+            <div style="width:8px;height:8px;background:#10b981;border-radius:50%;flex-shrink:0;"></div>
+            <span style="font-size:13px;color:#166534;font-weight:600;">WhatsApp conectado</span>
+            <span style="font-size:12px;color:#16a34a;" id="zapi-phone-label"></span>
+            <button onclick="disconnectZapi()" style="margin-left:auto;background:none;border:none;font-size:11.5px;color:#dc2626;cursor:pointer;font-weight:600;">Desconectar</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Info Make/Supabase -->
+      <div class="chart-card" id="zapi-info-card" style="display:none;margin-bottom:20px;">
+        <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:4px;">📋 Dados para configurar no Make</div>
+        <div style="font-size:12.5px;color:#64748b;margin-bottom:14px;">Use essas informações ao criar o cenário no make.com</div>
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;font-family:monospace;font-size:12px;color:#334155;line-height:2;">
+          <div><span style="color:#94a3b8;font-family:'Inter',sans-serif;">Supabase URL: </span>https://ipvztcqlawwslnkzmzzl.supabase.co</div>
+          <div><span style="color:#94a3b8;font-family:'Inter',sans-serif;">Tabela leads: </span>crm_leads</div>
+          <div><span style="color:#94a3b8;font-family:'Inter',sans-serif;">Tabela mensagens: </span>crm_messages</div>
+        </div>
+        <div style="margin-top:12px;padding:10px 13px;background:#fffbeb;border:1px solid #fde68a;border-radius:7px;font-size:12px;color:#92400e;">
+          ⚠️ Execute o arquivo <strong>SETUP_SUPABASE.sql</strong> no Supabase antes de configurar o Make.
+        </div>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -1721,78 +1793,6 @@
         <button type="button" onclick="closeModal('modal-agendamento')" class="btn-ghost">Cancelar</button>
       </div>
     </form>
-  </div>
-</div>
-
-<!-- ===================== CONFIGURAÇÕES ===================== -->
-<div id="page-configuracoes" class="page">
-  <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:28px;">
-    <div>
-      <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">⚙️ Configurações</div>
-      <div style="font-size:13.5px;color:#94a3b8;margin-top:4px;">Integrações e preferências do sistema</div>
-    </div>
-  </div>
-
-  <!-- Z-API Card -->
-  <div class="chart-card" style="margin-bottom:20px;">
-    <div style="display:flex;align-items:center;gap:14px;margin-bottom:0;">
-      <div style="font-size:30px;line-height:1;">💬</div>
-      <div style="flex:1;">
-        <div style="font-size:15px;font-weight:700;color:#0f172a;">Integração WhatsApp (Z-API)</div>
-        <div style="font-size:12.5px;color:#64748b;margin-top:3px;">Receba contatos no CRM e responda mensagens de dentro do sistema</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span style="font-size:12px;color:#64748b;" id="zapi-toggle-label">Desativado</span>
-        <label class="zapi-toggle-wrap">
-          <input type="checkbox" id="zapi-enabled-toggle" onchange="_zapiToggleChange(this.checked)">
-          <div class="zapi-track" id="zapi-track" onclick="document.getElementById('zapi-enabled-toggle').click()"></div>
-          <div class="zapi-thumb" id="zapi-thumb"></div>
-        </label>
-      </div>
-    </div>
-
-    <!-- Campos — aparecem quando ativado -->
-    <div id="zapi-fields" style="display:none;margin-top:20px;padding-top:20px;border-top:1px solid #f1f5f9;">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
-        <div>
-          <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Instance ID</label>
-          <input type="text" id="zapi-instance-id" class="input" placeholder="Ex: 3ABC1234..." />
-        </div>
-        <div>
-          <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Token</label>
-          <input type="password" id="zapi-token" class="input" placeholder="Token do Z-API..." />
-        </div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;">
-        <button onclick="saveZapiConfig()" class="btn-primary">Salvar</button>
-        <button onclick="testZapiConnection()" class="btn-ghost">Testar conexão</button>
-        <span id="zapi-status" style="font-size:12.5px;color:#94a3b8;"></span>
-      </div>
-    </div>
-
-    <!-- Badge conectado -->
-    <div id="zapi-connected-badge" style="display:none;margin-top:16px;">
-      <div style="display:flex;align-items:center;gap:9px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;">
-        <div style="width:8px;height:8px;background:#10b981;border-radius:50%;flex-shrink:0;animation:pulse 2s infinite;"></div>
-        <span style="font-size:13px;color:#166534;font-weight:600;">WhatsApp conectado</span>
-        <span style="font-size:12px;color:#16a34a;" id="zapi-phone-label"></span>
-        <button onclick="disconnectZapi()" style="margin-left:auto;background:none;border:none;font-size:11.5px;color:#dc2626;cursor:pointer;font-weight:600;">Desconectar</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Info Make/Supabase -->
-  <div class="chart-card" id="zapi-info-card" style="display:none;margin-bottom:20px;">
-    <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:4px;">📋 Dados para configurar no Make</div>
-    <div style="font-size:12.5px;color:#64748b;margin-bottom:14px;">Use essas informações ao criar o cenário no make.com</div>
-    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;font-family:monospace;font-size:12px;color:#334155;line-height:2;">
-      <div><span style="color:#94a3b8;font-family:'Inter',sans-serif;">Supabase URL: </span>https://ipvztcqlawwslnkzmzzl.supabase.co</div>
-      <div><span style="color:#94a3b8;font-family:'Inter',sans-serif;">Tabela leads: </span>crm_leads</div>
-      <div><span style="color:#94a3b8;font-family:'Inter',sans-serif;">Tabela mensagens: </span>crm_messages</div>
-    </div>
-    <div style="margin-top:12px;padding:10px 13px;background:#fffbeb;border:1px solid #fde68a;border-radius:7px;font-size:12px;color:#92400e;">
-      ⚠️ Execute o arquivo <strong>SETUP_SUPABASE.sql</strong> no Supabase antes de configurar o Make.
-    </div>
   </div>
 </div>
 
