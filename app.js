@@ -52,6 +52,10 @@ async function loginUser(email, password) {
     currentNome  = profile?.nome  || email.split('@')[0];
     // Sincroniza dados da nuvem
     await cloudPull();
+    // Inicia Realtime para leads do WhatsApp
+    initLeadsRealtime();
+    // Verifica leads pendentes que chegaram offline
+    syncLeadsFromSupabase();
     return { ok: true };
   } catch(e) { return { error: e.message }; }
 }
@@ -197,10 +201,10 @@ let agendaView = 'diario';
 
 // ====================== NAVEGAÇÃO + MOBILE ======================
 const _MOB_TITLES = {
-  dashboard: 'Dashboard',   crm: 'CRM',          pacientes: 'Atendidos',
-  followup:  'Follow-Up',   agenda: 'Agenda',     receita: 'Receita',
-  despesas:  'Despesas',    precos: 'Preços',      relatorio: 'Relatório',
-  metas:     'Metas',       backup:  'Backup'
+  dashboard:      'Dashboard',   crm: 'CRM',      pacientes: 'Atendidos',
+  followup:       'Follow-Up',   agenda: 'Agenda', receita: 'Receita',
+  despesas:       'Despesas',    precos: 'Preços',  relatorio: 'Relatório',
+  metas:          'Metas',       backup: 'Backup',  configuracoes: 'Configurações'
 };
 // CTA config per page (label → modal to open, or null to hide)
 const _MOB_CTA = {
@@ -285,6 +289,7 @@ function showPage(page) {
   if (page === 'relatorio') renderRelatorio('2026-05');
   if (page === 'metas') { renderMetas(); renderMetasProc(); }
   if (page === 'backup') renderBackup();
+  if (page === 'configuracoes') renderConfiguracoes();
 }
 
 // ====================== MODAIS ======================
@@ -795,7 +800,7 @@ function renderCrm() {
       <tr data-search="${r.nome} ${r.canal||''} ${r.status||''} ${r.tipo||''}" data-status="${r.status}">
         <td>${formatDate(r.data)}</td>
         <td style="font-weight:600;color:#0f172a;">${r.nome}</td>
-        <td>${r.whatsapp ? `<a href="https://wa.me/55${r.whatsapp.replace(/\D/g,'')}" target="_blank" style="color:#10b981;font-weight:600;">${r.whatsapp}</a>` : '—'}</td>
+        <td>${r.whatsapp ? `<button onclick="openCrmChat(${i})" style="background:none;border:none;cursor:pointer;color:#10b981;font-weight:600;font-size:13px;padding:0;font-family:'Inter',sans-serif;">💬 ${r.whatsapp}</button>` : '—'}</td>
         <td style="color:#475569;">${r.canal||'—'}</td>
         <td style="color:#475569;">${r.tipo||'—'}</td>
         <td>${statusSelect(r.status, i)}</td>
@@ -995,10 +1000,12 @@ function _kanbanCardHtml(r, col) {
   const badge    = _canalBadge(r.canal);
   const dias     = _diasDesde(r.data);
   const whatsBtn = r.whatsapp
-    ? `<a href="https://wa.me/55${r.whatsapp.replace(/\D/g,'')}" target="_blank"
-          style="display:inline-flex;align-items:center;gap:3px;font-size:11.5px;color:#10b981;font-weight:600;text-decoration:none;margin-bottom:9px;">
+    ? `<button onclick="openCrmChat(${idx})"
+          style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#10b981;font-weight:600;
+                 background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:4px 9px;
+                 cursor:pointer;margin-bottom:9px;font-family:'Inter',sans-serif;">
           💬 ${r.whatsapp}
-       </a>`
+       </button>`
     : '';
 
   const nextLabel = nextCol ? nextCol.label.replace(/^[^\s]+\s/, '') : ''; // strip emoji
@@ -5376,6 +5383,303 @@ function switchPerfilTab(tab, btn) {
 
 const BACKUP_KEYS = ['pacientes','crm','despesas','followup','agendamentos','bloqueios','procedimentos','agenda_config','metas','chat_history'];
 
+// ====================== CONFIGURAÇÕES / Z-API ======================
+
+function getZapiConfig() {
+  return DB.getObj('zapi_config', { enabled: false, instanceId: '', token: '' });
+}
+
+function renderConfiguracoes() {
+  const cfg = getZapiConfig();
+  const toggle = document.getElementById('zapi-enabled-toggle');
+  if (toggle) toggle.checked = cfg.enabled;
+  const idEl = document.getElementById('zapi-instance-id');
+  if (idEl) idEl.value = cfg.instanceId || '';
+  const tokenEl = document.getElementById('zapi-token');
+  if (tokenEl) tokenEl.value = cfg.token || '';
+  _applyZapiUI(cfg.enabled, !!(cfg.instanceId && cfg.token));
+}
+
+function _zapiToggleChange(enabled) {
+  const cfg = getZapiConfig();
+  cfg.enabled = enabled;
+  DB.setObj('zapi_config', cfg);
+  _applyZapiUI(enabled, !!(cfg.instanceId && cfg.token));
+}
+
+function _applyZapiUI(enabled, hasCredentials) {
+  const label  = document.getElementById('zapi-toggle-label');
+  const track  = document.getElementById('zapi-track');
+  const thumb  = document.getElementById('zapi-thumb');
+  const fields = document.getElementById('zapi-fields');
+  const badge  = document.getElementById('zapi-connected-badge');
+  const info   = document.getElementById('zapi-info-card');
+  if (label)  label.textContent = enabled ? 'Ativado' : 'Desativado';
+  if (track)  track.classList.toggle('on', enabled);
+  if (thumb)  thumb.classList.toggle('on', enabled);
+  if (fields) fields.style.display = enabled ? '' : 'none';
+  if (badge)  badge.style.display  = (enabled && hasCredentials) ? '' : 'none';
+  if (info)   info.style.display   = (enabled && hasCredentials) ? '' : 'none';
+}
+
+function saveZapiConfig() {
+  const instanceId = (document.getElementById('zapi-instance-id')?.value || '').trim();
+  const token      = (document.getElementById('zapi-token')?.value      || '').trim();
+  const statusEl   = document.getElementById('zapi-status');
+  if (!instanceId || !token) {
+    if (statusEl) { statusEl.textContent = '⚠️ Preencha os dois campos'; statusEl.style.color = '#f59e0b'; }
+    return;
+  }
+  const cfg = getZapiConfig();
+  cfg.instanceId = instanceId;
+  cfg.token      = token;
+  DB.setObj('zapi_config', cfg);
+  if (statusEl) { statusEl.textContent = '✅ Salvo!'; statusEl.style.color = '#10b981'; }
+  _applyZapiUI(cfg.enabled, true);
+  setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000);
+}
+
+async function testZapiConnection() {
+  const cfg = getZapiConfig();
+  const statusEl = document.getElementById('zapi-status');
+  if (!cfg.instanceId || !cfg.token) {
+    if (statusEl) { statusEl.textContent = '⚠️ Salve as credenciais primeiro'; statusEl.style.color = '#f59e0b'; }
+    return;
+  }
+  if (statusEl) { statusEl.textContent = '⏳ Testando…'; statusEl.style.color = '#64748b'; }
+  try {
+    const res  = await fetch(`https://api.z-api.io/instances/${cfg.instanceId}/token/${cfg.token}/status`, {
+      headers: { 'Client-Token': cfg.token }
+    });
+    const data = await res.json();
+    const ok   = data.connected || data.status === 'CONNECTED' || data.value === 'CONNECTED';
+    if (ok) {
+      if (statusEl) { statusEl.textContent = '✅ Conectado!'; statusEl.style.color = '#10b981'; }
+      const lbl = document.getElementById('zapi-phone-label');
+      if (lbl && data.phone) lbl.textContent = '· ' + data.phone;
+    } else {
+      if (statusEl) { statusEl.textContent = '❌ Não conectado — verifique as credenciais'; statusEl.style.color = '#ef4444'; }
+    }
+  } catch(e) {
+    if (statusEl) { statusEl.textContent = '❌ Erro de conexão'; statusEl.style.color = '#ef4444'; }
+  }
+}
+
+function disconnectZapi() {
+  if (!confirm('Desconectar o WhatsApp? As mensagens salvas não serão apagadas.')) return;
+  DB.setObj('zapi_config', { enabled: false, instanceId: '', token: '' });
+  renderConfiguracoes();
+}
+
+// ====================== CHAT PANEL ======================
+
+let _chatPhone = null;
+let _chatIdx   = null;
+let _chatSub   = null;
+
+function openCrmChat(idx) {
+  const data = DB.get('crm');
+  const r    = data[idx];
+  if (!r) return;
+  _chatPhone = (r.whatsapp || '').replace(/\D/g, '');
+  _chatIdx   = idx;
+
+  const nameEl  = document.getElementById('chat-contact-name');
+  const phoneEl = document.getElementById('chat-contact-phone');
+  if (nameEl)  nameEl.textContent  = r.nome || '—';
+  if (phoneEl) phoneEl.textContent = r.whatsapp || '—';
+
+  const cfg        = getZapiConfig();
+  const zapiOk     = cfg.enabled && cfg.instanceId && cfg.token;
+  const inputArea  = document.getElementById('chat-input-area');
+  const noZapiMsg  = document.getElementById('chat-no-zapi');
+  const statusEl   = document.getElementById('chat-wa-status');
+  if (inputArea) inputArea.style.display = zapiOk ? 'flex' : 'none';
+  if (noZapiMsg) noZapiMsg.style.display = zapiOk ? 'none' : '';
+  if (statusEl)  {
+    statusEl.textContent = zapiOk ? '● WhatsApp' : 'sem integração';
+    statusEl.style.color = zapiOk ? '#10b981' : '#94a3b8';
+  }
+
+  document.getElementById('crm-chat-panel')?.classList.add('open');
+  document.getElementById('crm-chat-panel-overlay')?.classList.add('open');
+
+  loadChatHistory(_chatPhone);
+  _subscribeChatRealtime(_chatPhone);
+}
+
+function closeCrmChat() {
+  document.getElementById('crm-chat-panel')?.classList.remove('open');
+  document.getElementById('crm-chat-panel-overlay')?.classList.remove('open');
+  _chatPhone = null;
+  _chatIdx   = null;
+  if (_chatSub && _supa) { _supa.removeChannel(_chatSub); _chatSub = null; }
+}
+
+async function loadChatHistory(phone) {
+  const container = document.getElementById('chat-messages');
+  if (!container) return;
+  container.innerHTML = '<div style="text-align:center;color:#94a3b8;font-size:12px;padding:24px;">Carregando…</div>';
+  if (!_supa) {
+    container.innerHTML = '<div style="text-align:center;color:#94a3b8;font-size:12.5px;padding:32px;">Sem conexão com o servidor</div>';
+    return;
+  }
+  try {
+    const { data, error } = await _supa
+      .from('crm_messages')
+      .select('*')
+      .eq('whatsapp', phone)
+      .order('created_at', { ascending: true })
+      .limit(100);
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      container.innerHTML = '<div style="text-align:center;color:#94a3b8;font-size:12.5px;padding:40px 20px;">Nenhuma mensagem ainda.<br><span style="font-size:11.5px;">As mensagens do WhatsApp aparecerão aqui.</span></div>';
+      return;
+    }
+    _renderChatMessages(container, data);
+  } catch(e) {
+    container.innerHTML = '<div style="text-align:center;color:#94a3b8;font-size:12.5px;padding:32px;">Erro ao carregar mensagens</div>';
+  }
+}
+
+function _renderChatMessages(container, msgs) {
+  container.innerHTML = msgs.map(m => {
+    const isOut = m.remetente === 'consultorio';
+    const time  = new Date(m.created_at).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+    return `<div class="chat-msg-wrap ${isOut ? 'out' : 'in'}">
+      <div class="chat-bubble ${isOut ? 'out' : 'in'}">${m.mensagem.replace(/\n/g,'<br>')}</div>
+      <div class="chat-ts">${time}</div>
+    </div>`;
+  }).join('');
+  container.scrollTop = container.scrollHeight;
+}
+
+function _appendChatMessage(m) {
+  const container = document.getElementById('chat-messages');
+  if (!container) return;
+  // Remove empty state
+  if (container.children.length === 1 && container.children[0].style.textAlign === 'center') {
+    container.innerHTML = '';
+  }
+  const isOut = m.remetente === 'consultorio';
+  const time  = new Date(m.created_at || Date.now()).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+  const el    = document.createElement('div');
+  el.className = `chat-msg-wrap ${isOut ? 'out' : 'in'}`;
+  el.innerHTML = `<div class="chat-bubble ${isOut ? 'out' : 'in'}">${m.mensagem.replace(/\n/g,'<br>')}</div>
+    <div class="chat-ts">${time}</div>`;
+  container.appendChild(el);
+  container.scrollTop = container.scrollHeight;
+}
+
+function _subscribeChatRealtime(phone) {
+  if (!_supa) return;
+  if (_chatSub) { _supa.removeChannel(_chatSub); }
+  _chatSub = _supa
+    .channel('chat-msgs-' + phone)
+    .on('postgres_changes', {
+      event: 'INSERT', schema: 'public', table: 'crm_messages',
+      filter: `whatsapp=eq.${phone}`
+    }, payload => {
+      if (_chatPhone === phone) _appendChatMessage(payload.new);
+    })
+    .subscribe();
+}
+
+async function sendChatMessage() {
+  const input  = document.getElementById('chat-input-text');
+  const text   = (input?.value || '').trim();
+  if (!text || !_chatPhone) return;
+  const cfg = getZapiConfig();
+  if (!cfg.enabled || !cfg.instanceId || !cfg.token) return;
+
+  input.value    = '';
+  input.disabled = true;
+
+  // Otimista: mostra na tela imediatamente
+  _appendChatMessage({ remetente: 'consultorio', mensagem: text, created_at: new Date().toISOString() });
+
+  try {
+    const phone55 = _chatPhone.startsWith('55') ? _chatPhone : '55' + _chatPhone;
+    const res = await fetch(
+      `https://api.z-api.io/instances/${cfg.instanceId}/token/${cfg.token}/send-text`,
+      { method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Client-Token': cfg.token },
+        body: JSON.stringify({ phone: phone55, message: text }) }
+    );
+    if (!res.ok) throw new Error('Z-API error ' + res.status);
+    // Persiste no Supabase
+    if (_supa) {
+      await _supa.from('crm_messages').insert({
+        whatsapp: _chatPhone, remetente: 'consultorio', mensagem: text
+      });
+    }
+  } catch(e) {
+    alert('Erro ao enviar mensagem. Verifique a conexão com o Z-API.');
+  } finally {
+    input.disabled = false;
+    input.focus();
+  }
+}
+
+// ====================== REALTIME: LEADS DO WHATSAPP ======================
+
+function initLeadsRealtime() {
+  if (!_supa) return;
+  _supa
+    .channel('new-wa-leads')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'crm_leads' }, () => {
+      syncLeadsFromSupabase();
+    })
+    .subscribe();
+}
+
+async function syncLeadsFromSupabase() {
+  if (!_supa) return;
+  try {
+    const { data, error } = await _supa
+      .from('crm_leads')
+      .select('*')
+      .eq('processado', false)
+      .order('created_at', { ascending: true });
+    if (error || !data || data.length === 0) return;
+
+    const crm = DB.get('crm');
+    const ids = [];
+    let novos = 0;
+
+    data.forEach(lead => {
+      const cleanPhone = (lead.whatsapp || '').replace(/\D/g, '');
+      const existe = crm.some(c => c.whatsapp && c.whatsapp.replace(/\D/g, '') === cleanPhone);
+      if (!existe) {
+        const d = new Date(lead.created_at);
+        crm.unshift({
+          data:      d.toISOString().substring(0, 10),
+          hora:      `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`,
+          nome:      lead.nome || 'Contato WhatsApp',
+          whatsapp:  cleanPhone.replace(/^55/, ''),
+          canal:     'WhatsApp',
+          tipo:      '',
+          status:    'Contato feito',
+          obs:       lead.primeira_mensagem ? `Primeira msg: ${lead.primeira_mensagem}` : ''
+        });
+        novos++;
+      }
+      ids.push(lead.id);
+    });
+
+    if (ids.length > 0) {
+      DB.set('crm', crm);
+      await _supa.from('crm_leads').update({ processado: true }).in('id', ids);
+      if (novos > 0 && document.getElementById('page-crm')?.classList.contains('active')) {
+        renderCrm();
+      }
+      console.log(`[WhatsApp] ${novos} novo(s) lead(s) incorporado(s) ao CRM`);
+    }
+  } catch(e) {
+    console.warn('syncLeadsFromSupabase error:', e.message);
+  }
+}
+
 function renderBackup() {
   const resumo = document.getElementById('backup-resumo');
   if (!resumo) return;
@@ -6102,6 +6406,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (temSessao) {
     // Já logado: sincroniza e abre o app
     await cloudPull();
+    initLeadsRealtime();
+    syncLeadsFromSupabase();
     _iniciarApp();
   } else {
     // Mostra tela de login (já visível por padrão)

@@ -308,6 +308,56 @@
       .kanban-arrow { display: none; }
     }
 
+    /* ── Chat Panel ── */
+    #crm-chat-panel {
+      position: fixed;
+      top: 0; right: 0;
+      width: 380px;
+      height: 100vh;
+      background: #fff;
+      box-shadow: -4px 0 32px rgba(0,0,0,0.13);
+      z-index: 4000;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(100%);
+      transition: transform 0.25s cubic-bezier(.4,0,.2,1);
+    }
+    #crm-chat-panel.open { transform: translateX(0); }
+    #crm-chat-panel-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.18);
+      z-index: 3999;
+      display: none;
+    }
+    #crm-chat-panel-overlay.open { display: block; }
+    .chat-msg-wrap { display:flex; flex-direction:column; margin-bottom:10px; }
+    .chat-msg-wrap.out { align-items:flex-end; }
+    .chat-msg-wrap.in  { align-items:flex-start; }
+    .chat-bubble {
+      padding:9px 13px; font-size:13px; max-width:82%;
+      line-height:1.4; word-break:break-word;
+    }
+    .chat-bubble.out { background:#22c55e; color:#fff; border-radius:12px 12px 2px 12px; }
+    .chat-bubble.in  { background:#f1f5f9; color:#0f172a; border-radius:12px 12px 12px 2px; }
+    .chat-ts { font-size:10px; color:#94a3b8; margin-top:3px; }
+
+    /* ── Toggle switch ── */
+    .zapi-toggle-wrap { position:relative; width:40px; height:22px; flex-shrink:0; }
+    .zapi-toggle-wrap input { opacity:0; width:0; height:0; }
+    .zapi-track {
+      position:absolute; inset:0; background:#e2e8f0;
+      border-radius:999px; cursor:pointer;
+      transition:background .2s;
+    }
+    .zapi-thumb {
+      position:absolute; top:3px; left:3px;
+      width:16px; height:16px; background:#fff;
+      border-radius:50%; box-shadow:0 1px 3px rgba(0,0,0,.2);
+      transition:transform .2s; pointer-events:none;
+    }
+    .zapi-track.on { background:#10b981; }
+    .zapi-thumb.on { transform:translateX(18px); }
+
     /* ══════════════════════════════════════════
        MOBILE NAVIGATION
     ══════════════════════════════════════════ */
@@ -552,6 +602,9 @@
       </div>
       <div class="nav-item" onclick="showPage('backup')" id="nav-backup">
         <span class="icon"><i data-lucide="hard-drive"></i></span> Backup
+      </div>
+      <div class="nav-item" onclick="showPage('configuracoes')" id="nav-configuracoes">
+        <span class="icon"><i data-lucide="settings"></i></span> Configurações
       </div>
     </nav>
 
@@ -1668,6 +1721,108 @@
         <button type="button" onclick="closeModal('modal-agendamento')" class="btn-ghost">Cancelar</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- ===================== CONFIGURAÇÕES ===================== -->
+<div id="page-configuracoes" class="page" style="display:none;">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:28px;">
+    <div>
+      <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">⚙️ Configurações</div>
+      <div style="font-size:13.5px;color:#94a3b8;margin-top:4px;">Integrações e preferências do sistema</div>
+    </div>
+  </div>
+
+  <!-- Z-API Card -->
+  <div class="chart-card" style="margin-bottom:20px;">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:0;">
+      <div style="font-size:30px;line-height:1;">💬</div>
+      <div style="flex:1;">
+        <div style="font-size:15px;font-weight:700;color:#0f172a;">Integração WhatsApp (Z-API)</div>
+        <div style="font-size:12.5px;color:#64748b;margin-top:3px;">Receba contatos no CRM e responda mensagens de dentro do sistema</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:12px;color:#64748b;" id="zapi-toggle-label">Desativado</span>
+        <label class="zapi-toggle-wrap">
+          <input type="checkbox" id="zapi-enabled-toggle" onchange="_zapiToggleChange(this.checked)">
+          <div class="zapi-track" id="zapi-track" onclick="document.getElementById('zapi-enabled-toggle').click()"></div>
+          <div class="zapi-thumb" id="zapi-thumb"></div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Campos — aparecem quando ativado -->
+    <div id="zapi-fields" style="display:none;margin-top:20px;padding-top:20px;border-top:1px solid #f1f5f9;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+        <div>
+          <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Instance ID</label>
+          <input type="text" id="zapi-instance-id" class="input" placeholder="Ex: 3ABC1234..." />
+        </div>
+        <div>
+          <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Token</label>
+          <input type="password" id="zapi-token" class="input" placeholder="Token do Z-API..." />
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button onclick="saveZapiConfig()" class="btn-primary">Salvar</button>
+        <button onclick="testZapiConnection()" class="btn-ghost">Testar conexão</button>
+        <span id="zapi-status" style="font-size:12.5px;color:#94a3b8;"></span>
+      </div>
+    </div>
+
+    <!-- Badge conectado -->
+    <div id="zapi-connected-badge" style="display:none;margin-top:16px;">
+      <div style="display:flex;align-items:center;gap:9px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;">
+        <div style="width:8px;height:8px;background:#10b981;border-radius:50%;flex-shrink:0;animation:pulse 2s infinite;"></div>
+        <span style="font-size:13px;color:#166534;font-weight:600;">WhatsApp conectado</span>
+        <span style="font-size:12px;color:#16a34a;" id="zapi-phone-label"></span>
+        <button onclick="disconnectZapi()" style="margin-left:auto;background:none;border:none;font-size:11.5px;color:#dc2626;cursor:pointer;font-weight:600;">Desconectar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Info Make/Supabase -->
+  <div class="chart-card" id="zapi-info-card" style="display:none;margin-bottom:20px;">
+    <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:4px;">📋 Dados para configurar no Make</div>
+    <div style="font-size:12.5px;color:#64748b;margin-bottom:14px;">Use essas informações ao criar o cenário no make.com</div>
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;font-family:monospace;font-size:12px;color:#334155;line-height:2;">
+      <div><span style="color:#94a3b8;font-family:'Inter',sans-serif;">Supabase URL: </span>https://ipvztcqlawwslnkzmzzl.supabase.co</div>
+      <div><span style="color:#94a3b8;font-family:'Inter',sans-serif;">Tabela leads: </span>crm_leads</div>
+      <div><span style="color:#94a3b8;font-family:'Inter',sans-serif;">Tabela mensagens: </span>crm_messages</div>
+    </div>
+    <div style="margin-top:12px;padding:10px 13px;background:#fffbeb;border:1px solid #fde68a;border-radius:7px;font-size:12px;color:#92400e;">
+      ⚠️ Execute o arquivo <strong>SETUP_SUPABASE.sql</strong> no Supabase antes de configurar o Make.
+    </div>
+  </div>
+</div>
+
+<!-- ===== CHAT PANEL OVERLAY ===== -->
+<div id="crm-chat-panel-overlay" onclick="closeCrmChat()"></div>
+<div id="crm-chat-panel">
+  <!-- Header -->
+  <div style="padding:14px 18px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:10px;flex-shrink:0;">
+    <button onclick="closeCrmChat()" style="background:#f1f5f9;border:none;border-radius:7px;width:30px;height:30px;cursor:pointer;font-size:16px;color:#64748b;display:flex;align-items:center;justify-content:center;flex-shrink:0;">←</button>
+    <div style="flex:1;min-width:0;">
+      <div style="font-size:14px;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" id="chat-contact-name">—</div>
+      <div style="font-size:11.5px;color:#64748b;" id="chat-contact-phone">—</div>
+    </div>
+    <div id="chat-wa-status" style="font-size:11px;color:#94a3b8;white-space:nowrap;flex-shrink:0;">sem integração</div>
+  </div>
+
+  <!-- Messages -->
+  <div id="chat-messages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;background:#f8fafc;gap:2px;">
+    <div style="text-align:center;color:#94a3b8;font-size:12.5px;padding:40px 20px;">Nenhuma mensagem ainda</div>
+  </div>
+
+  <!-- Input -->
+  <div style="padding:12px 14px;border-top:1px solid #e2e8f0;background:#fff;flex-shrink:0;">
+    <div id="chat-no-zapi" style="text-align:center;font-size:12px;color:#94a3b8;padding:6px 0;">
+      Configure a integração em <a href="#" onclick="showPage('configuracoes');closeCrmChat();return false;" style="color:#3b82f6;font-weight:600;">Configurações</a> para responder
+    </div>
+    <div id="chat-input-area" style="display:none;gap:8px;align-items:flex-end;">
+      <textarea id="chat-input-text" rows="2" class="input" style="flex:1;resize:none;font-size:13px;line-height:1.4;" placeholder="Digite uma mensagem…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea>
+      <button onclick="sendChatMessage()" class="btn-primary" style="padding:8px 14px;height:fit-content;flex-shrink:0;">➤</button>
+    </div>
   </div>
 </div>
 
