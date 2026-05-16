@@ -3,8 +3,8 @@ const SUPA_URL = 'https://ipvztcqlawwslnkzmzzl.supabase.co';
 const SUPA_KEY = 'sb_publishable_-AffRgArhzjeJioFgyzgng_bnSo2F4K';
 let _supa = null;
 let currentUser = null;
-let currentRole = 'medico'; // default safe
-let currentNome = 'Rafael Duncan';
+let currentRole = null; // só é setado após login bem-sucedido
+let currentNome = '';
 
 function initSupabase() {
   try {
@@ -14,21 +14,26 @@ function initSupabase() {
   } catch(e) { console.warn('Supabase init error:', e); }
 }
 
-// Push uma chave ao Supabase (fire-and-forget)
+// Push uma chave ao Supabase (fire-and-forget) — isolado por user_id
 async function cloudPush(key) {
   if (!_supa || !currentUser) return;
   const raw = localStorage.getItem('consult_' + key);
   if (raw === null) return;
   try {
-    await _supa.from('app_data').upsert({ key, value: JSON.parse(raw) }, { onConflict: 'key' });
+    await _supa.from('app_data').upsert(
+      { user_id: currentUser.id, key, value: JSON.parse(raw) },
+      { onConflict: 'user_id,key' }
+    );
   } catch(e) { console.warn('cloudPush error', key, e.message); }
 }
 
-// Pull todas as chaves do Supabase → localStorage
+// Pull todas as chaves do Supabase → localStorage — só do usuário atual
 async function cloudPull() {
-  if (!_supa) return;
+  if (!_supa || !currentUser) return;
   try {
-    const { data, error } = await _supa.from('app_data').select('key, value');
+    const { data, error } = await _supa.from('app_data')
+      .select('key, value')
+      .eq('user_id', currentUser.id);
     if (error) throw error;
     if (data && data.length) {
       data.forEach(row => {
@@ -64,8 +69,10 @@ async function loginUser(email, password) {
 async function logoutUser() {
   if (_supa) await _supa.auth.signOut();
   currentUser = null;
-  currentRole = 'medico';
-  currentNome  = 'Rafael Duncan';
+  currentRole = null;
+  currentNome  = '';
+  // Limpa todas as chaves consult_* do localStorage (evita cross-pollination entre usuários)
+  Object.keys(localStorage).filter(k => k.startsWith('consult_')).forEach(k => localStorage.removeItem(k));
   document.getElementById('login-page').style.display = 'flex';
   document.getElementById('login-email').value = '';
   document.getElementById('login-password').value = '';
@@ -129,6 +136,12 @@ async function doLogin() {
 
 // Mostra o app e configura role
 function _iniciarApp() {
+  // GUARD: só inicia se houver sessão válida (impede bypass via console)
+  if (!currentUser || !currentRole) {
+    document.getElementById('login-page').style.display = 'flex';
+    console.warn('_iniciarApp bloqueado: faça login antes.');
+    return;
+  }
   // Esconde login
   document.getElementById('login-page').style.display = 'none';
   // Atualiza sidebar
@@ -166,6 +179,13 @@ function _atualizarSidebar() {
 const _PAGES_FINANCEIRO = ['receita', 'despesas', 'relatorio', 'metas', 'precos', 'backup'];
 
 function _applyRole() {
+  // Sem sessão: esconde toda a sidebar (defesa extra contra bypass)
+  if (!currentRole) {
+    document.querySelectorAll('.nav-item').forEach(el => el.style.display = 'none');
+    return;
+  }
+  // Garante que itens não-financeiros estão visíveis
+  document.querySelectorAll('.nav-item').forEach(el => el.style.display = '');
   if (currentRole === 'medico') {
     // Médico vê tudo
     _PAGES_FINANCEIRO.forEach(p => {
@@ -179,6 +199,33 @@ function _applyRole() {
     const el = document.getElementById('nav-' + p);
     if (el) el.style.display = 'none';
   });
+}
+
+// ====================== HELPERS DE SEGURANÇA ======================
+// Escapa string para inserção segura em innerHTML (evita XSS armazenado)
+function _esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Gemini key — agora isolada por user_id via Supabase (sai do localStorage exposto)
+function getGeminiKey() {
+  // Tenta DB (vai pro Supabase via app_data) e, se não tiver, faz fallback temporário pra localStorage antigo
+  const fromDb = JSON.parse(localStorage.getItem('consult_gemini_key_secure') || 'null');
+  if (fromDb) return fromDb;
+  // Migração: se ainda existe a chave antiga em texto plano, move pro novo formato e apaga
+  const legado = localStorage.getItem('consult_gemini_key');
+  if (legado) {
+    localStorage.setItem('consult_gemini_key_secure', JSON.stringify(legado));
+    if (typeof cloudPush === 'function') cloudPush('gemini_key_secure');
+    localStorage.removeItem('consult_gemini_key');
+    return legado;
+  }
+  return '';
+}
+function setGeminiKey(key) {
+  localStorage.setItem('consult_gemini_key_secure', JSON.stringify(key || ''));
+  if (typeof cloudPush === 'function') cloudPush('gemini_key_secure');
 }
 
 // ====================== ESTADO DA APP ======================
@@ -202,7 +249,8 @@ let agendaView = 'diario';
 // ====================== NAVEGAÇÃO + MOBILE ======================
 const _MOB_TITLES = {
   dashboard:      'Dashboard',   crm: 'CRM',      pacientes: 'Atendidos',
-  followup:       'Follow-Up',   agenda: 'Agenda', receita: 'Receita',
+  followup:       'Follow-Up',   programas: 'Programas',
+  agenda:         'Agenda',      receita: 'Receita',
   despesas:       'Despesas',    precos: 'Preços',  relatorio: 'Relatório',
   metas:          'Metas',       backup: 'Backup',  configuracoes: 'Configurações'
 };
@@ -259,6 +307,11 @@ function closeMobileSidebar() {
 }
 
 function showPage(page) {
+  // GUARD: bloqueia navegação sem sessão (impede bypass via console)
+  if (!currentUser || !currentRole) {
+    document.getElementById('login-page').style.display = 'flex';
+    return;
+  }
   // Bloqueia acesso financeiro para secretária
   if (currentRole !== 'medico' && _PAGES_FINANCEIRO.includes(page)) return;
 
@@ -290,6 +343,7 @@ function showPage(page) {
   if (page === 'metas') { renderMetas(); renderMetasProc(); }
   if (page === 'backup') renderBackup();
   if (page === 'configuracoes') renderConfiguracoes();
+  if (page === 'programas') renderProgramas();
 }
 
 // ====================== MODAIS ======================
@@ -385,6 +439,574 @@ function getProcedimentos() {
   return arr;
 }
 
+// ====================== PROGRAMAS DE ACOMPANHAMENTO ======================
+//
+// Modelo:
+//   consult_programas: [{ id, nome, tipo:'Fixo'|'Contínuo', descricao,
+//                         marcos: [{ dias, descricao, tipoAtividade, duracao }],
+//                         intervaloDias, camposClinicos: [{ nome, unidade }], ativo }]
+//   consult_inscricoes: [{ id, programaId, pacienteNome, pacienteWhatsapp, pacIdx,
+//                          dataInicio, status:'Ativo'|'Pausado'|'Concluído',
+//                          registros: [{ marcoIdx, dataPrevista, dataReal, agendamentoId,
+//                                        followupIdx, valoresClinicos, obs }],
+//                          obs }]
+function getProgramas() {
+  let arr = DB.get('programas');
+  if (!arr.length && !localStorage.getItem('consult_progs_seeded')) {
+    arr = [
+      {
+        id: 'pg_posop',
+        nome: 'Pós-operatório 6 meses',
+        tipo: 'Fixo',
+        descricao: 'Acompanhamento padrão após cirurgia eletiva',
+        marcos: [
+          { dias: 7,   descricao: 'Retorno 7 dias',   tipoAtividade: 'Consultório', duracao: 30 },
+          { dias: 30,  descricao: 'Retorno 30 dias',  tipoAtividade: 'Consultório', duracao: 50 },
+          { dias: 90,  descricao: 'Retorno 90 dias',  tipoAtividade: 'Consultório', duracao: 50 },
+          { dias: 180, descricao: 'Alta',             tipoAtividade: 'Consultório', duracao: 30 },
+        ],
+        intervaloDias: null,
+        camposClinicos: [
+          { nome: 'PA', unidade: 'mmHg' },
+          { nome: 'Peso', unidade: 'kg' },
+        ],
+        ativo: true,
+      },
+      {
+        id: 'pg_hipertensao',
+        nome: 'Acompanhamento Hipertensão',
+        tipo: 'Contínuo',
+        descricao: 'Controle pressórico periódico',
+        marcos: [],
+        intervaloDias: 90,
+        camposClinicos: [
+          { nome: 'PA', unidade: 'mmHg' },
+          { nome: 'Peso', unidade: 'kg' },
+          { nome: 'Frequência cardíaca', unidade: 'bpm' },
+        ],
+        ativo: true,
+      },
+      {
+        id: 'pg_diabetes',
+        nome: 'Acompanhamento Diabetes',
+        tipo: 'Contínuo',
+        descricao: 'Controle glicêmico periódico',
+        marcos: [],
+        intervaloDias: 90,
+        camposClinicos: [
+          { nome: 'Glicemia jejum', unidade: 'mg/dL' },
+          { nome: 'HbA1c', unidade: '%' },
+          { nome: 'Peso', unidade: 'kg' },
+        ],
+        ativo: true,
+      },
+      {
+        id: 'pg_avc',
+        nome: 'Pós-AVC',
+        tipo: 'Fixo',
+        descricao: 'Reavaliação após acidente vascular',
+        marcos: [
+          { dias: 15,  descricao: 'Reavaliação 15d', tipoAtividade: 'Consultório', duracao: 50 },
+          { dias: 45,  descricao: 'Reavaliação 45d', tipoAtividade: 'Consultório', duracao: 50 },
+          { dias: 90,  descricao: 'Reavaliação 90d', tipoAtividade: 'Consultório', duracao: 50 },
+          { dias: 180, descricao: 'Reavaliação 6m',  tipoAtividade: 'Consultório', duracao: 50 },
+          { dias: 365, descricao: 'Reavaliação 12m', tipoAtividade: 'Consultório', duracao: 50 },
+        ],
+        intervaloDias: null,
+        camposClinicos: [
+          { nome: 'PA', unidade: 'mmHg' },
+          { nome: 'Escala NIHSS', unidade: 'pts' },
+        ],
+        ativo: true,
+      },
+    ];
+    DB.set('programas', arr);
+    localStorage.setItem('consult_progs_seeded', '1');
+  }
+  return arr;
+}
+function getInscricoes() { return DB.get('inscricoes'); }
+
+// Helper de data
+function _addDaysIso(isoDate, dias) {
+  const d = new Date(isoDate + 'T12:00:00');
+  d.setDate(d.getDate() + dias);
+  return d.toISOString().substring(0, 10);
+}
+
+// Cria inscrição + agendamentos + follow-ups automaticamente
+function inscreverEmPrograma(programaId, pacienteRef, dataInicio, horaPadrao = '08:00') {
+  const prog = getProgramas().find(p => p.id === programaId);
+  if (!prog) { alert('Programa não encontrado.'); return null; }
+  // pacienteRef pode ser { nome, whatsapp, pacIdx }
+  const nome     = pacienteRef.nome;
+  const whatsapp = pacienteRef.whatsapp || '';
+  const pacIdx   = (pacienteRef.pacIdx != null) ? pacienteRef.pacIdx : null;
+
+  const inscricao = {
+    id: 'ins_' + Date.now() + '_' + Math.floor(Math.random()*1000),
+    programaId, pacienteNome: nome, pacienteWhatsapp: whatsapp, pacIdx,
+    dataInicio, status: 'Ativo',
+    registros: [], obs: ''
+  };
+
+  // Para Fixo: usa os marcos do template. Para Contínuo: cria 1 marco inicial.
+  const marcos = prog.tipo === 'Fixo' && prog.marcos.length
+    ? prog.marcos
+    : [{ dias: prog.intervaloDias || 90, descricao: prog.nome, tipoAtividade: 'Consultório', duracao: 50 }];
+
+  const ags = DB.get('agendamentos');
+  const fus = DB.get('followup');
+
+  marcos.forEach((m, idx) => {
+    const dataPrev = _addDaysIso(dataInicio, m.dias);
+    const agId = (typeof _agId === 'function') ? _agId() : ('ag_' + Date.now() + '_' + idx);
+    const ag = {
+      id: agId, data: dataPrev, hora: horaPadrao, duracao: m.duracao || 50,
+      pacienteNome: nome, whatsapp,
+      procedimento: m.descricao, status: 'Confirmado',
+      tipoAtividade: m.tipoAtividade || 'Consultório',
+      obs: `[Programa: ${prog.nome}] marco ${idx+1}${prog.tipo==='Fixo'?'/'+marcos.length:''}`,
+      programaInscricaoId: inscricao.id, marcoIdx: idx,
+      crmIdx: null, pacIdx,
+    };
+    ags.push(ag);
+
+    const fuObj = {
+      nome, ultConsulta: dataInicio,
+      dataContato: _addDaysIso(dataPrev, -2),
+      tipoContato: 'WhatsApp', feito: false,
+      dataReav: dataPrev,
+      obs: `Confirmar ${m.descricao} — ${prog.nome}`,
+      programaInscricaoId: inscricao.id, marcoIdx: idx,
+    };
+    fus.push(fuObj);
+
+    inscricao.registros.push({
+      marcoIdx: idx, dataPrevista: dataPrev, dataReal: null,
+      agendamentoId: agId, followupIdx: fus.length - 1,
+      valoresClinicos: {}, obs: ''
+    });
+  });
+
+  DB.set('agendamentos', ags);
+  DB.set('followup', fus);
+  const inscricoes = DB.get('inscricoes');
+  inscricoes.push(inscricao);
+  DB.set('inscricoes', inscricoes);
+  return inscricao;
+}
+
+// Registra a realização de um marco e dispara o próximo (programa contínuo)
+function registrarMarco(inscricaoId, marcoIdx, valoresClinicos = {}, obs = '') {
+  const inscricoes = DB.get('inscricoes');
+  const ins = inscricoes.find(i => i.id === inscricaoId);
+  if (!ins) return;
+  const reg = ins.registros[marcoIdx];
+  if (!reg) return;
+  reg.dataReal = new Date().toISOString().substring(0, 10);
+  reg.valoresClinicos = valoresClinicos || {};
+  reg.obs = obs || '';
+
+  // Atualiza agendamento correspondente
+  if (reg.agendamentoId) {
+    const ags = DB.get('agendamentos');
+    const ag = ags.find(a => a.id === reg.agendamentoId);
+    if (ag) { ag.status = 'Compareceu'; DB.set('agendamentos', ags); }
+  }
+  // Marca o follow-up como feito
+  if (reg.followupIdx != null) {
+    const fus = DB.get('followup');
+    if (fus[reg.followupIdx]) { fus[reg.followupIdx].feito = true; DB.set('followup', fus); }
+  }
+
+  const prog = getProgramas().find(p => p.id === ins.programaId);
+  // Programa Contínuo: cria automaticamente o próximo marco
+  if (prog && prog.tipo === 'Contínuo' && marcoIdx === ins.registros.length - 1) {
+    const dataNova = _addDaysIso(reg.dataReal, prog.intervaloDias || 90);
+    const ags = DB.get('agendamentos');
+    const fus = DB.get('followup');
+    const novoIdx = ins.registros.length;
+    const agId = (typeof _agId === 'function') ? _agId() : ('ag_' + Date.now() + '_' + novoIdx);
+    ags.push({
+      id: agId, data: dataNova, hora: '08:00', duracao: 50,
+      pacienteNome: ins.pacienteNome, whatsapp: ins.pacienteWhatsapp || '',
+      procedimento: prog.nome, status: 'Confirmado',
+      tipoAtividade: 'Consultório',
+      obs: `[Programa: ${prog.nome}] marco ${novoIdx+1}`,
+      programaInscricaoId: ins.id, marcoIdx: novoIdx,
+      crmIdx: null, pacIdx: ins.pacIdx,
+    });
+    fus.push({
+      nome: ins.pacienteNome, ultConsulta: reg.dataReal,
+      dataContato: _addDaysIso(dataNova, -2),
+      tipoContato: 'WhatsApp', feito: false, dataReav: dataNova,
+      obs: `Confirmar próximo marco — ${prog.nome}`,
+      programaInscricaoId: ins.id, marcoIdx: novoIdx,
+    });
+    DB.set('agendamentos', ags);
+    DB.set('followup', fus);
+    ins.registros.push({
+      marcoIdx: novoIdx, dataPrevista: dataNova, dataReal: null,
+      agendamentoId: agId, followupIdx: fus.length - 1,
+      valoresClinicos: {}, obs: ''
+    });
+  }
+
+  // Fixo: se todos os marcos preenchidos, conclui
+  if (prog && prog.tipo === 'Fixo' && ins.registros.every(r => r.dataReal)) {
+    ins.status = 'Concluído';
+  }
+
+  DB.set('inscricoes', inscricoes);
+}
+
+// Retorna o próximo marco pendente de uma inscrição (ou null se concluída)
+function _proximoMarco(ins) {
+  return ins.registros.find(r => !r.dataReal) || null;
+}
+
+// Retorna a aderência de uma inscrição (registros realizados até hoje / esperados até hoje)
+function _aderenciaInscricao(ins) {
+  const hoje = new Date().toISOString().substring(0, 10);
+  const esperados = ins.registros.filter(r => r.dataPrevista <= hoje).length;
+  const realizados = ins.registros.filter(r => r.dataReal).length;
+  return esperados ? (realizados / esperados) * 100 : 100;
+}
+
+// Retorna a inscrição correspondente a um agendamento (se houver)
+function _inscricaoDoAg(ag) {
+  if (!ag.programaInscricaoId) return null;
+  return getInscricoes().find(i => i.id === ag.programaInscricaoId) || null;
+}
+
+// ====================== UI: PÁGINA PROGRAMAS ======================
+let _progTab = 'pacientes';
+function setProgramasTab(tab) {
+  _progTab = tab;
+  document.getElementById('prog-tab-pacientes').classList.toggle('prog-tab-active', tab === 'pacientes');
+  document.getElementById('prog-tab-templates').classList.toggle('prog-tab-active', tab === 'templates');
+  document.getElementById('prog-conteudo-pacientes').style.display = tab === 'pacientes' ? '' : 'none';
+  document.getElementById('prog-conteudo-templates').style.display = tab === 'templates' ? '' : 'none';
+  renderProgramas();
+}
+
+function renderProgramas() {
+  const progs = getProgramas();
+  const inscricoes = getInscricoes();
+  const ativas = inscricoes.filter(i => i.status === 'Ativo');
+  const hoje = new Date().toISOString().substring(0, 10);
+
+  // KPIs
+  const totalAtivos = ativas.length;
+  const aderencias = ativas.map(i => _aderenciaInscricao(i));
+  const aderMedia = aderencias.length ? aderencias.reduce((s,x)=>s+x,0) / aderencias.length : 0;
+  const atrasados = ativas.filter(i => {
+    const prox = _proximoMarco(i);
+    return prox && prox.dataPrevista < hoje;
+  }).length;
+  const concluidos = inscricoes.filter(i => i.status === 'Concluído').length;
+
+  const kpis = document.getElementById('prog-kpis');
+  if (kpis) {
+    kpis.innerHTML = `
+      <div class="chart-card" style="padding:14px 18px;">
+        <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">Inscritos ativos</div>
+        <div style="font-size:24px;font-weight:800;color:#0f172a;margin-top:4px;">${totalAtivos}</div>
+      </div>
+      <div class="chart-card" style="padding:14px 18px;">
+        <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">Aderência média</div>
+        <div style="font-size:24px;font-weight:800;color:${aderMedia>=80?'#15803d':aderMedia>=50?'#a16207':'#b91c1c'};margin-top:4px;">${PCT(aderMedia)}</div>
+      </div>
+      <div class="chart-card" style="padding:14px 18px;">
+        <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">Atrasados</div>
+        <div style="font-size:24px;font-weight:800;color:${atrasados>0?'#dc2626':'#0f172a'};margin-top:4px;">${atrasados}</div>
+      </div>
+      <div class="chart-card" style="padding:14px 18px;">
+        <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">Concluídos</div>
+        <div style="font-size:24px;font-weight:800;color:#0f172a;margin-top:4px;">${concluidos}</div>
+      </div>`;
+  }
+
+  // Aba: Pacientes inscritos
+  const elPac = document.getElementById('prog-conteudo-pacientes');
+  if (elPac) {
+    if (!inscricoes.length) {
+      elPac.innerHTML = `<div class="chart-card" style="text-align:center;padding:48px 24px;color:#94a3b8;">
+        Nenhum paciente inscrito. <button class="btn-primary" style="margin-left:12px;" onclick="openModalInscrever()">+ Inscrever paciente</button>
+      </div>`;
+    } else {
+      elPac.innerHTML = `<div class="chart-card" style="padding:0;overflow:hidden;">
+        <table class="data-table">
+          <thead><tr><th>Paciente</th><th>Programa</th><th>Progresso</th><th>Próximo marco</th><th>Status</th><th>Ações</th></tr></thead>
+          <tbody>
+            ${inscricoes.map(i => _rowInscricao(i, hoje, progs)).join('')}
+          </tbody>
+        </table></div>`;
+    }
+  }
+
+  // Aba: Templates
+  const elTpl = document.getElementById('prog-conteudo-templates');
+  if (elTpl) {
+    if (!progs.length) {
+      elTpl.innerHTML = `<div class="chart-card" style="text-align:center;padding:48px 24px;color:#94a3b8;">
+        Nenhum template. <button class="btn-primary" style="margin-left:12px;" onclick="openModalTemplatePrograma()">+ Novo template</button>
+      </div>`;
+    } else {
+      elTpl.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;">
+        ${progs.map(p => {
+          const inscritos = inscricoes.filter(i => i.programaId === p.id).length;
+          return `<div class="chart-card" style="padding:18px;">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px;">
+              <div style="font-size:14px;font-weight:700;color:#0f172a;">${_esc(p.nome)}</div>
+              <span style="font-size:10px;font-weight:700;color:${p.tipo==='Fixo'?'#1d4ed8':'#15803d'};background:${p.tipo==='Fixo'?'#eff6ff':'#f0fdf4'};padding:2px 7px;border-radius:999px;">${p.tipo}</span>
+            </div>
+            <div style="font-size:12px;color:#64748b;margin-bottom:10px;min-height:32px;">${_esc(p.descricao || '—')}</div>
+            <div style="font-size:11.5px;color:#475569;margin-bottom:10px;">
+              ${p.tipo==='Fixo' ? `${p.marcos.length} marco(s)` : `A cada ${p.intervaloDias} dias`} · ${inscritos} inscrito(s)
+            </div>
+            <div style="display:flex;gap:6px;">
+              <button onclick="openModalTemplatePrograma('${p.id}')" style="flex:1;background:#f1f5f9;border:none;border-radius:6px;padding:6px 10px;font-size:11.5px;font-weight:600;color:#475569;cursor:pointer;">Editar</button>
+              <button onclick="openModalInscrever('${p.id}')" style="flex:1;background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:6px 10px;font-size:11.5px;font-weight:600;cursor:pointer;">Inscrever</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+    }
+  }
+}
+
+function _rowInscricao(ins, hoje, progs) {
+  const prog = progs.find(p => p.id === ins.programaId);
+  const progNome = prog ? prog.nome : '—';
+  const totalMarcos = ins.registros.length;
+  const realizados  = ins.registros.filter(r => r.dataReal).length;
+  const pct = totalMarcos ? (realizados / totalMarcos) * 100 : 0;
+  const prox = _proximoMarco(ins);
+  const atrasado = prox && prox.dataPrevista < hoje;
+  const corStatus = ins.status === 'Ativo' ? '#15803d' : ins.status === 'Pausado' ? '#a16207' : '#64748b';
+
+  return `<tr>
+    <td style="font-weight:600;">${_esc(ins.pacienteNome)}</td>
+    <td>${_esc(progNome)}</td>
+    <td>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <div style="flex:1;height:6px;background:#f1f5f9;border-radius:3px;overflow:hidden;min-width:60px;">
+          <div style="height:100%;width:${pct.toFixed(1)}%;background:${pct>=80?'#16a34a':pct>=40?'#3b82f6':'#94a3b8'};"></div>
+        </div>
+        <span style="font-size:11.5px;color:#64748b;white-space:nowrap;">${realizados}/${totalMarcos}</span>
+      </div>
+    </td>
+    <td>${prox ? `<span style="color:${atrasado?'#dc2626':'#475569'};${atrasado?'font-weight:700;':''}">${atrasado?'⚠️ ':''}${formatDate(prox.dataPrevista)}</span>` : '<span style="color:#94a3b8;">—</span>'}</td>
+    <td><span style="color:${corStatus};font-weight:600;font-size:12px;">${ins.status}</span></td>
+    <td style="white-space:nowrap;">
+      ${prox && ins.status === 'Ativo' ? `<button onclick="openModalRegistrarMarco('${ins.id}',${prox.marcoIdx})" style="background:#10b981;color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:600;cursor:pointer;margin-right:4px;">✓ Registrar</button>` : ''}
+      ${ins.status === 'Ativo' ? `<button onclick="pausarInscricao('${ins.id}')" title="Pausar" style="background:#fef3c7;color:#a16207;border:none;border-radius:6px;padding:4px 7px;font-size:11px;cursor:pointer;">⏸</button>` : ''}
+      ${ins.status === 'Pausado' ? `<button onclick="reativarInscricao('${ins.id}')" title="Reativar" style="background:#dbeafe;color:#1d4ed8;border:none;border-radius:6px;padding:4px 7px;font-size:11px;cursor:pointer;">▶</button>` : ''}
+      <button onclick="excluirInscricao('${ins.id}')" title="Excluir" style="background:#fef2f2;color:#b91c1c;border:none;border-radius:6px;padding:4px 7px;font-size:11px;cursor:pointer;margin-left:2px;">🗑️</button>
+    </td>
+  </tr>`;
+}
+
+// === Modais ===
+function openModalInscrever(programaPreId) {
+  const progs = getProgramas().filter(p => p.ativo !== false);
+  const sel = document.getElementById('ins-programa');
+  sel.innerHTML = progs.map(p => `<option value="${_esc(p.id)}">${_esc(p.nome)} (${p.tipo})</option>`).join('');
+  if (programaPreId) sel.value = programaPreId;
+  document.getElementById('ins-data-inicio').value = new Date().toISOString().substring(0, 10);
+  document.getElementById('ins-paciente-nome').value = '';
+  document.getElementById('ins-paciente-whats').value = '';
+  // datalist com pacientes
+  const pacs = DB.get('pacientes');
+  const nomes = [...new Set(pacs.map(p => p.nome).filter(Boolean))];
+  document.getElementById('ins-pacientes-list').innerHTML = nomes.map(n => `<option value="${_esc(n)}">`).join('');
+  _atualizarInfoPrograma();
+  sel.onchange = _atualizarInfoPrograma;
+  openModal('modal-inscrever');
+}
+function _atualizarInfoPrograma() {
+  const id = document.getElementById('ins-programa').value;
+  const prog = getProgramas().find(p => p.id === id);
+  const info = document.getElementById('ins-prog-info');
+  if (!prog || !info) return;
+  if (prog.tipo === 'Fixo') {
+    info.innerHTML = `<strong>${_esc(prog.nome)}</strong> · ${prog.marcos.length} marcos: ${prog.marcos.map(m => m.dias + 'd').join(', ')}`;
+  } else {
+    info.innerHTML = `<strong>${_esc(prog.nome)}</strong> · Contínuo a cada ${prog.intervaloDias} dias`;
+  }
+}
+function saveInscricao(e) {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const programaId = fd.get('programaId');
+  const nome = (fd.get('pacienteNome') || '').trim();
+  if (!nome) { alert('Informe o nome do paciente'); return; }
+  const whatsapp = fd.get('pacienteWhatsapp') || '';
+  const dataInicio = fd.get('dataInicio');
+  // Tenta encontrar pacIdx
+  const pacs = DB.get('pacientes');
+  const pacIdx = pacs.findIndex(p => p.nome === nome);
+  const ins = inscreverEmPrograma(programaId, { nome, whatsapp, pacIdx: pacIdx >= 0 ? pacIdx : null }, dataInicio);
+  if (ins) {
+    closeModal('modal-inscrever');
+    renderProgramas();
+    toast(`✅ ${nome} inscrito(a). Agendamentos e follow-ups criados automaticamente.`);
+  }
+}
+
+let _marcoBuffer = [];
+let _camposBuffer = [];
+function openModalTemplatePrograma(id) {
+  const progs = getProgramas();
+  const p = id ? progs.find(x => x.id === id) : null;
+  document.getElementById('tpl-id').value = p ? p.id : '';
+  document.getElementById('tpl-nome').value = p ? p.nome : '';
+  document.getElementById('tpl-descricao').value = p ? (p.descricao || '') : '';
+  document.getElementById('tpl-tipo').value = p ? p.tipo : 'Fixo';
+  document.getElementById('tpl-intervalo').value = p ? (p.intervaloDias || 90) : 90;
+  _marcoBuffer = p && p.marcos ? p.marcos.map(m => ({...m})) : [{ dias: 7, descricao: 'Retorno 7 dias', tipoAtividade: 'Consultório', duracao: 30 }];
+  _camposBuffer = p && p.camposClinicos ? p.camposClinicos.map(c => ({...c})) : [];
+  _atualizarTipoPrograma();
+  _renderMarcoBuffer();
+  _renderCamposBuffer();
+  openModal('modal-template-programa');
+}
+function _atualizarTipoPrograma() {
+  const tipo = document.getElementById('tpl-tipo').value;
+  document.getElementById('tpl-intervalo-wrap').style.display = tipo === 'Contínuo' ? '' : 'none';
+  document.getElementById('tpl-marcos-wrap').style.display = tipo === 'Fixo' ? '' : 'none';
+}
+function _renderMarcoBuffer() {
+  const cont = document.getElementById('tpl-marcos');
+  cont.innerHTML = _marcoBuffer.map((m, idx) => `
+    <div style="display:grid;grid-template-columns:70px 1fr 110px 80px 30px;gap:6px;align-items:center;">
+      <input type="number" min="1" value="${m.dias}" onchange="_marcoBuffer[${idx}].dias=parseInt(this.value)||1" class="input" placeholder="dias" />
+      <input type="text" value="${_esc(m.descricao)}" oninput="_marcoBuffer[${idx}].descricao=this.value" class="input" placeholder="Descrição" />
+      <select onchange="_marcoBuffer[${idx}].tipoAtividade=this.value" class="select">
+        <option value="Consultório" ${m.tipoAtividade==='Consultório'?'selected':''}>Consultório</option>
+        <option value="Visita Domiciliar" ${m.tipoAtividade==='Visita Domiciliar'?'selected':''}>Domiciliar</option>
+        <option value="Visita Hospitalar" ${m.tipoAtividade==='Visita Hospitalar'?'selected':''}>Hospitalar</option>
+        <option value="Outro" ${m.tipoAtividade==='Outro'?'selected':''}>Outro</option>
+      </select>
+      <input type="number" min="10" step="5" value="${m.duracao||50}" onchange="_marcoBuffer[${idx}].duracao=parseInt(this.value)||50" class="input" placeholder="min" />
+      <button type="button" onclick="_marcoBuffer.splice(${idx},1);_renderMarcoBuffer();" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:14px;">×</button>
+    </div>
+  `).join('');
+}
+function _addMarcoTpl() {
+  const ultimo = _marcoBuffer[_marcoBuffer.length-1];
+  const proxDias = ultimo ? ultimo.dias + 30 : 7;
+  _marcoBuffer.push({ dias: proxDias, descricao: `Retorno ${proxDias} dias`, tipoAtividade: 'Consultório', duracao: 50 });
+  _renderMarcoBuffer();
+}
+function _renderCamposBuffer() {
+  const cont = document.getElementById('tpl-campos');
+  cont.innerHTML = _camposBuffer.map((c, idx) => `
+    <div style="display:grid;grid-template-columns:1fr 140px 30px;gap:6px;align-items:center;">
+      <input type="text" value="${_esc(c.nome)}" oninput="_camposBuffer[${idx}].nome=this.value" class="input" placeholder="Ex: PA, Peso…" />
+      <input type="text" value="${_esc(c.unidade||'')}" oninput="_camposBuffer[${idx}].unidade=this.value" class="input" placeholder="Unidade" />
+      <button type="button" onclick="_camposBuffer.splice(${idx},1);_renderCamposBuffer();" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:14px;">×</button>
+    </div>
+  `).join('');
+}
+function _addCampoClinicoTpl() {
+  _camposBuffer.push({ nome: '', unidade: '' });
+  _renderCamposBuffer();
+}
+function saveTemplatePrograma(e) {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const id = fd.get('programaId') || ('pg_' + Date.now());
+  const tipo = fd.get('tipo');
+  const programa = {
+    id, nome: fd.get('nome'),
+    tipo, descricao: fd.get('descricao') || '',
+    marcos: tipo === 'Fixo' ? _marcoBuffer.filter(m => m.descricao).sort((a,b)=>a.dias-b.dias) : [],
+    intervaloDias: tipo === 'Contínuo' ? (parseInt(fd.get('intervaloDias'))||90) : null,
+    camposClinicos: _camposBuffer.filter(c => c.nome),
+    ativo: true,
+  };
+  const progs = getProgramas();
+  const idx = progs.findIndex(p => p.id === id);
+  if (idx >= 0) progs[idx] = programa; else progs.push(programa);
+  DB.set('programas', progs);
+  closeModal('modal-template-programa');
+  renderProgramas();
+  toast(`✅ Template "${programa.nome}" salvo`);
+}
+
+function openModalRegistrarMarco(inscricaoId, marcoIdx) {
+  const ins = getInscricoes().find(i => i.id === inscricaoId);
+  if (!ins) return;
+  const prog = getProgramas().find(p => p.id === ins.programaId);
+  if (!prog) return;
+  const reg = ins.registros[marcoIdx];
+  const marco = prog.tipo === 'Fixo' ? prog.marcos[reg.marcoIdx] : { descricao: prog.nome };
+  document.getElementById('rm-inscricao').value = inscricaoId;
+  document.getElementById('rm-marco-idx').value = marcoIdx;
+  document.getElementById('rm-info').innerHTML = `<strong>${_esc(ins.pacienteNome)}</strong> · ${_esc(prog.nome)} · ${_esc(marco.descricao)}<br><span style="font-size:11px;color:#16a34a;">Previsto: ${formatDate(reg.dataPrevista)}</span>`;
+  const cont = document.getElementById('rm-campos-clinicos');
+  cont.innerHTML = (prog.camposClinicos || []).map(c => `
+    <div><label style="font-size:11.5px;color:#475569;">${_esc(c.nome)} ${c.unidade ? `<span style="color:#94a3b8;">(${_esc(c.unidade)})</span>` : ''}</label>
+      <input type="text" class="input" name="clin_${_esc(c.nome)}" placeholder="Ex: 130/85" /></div>
+  `).join('') || '<div style="font-size:12px;color:#94a3b8;">Sem campos clínicos definidos no template.</div>';
+  document.getElementById('rm-obs').value = '';
+  openModal('modal-registrar-marco');
+}
+function saveRegistroMarco(e) {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const inscricaoId = fd.get('inscricaoId');
+  const marcoIdx = parseInt(fd.get('marcoIdx'));
+  const obs = fd.get('obs') || '';
+  // Coleta valores clínicos
+  const valoresClinicos = {};
+  for (const [k, v] of fd.entries()) {
+    if (k.startsWith('clin_') && v) valoresClinicos[k.replace('clin_','')] = v;
+  }
+  registrarMarco(inscricaoId, marcoIdx, valoresClinicos, obs);
+  closeModal('modal-registrar-marco');
+  renderProgramas();
+  toast('✅ Marco registrado');
+}
+
+function pausarInscricao(id) {
+  const inscricoes = getInscricoes();
+  const ins = inscricoes.find(i => i.id === id);
+  if (!ins) return;
+  ins.status = 'Pausado';
+  DB.set('inscricoes', inscricoes);
+  renderProgramas();
+}
+function reativarInscricao(id) {
+  const inscricoes = getInscricoes();
+  const ins = inscricoes.find(i => i.id === id);
+  if (!ins) return;
+  ins.status = 'Ativo';
+  DB.set('inscricoes', inscricoes);
+  renderProgramas();
+}
+function excluirInscricao(id) {
+  if (!confirm('Excluir esta inscrição? Os agendamentos futuros vinculados também serão removidos.')) return;
+  const inscricoes = getInscricoes();
+  const ins = inscricoes.find(i => i.id === id);
+  if (!ins) return;
+  // Remove agendamentos não realizados (status != Compareceu)
+  const ags = DB.get('agendamentos');
+  const agsLimpos = ags.filter(a => a.programaInscricaoId !== id || a.status === 'Compareceu');
+  DB.set('agendamentos', agsLimpos);
+  // Remove follow-ups pendentes
+  const fus = DB.get('followup').filter(f => f.programaInscricaoId !== id || f.feito);
+  DB.set('followup', fus);
+  // Remove inscrição
+  const filtradas = inscricoes.filter(i => i.id !== id);
+  DB.set('inscricoes', filtradas);
+  renderProgramas();
+  toast('Inscrição excluída');
+}
+
 // Retorna o valor sugerido pra um procedimento dado a forma de pagamento
 function valorSugerido(nomeProc, pagamento) {
   const procs = getProcedimentos();
@@ -400,7 +1022,7 @@ function popularProcedimentoSelect() {
   if (!sel) return;
   const procs = getProcedimentos();
   const valAtual = sel.value;
-  sel.innerHTML = procs.map(p => `<option value="${p.nome}">${p.nome}</option>`).join('');
+  sel.innerHTML = procs.map(p => `<option value="${_esc(p.nome)}">${_esc(p.nome)}</option>`).join('');
   if (valAtual && procs.some(p => p.nome === valAtual)) sel.value = valAtual;
 }
 
@@ -413,7 +1035,7 @@ function atualizarValorSugerido() {
   const procs = getProcedimentos();
   const p = procs.find(x => x.nome === sel.value);
   if (!p) { hint.textContent = ''; return; }
-  hint.innerHTML = `💡 ${p.nome}: PIX/Dinheiro <strong>${BRL(p.valorPix)}</strong> · Cartão <strong>${BRL(p.valorCartao)}</strong>`;
+  hint.innerHTML = `💡 ${_esc(p.nome)}: PIX/Dinheiro <strong>${BRL(p.valorPix)}</strong> · Cartão <strong>${BRL(p.valorCartao)}</strong>`;
   const sug = valorSugerido(sel.value, pag.value);
   const atual = parseFloat(valor.value) || 0;
   if (!atual || atual === p.valorPix || atual === p.valorCartao) {
@@ -453,7 +1075,7 @@ function renderPrecos() {
     const diffPct = p.valorPix ? (diff / p.valorPix) * 100 : 0;
     return `
       <tr>
-        <td style="font-weight:600;color:#0f172a;">${p.nome}${p.obs ? `<div style="font-size:11px;color:#94a3b8;font-weight:400;margin-top:2px;">${p.obs}</div>` : ''}</td>
+        <td style="font-weight:600;color:#0f172a;">${_esc(p.nome)}${p.obs ? `<div style="font-size:11px;color:#94a3b8;font-weight:400;margin-top:2px;">${_esc(p.obs)}</div>` : ''}</td>
         <td style="text-align:right;font-weight:600;color:#10b981;">${BRL(p.valorPix)}</td>
         <td style="text-align:right;font-weight:600;color:#3b82f6;">${BRL(p.valorCartao)}</td>
         <td style="text-align:center;color:${diff > 0 ? '#3b82f6' : diff < 0 ? '#ef4444' : '#94a3b8'};font-size:12px;">${diff === 0 ? '—' : (diff > 0 ? '+' : '') + BRL(diff) + (diffPct ? ` (${diffPct.toFixed(1)}%)` : '')}</td>
@@ -710,7 +1332,7 @@ function editRow(col, idx) {
     const procs = getProcedimentos();
     if (r.tipo && !procs.some(p => p.nome === r.tipo)) {
       const sel = document.getElementById('pac-procedimento');
-      if (sel) sel.insertAdjacentHTML('beforeend', `<option value="${r.tipo}">${r.tipo} (legado)</option>`);
+      if (sel) sel.insertAdjacentHTML('beforeend', `<option value="${_esc(r.tipo)}">${_esc(r.tipo)} (legado)</option>`);
     }
     form.data.value = r.data || '';
     form.tipo.value = r.tipo || '';
@@ -764,7 +1386,17 @@ function saveCrm(e) {
   const fd = new FormData(e.target);
   const item = { data: fd.get('data'), hora: fd.get('hora'), nome: fd.get('nome'), whatsapp: fd.get('whatsapp'), idade: fd.get('idade'), canal: fd.get('canal'), tipo: fd.get('tipo'), status: fd.get('status'), obs: fd.get('obs') };
   const data = DB.get('crm');
-  if (editState.col === 'crm' && editState.idx !== null) { data[editState.idx] = item; } else { data.unshift(item); }
+  // Bloqueia duplicata por WhatsApp (compara só dígitos)
+  const cleanPhone = (item.whatsapp || '').replace(/\D/g, '');
+  const editIdx = (editState.col === 'crm' && editState.idx !== null) ? editState.idx : -1;
+  if (cleanPhone) {
+    const dupIdx = data.findIndex((c, i) => i !== editIdx && c.whatsapp && c.whatsapp.replace(/\D/g, '') === cleanPhone);
+    if (dupIdx >= 0) {
+      const dupNome = data[dupIdx].nome || '(sem nome)';
+      if (!confirm(`Já existe um contato com este WhatsApp: "${dupNome}".\n\nDeseja criar mesmo assim?`)) return;
+    }
+  }
+  if (editIdx >= 0) { data[editIdx] = item; } else { data.unshift(item); }
   DB.set('crm', data);
   closeModal('modal-crm');
   renderCrm();
@@ -797,14 +1429,14 @@ function renderCrm() {
 
   if (tbody) {
     tbody.innerHTML = data.map((r, i) => `
-      <tr data-search="${r.nome} ${r.canal||''} ${r.status||''} ${r.tipo||''}" data-status="${r.status}">
+      <tr data-search="${_esc(r.nome)} ${_esc(r.canal||'')} ${_esc(r.status||'')} ${_esc(r.tipo||'')}" data-status="${_esc(r.status)}">
         <td>${formatDate(r.data)}</td>
-        <td style="font-weight:600;color:#0f172a;">${r.nome}</td>
+        <td style="font-weight:600;color:#0f172a;">${_esc(r.nome)}</td>
         <td>${r.whatsapp ? (getZapiConfig().enabled
-          ? `<button onclick="openCrmChat(${i})" style="background:none;border:none;cursor:pointer;color:#10b981;font-weight:600;font-size:13px;padding:0;font-family:'Inter',sans-serif;">💬 ${r.whatsapp}</button>`
-          : `<a href="https://wa.me/55${r.whatsapp.replace(/\D/g,'')}" target="_blank" style="color:#10b981;font-weight:600;text-decoration:none;">💬 ${r.whatsapp}</a>`) : '—'}</td>
-        <td style="color:#475569;">${r.canal||'—'}</td>
-        <td style="color:#475569;">${r.tipo||'—'}</td>
+          ? `<button onclick="openCrmChat(${i})" style="background:none;border:none;cursor:pointer;color:#10b981;font-weight:600;font-size:13px;padding:0;font-family:'Inter',sans-serif;">💬 ${_esc(r.whatsapp)}</button>`
+          : `<a href="https://wa.me/55${r.whatsapp.replace(/\D/g,'')}" target="_blank" style="color:#10b981;font-weight:600;text-decoration:none;">💬 ${_esc(r.whatsapp)}</a>`) : '—'}</td>
+        <td style="color:#475569;">${_esc(r.canal||'—')}</td>
+        <td style="color:#475569;">${_esc(r.tipo||'—')}</td>
         <td>${statusSelect(r.status, i)}</td>
         <td style="white-space:nowrap;">
           <button onclick="editRow('crm',${i})" title="Editar" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;">✏️</button>
@@ -1008,13 +1640,13 @@ function _kanbanCardHtml(r, col) {
               style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#10b981;font-weight:600;
                      background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:4px 9px;
                      cursor:pointer;margin-bottom:9px;font-family:'Inter',sans-serif;">
-              💬 ${r.whatsapp}
+              💬 ${_esc(r.whatsapp)}
            </button>`
         : `<a href="https://wa.me/55${r.whatsapp.replace(/\D/g,'')}" target="_blank"
               style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#10b981;font-weight:600;
                      background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:4px 9px;
                      text-decoration:none;margin-bottom:9px;">
-              💬 ${r.whatsapp}
+              💬 ${_esc(r.whatsapp)}
            </a>`)
     : '';
 
@@ -1027,12 +1659,12 @@ function _kanbanCardHtml(r, col) {
          ondragend="document.querySelectorAll('.kanban-card').forEach(c=>c.classList.remove('kanban-dragging'))">
 
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;margin-bottom:6px;">
-        <div style="font-size:13px;font-weight:700;color:#0f172a;line-height:1.3;">${r.nome}</div>
+        <div style="font-size:13px;font-weight:700;color:#0f172a;line-height:1.3;">${_esc(r.nome)}</div>
         ${badge}
       </div>
 
       ${(r.tipo && r.tipo.trim().toLowerCase() !== col.status.toLowerCase())
-          ? `<div style="font-size:11.5px;color:#475569;margin-bottom:2px;">${r.tipo}</div>`
+          ? `<div style="font-size:11.5px;color:#475569;margin-bottom:2px;">${_esc(r.tipo)}</div>`
           : ''}
       <div style="font-size:11px;color:#94a3b8;margin-bottom:8px;">
         ${formatDate(r.data)} · <span style="font-weight:600;color:${dias.cor};">${dias.texto}</span>
@@ -1266,7 +1898,7 @@ async function processarImportWA() {
   if (!texto && !temImagem) { toast('Cole texto ou uma imagem para analisar'); return; }
   if (!temImagem && texto.length < 20) { toast('Conversa muito curta — cole mais contexto ou um print'); return; }
 
-  const key = localStorage.getItem('consult_gemini_key');
+  const key = getGeminiKey();
   if (!key) { toast('Configure a chave da MaestrIA (⚙️ no chat) primeiro'); return; }
 
   document.getElementById('wa-step-paste').style.display = 'none';
@@ -1351,13 +1983,13 @@ ${temImagem ? '- O nome do contato no print costuma estar no topo (header da con
     const preview = document.getElementById('wa-preview-content');
     preview.innerHTML = `
       <div style="display:grid;grid-template-columns:90px 1fr;gap:6px 12px;">
-        <div style="color:#64748b;font-weight:600;">Nome:</div><div>${waExtracted.nome || '<em style="color:#cbd5e1;">não identificado</em>'}</div>
-        <div style="color:#64748b;font-weight:600;">WhatsApp:</div><div>${waExtracted.whatsapp || '<em style="color:#cbd5e1;">não identificado</em>'}</div>
-        <div style="color:#64748b;font-weight:600;">Idade:</div><div>${waExtracted.idade || '<em style="color:#cbd5e1;">—</em>'}</div>
-        <div style="color:#64748b;font-weight:600;">Canal:</div><div>${waExtracted.canal}</div>
-        <div style="color:#64748b;font-weight:600;">Tipo:</div><div>${waExtracted.tipo}</div>
-        <div style="color:#64748b;font-weight:600;">Status:</div><div>${waExtracted.status}</div>
-        <div style="color:#64748b;font-weight:600;">Resumo:</div><div style="font-style:italic;color:#475569;">${waExtracted.obs || '—'}</div>
+        <div style="color:#64748b;font-weight:600;">Nome:</div><div>${waExtracted.nome ? _esc(waExtracted.nome) : '<em style="color:#cbd5e1;">não identificado</em>'}</div>
+        <div style="color:#64748b;font-weight:600;">WhatsApp:</div><div>${waExtracted.whatsapp ? _esc(waExtracted.whatsapp) : '<em style="color:#cbd5e1;">não identificado</em>'}</div>
+        <div style="color:#64748b;font-weight:600;">Idade:</div><div>${waExtracted.idade ? _esc(waExtracted.idade) : '<em style="color:#cbd5e1;">—</em>'}</div>
+        <div style="color:#64748b;font-weight:600;">Canal:</div><div>${_esc(waExtracted.canal)}</div>
+        <div style="color:#64748b;font-weight:600;">Tipo:</div><div>${_esc(waExtracted.tipo)}</div>
+        <div style="color:#64748b;font-weight:600;">Status:</div><div>${_esc(waExtracted.status)}</div>
+        <div style="color:#64748b;font-weight:600;">Resumo:</div><div style="font-style:italic;color:#475569;">${waExtracted.obs ? _esc(waExtracted.obs) : '—'}</div>
       </div>
       <div style="margin-top:10px;padding-top:10px;border-top:1px dashed #bbf7d0;font-size:11.5px;color:#15803d;">💡 Você pode ajustar tudo depois clicando no ✏️ da linha no CRM</div>`;
 
@@ -1418,8 +2050,8 @@ function renderAtendidosSemFollowup() {
         ${visibles.map(p => `
           <div style="display:flex;align-items:center;justify-content:space-between;background:#fff;border-radius:8px;padding:10px 14px;border:1px solid #bfdbfe;">
             <div>
-              <span style="font-weight:600;color:#0f172a;">${p.nome}</span>
-              <span style="color:#64748b;font-size:12px;margin-left:10px;">Consulta: ${formatDate(p.data)} · ${p.tipo}</span>
+              <span style="font-weight:600;color:#0f172a;">${_esc(p.nome)}</span>
+              <span style="color:#64748b;font-size:12px;margin-left:10px;">Consulta: ${formatDate(p.data)} · ${_esc(p.tipo)}</span>
             </div>
             <button onclick="convertAtendidoToFollowup(${p._idx})" style="background:#3b82f6;color:#fff;border:none;border-radius:7px;padding:7px 16px;font-weight:600;font-size:13px;cursor:pointer;">
               + Criar Follow-Up
@@ -1454,6 +2086,7 @@ function savePaciente(e) {
   e.preventDefault();
   const fd = new FormData(e.target);
   const valorTotal = parseFloat(fd.get('valor')) || 0;
+  if (valorTotal < 0) { alert('Valor não pode ser negativo.'); return; }
   const pagamento  = fd.get('pagamento');
   const parcelas   = pagamento === 'Cartão crédito' ? (parseInt(fd.get('parcelas')) || 1) : 1;
   const dataConsulta = fd.get('data') || new Date().toISOString().split('T')[0];
@@ -1562,12 +2195,12 @@ function renderPacientes() {
     return;
   }
   tbody.innerHTML = data.map((r, i) => `
-    <tr data-search="${r.nome} ${r.tipo}" data-status="${r.statusPgto === 'Pago' ? 'Ativo' : 'Inativo'}" class="border-b border-gray-50 hover:bg-gray-50">
+    <tr data-search="${_esc(r.nome)} ${_esc(r.tipo)}" data-status="${r.statusPgto === 'Pago' ? 'Ativo' : 'Inativo'}" class="border-b border-gray-50 hover:bg-gray-50">
       <td class="px-4 py-3 text-gray-600">${formatDate(r.data)}</td>
-      <td class="px-4 py-3 font-medium text-gray-900">${r.nome}</td>
-      <td class="px-4 py-3 text-gray-600">${r.tipo}</td>
+      <td class="px-4 py-3 font-medium text-gray-900">${_esc(r.nome)}</td>
+      <td class="px-4 py-3 text-gray-600">${_esc(r.tipo)}</td>
       <td class="px-4 py-3 font-semibold text-gray-900">${BRL(r.valor)}</td>
-      <td class="px-4 py-3 text-gray-600">${r.pagamento}</td>
+      <td class="px-4 py-3 text-gray-600">${_esc(r.pagamento)}</td>
       <td class="px-4 py-3">${pgtoSelect(r.statusPgto, i)}</td>
       <td class="px-4 py-3">
         <button onclick="abrirPerfilPaciente('${encodeURIComponent(r.nome)}')" style="background:#f1f5f9;border:none;border-radius:6px;padding:4px 9px;font-size:11.5px;cursor:pointer;color:#475569;font-weight:600;" title="Ver perfil completo" onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f1f5f9'">👤 Ver</button>
@@ -1636,10 +2269,10 @@ function renderFollowup() {
     const atrasado = !r.feito && r.dataContato && r.dataContato < today;
     return `
     <tr class="border-b border-gray-50 hover:bg-gray-50 ${atrasado ? 'bg-orange-50' : ''}">
-      <td class="px-4 py-3 font-medium text-gray-900">${r.nome}</td>
+      <td class="px-4 py-3 font-medium text-gray-900">${_esc(r.nome)}${r.programaInscricaoId ? ' <span title="Vinculado a programa de acompanhamento" style="background:#dbeafe;color:#1d4ed8;font-size:10px;padding:2px 6px;border-radius:999px;margin-left:4px;font-weight:700;">🔁 Programa</span>' : ''}</td>
       <td class="px-4 py-3 text-gray-600">${formatDate(r.ultConsulta)}</td>
       <td class="px-4 py-3 text-gray-600 ${atrasado ? 'text-orange-600 font-semibold' : ''}">${formatDate(r.dataContato)}</td>
-      <td class="px-4 py-3 text-gray-600">${r.tipoContato}</td>
+      <td class="px-4 py-3 text-gray-600">${_esc(r.tipoContato)}</td>
       <td class="px-4 py-3">
         <input type="checkbox" ${r.feito ? 'checked' : ''} onchange="toggleFollowupFeito(${i})" class="w-4 h-4 accent-green-600 cursor-pointer" />
       </td>
@@ -1773,7 +2406,7 @@ function openNovoAgendamento(prefill = {}) {
   // Popula select de procedimentos
   const sel = document.getElementById('ag-procedimento');
   const procs = getProcedimentos();
-  sel.innerHTML = procs.map(p => `<option value="${p.nome}">${p.nome}</option>`).join('');
+  sel.innerHTML = procs.map(p => `<option value="${_esc(p.nome)}">${_esc(p.nome)}</option>`).join('');
   // Pré-preenche
   form.data.value = prefill.data || _ymd(new Date());
   form.hora.value = prefill.hora || '09:00';
@@ -1800,8 +2433,8 @@ function editAgendamento(id) {
   const sel = document.getElementById('ag-procedimento');
   const procs = getProcedimentos();
   // Garante que o procedimento dele esteja no select
-  let opts = procs.map(p => `<option value="${p.nome}">${p.nome}</option>`).join('');
-  if (a.procedimento && !procs.some(p => p.nome === a.procedimento)) opts += `<option value="${a.procedimento}">${a.procedimento} (legado)</option>`;
+  let opts = procs.map(p => `<option value="${_esc(p.nome)}">${_esc(p.nome)}</option>`).join('');
+  if (a.procedimento && !procs.some(p => p.nome === a.procedimento)) opts += `<option value="${_esc(a.procedimento)}">${_esc(a.procedimento)} (legado)</option>`;
   sel.innerHTML = opts;
   form.data.value = a.data;
   form.hora.value = a.hora;
@@ -1841,7 +2474,7 @@ function saveAgendamento(e) {
   if (conflito && item.status !== 'Cancelado') {
     const aviso = document.getElementById('ag-conflito-aviso');
     aviso.style.display = 'block';
-    aviso.innerHTML = `⚠️ Conflito com agendamento de <strong>${conflito.pacienteNome}</strong> às ${conflito.hora} (${conflito.duracao} min). Mude o horário ou cancele para continuar.`;
+    aviso.innerHTML = `⚠️ Conflito com agendamento de <strong>${_esc(conflito.pacienteNome)}</strong> às ${_esc(conflito.hora)} (${conflito.duracao} min). Mude o horário ou cancele para continuar.`;
     return;
   }
   // Verifica bloqueio
@@ -2403,7 +3036,9 @@ function _viewWeekOrDay(numDias) {
 function saveDespesa(e) {
   e.preventDefault();
   const fd = new FormData(e.target);
-  const item = { data: fd.get('data'), descricao: fd.get('descricao'), categoria: fd.get('categoria'), tipo: fd.get('tipo'), valor: parseFloat(fd.get('valor')) || 0, formaPgto: fd.get('formaPgto') };
+  const valorDesp = parseFloat(fd.get('valor')) || 0;
+  if (valorDesp < 0) { alert('Valor não pode ser negativo.'); return; }
+  const item = { data: fd.get('data'), descricao: fd.get('descricao'), categoria: fd.get('categoria'), tipo: fd.get('tipo'), valor: valorDesp, formaPgto: fd.get('formaPgto') };
   const data = DB.get('despesas');
   if (editState.col === 'despesas' && editState.idx !== null) { data[editState.idx] = item; } else { data.unshift(item); }
   DB.set('despesas', data);
@@ -2551,10 +3186,10 @@ function renderReceita() {
   tbody.innerHTML = linhasFiltradas.map(({ p, idx }) => `
     <tr>
       <td style="color:#475569;">${formatDate(p.data)}</td>
-      <td style="font-weight:600;color:#0f172a;">${p.nome}</td>
-      <td style="color:#475569;">${p.tipo || '—'}</td>
+      <td style="font-weight:600;color:#0f172a;">${_esc(p.nome)}</td>
+      <td style="color:#475569;">${_esc(p.tipo || '—')}</td>
       <td style="text-align:right;font-weight:700;color:#0f172a;">${BRL(p.valor)}</td>
-      <td style="color:#475569;">${p.pagamento || '—'}</td>
+      <td style="color:#475569;">${_esc(p.pagamento || '—')}</td>
       <td>${pgtoSelect(p.statusPgto, idx)}</td>
       <td style="white-space:nowrap;">
         <button onclick="editRow('pacientes',${idx})" class="text-blue-400 hover:text-blue-600 text-xs mr-2" title="Editar">✏️</button>
@@ -2590,11 +3225,21 @@ function renderDespesas() {
   const tbody = document.getElementById('desp-tbody');
 
   const totalDesp = data.reduce((s, r) => s + r.valor, 0);
-  const totalRec = pacs.filter(p => p.statusPgto === 'Pago').reduce((s, r) => s + r.valor, 0);
-  const lucro = totalRec - totalDesp;
-  const margem = totalRec ? (lucro / totalRec) * 100 : 0;
+  // === MÉTRICAS PADRONIZADAS ===
+  // Faturamento bruto = soma de TUDO emitido (independe de pagamento) — métrica usada em Dashboard/Relatório
+  // Receita realizada = soma do que foi efetivamente PAGO — base para lucro contábil
+  const faturamentoBruto = pacs.reduce((s, p) => s + (p.valor || 0), 0);
+  const receitaRealizada = pacs.filter(p => p.statusPgto === 'Pago').reduce((s, r) => s + (r.valor || 0), 0);
+  const aReceber         = pacs.filter(p => p.statusPgto === 'Pendente').reduce((s, r) => s + (r.valor || 0), 0);
+  const lucro  = receitaRealizada - totalDesp;
+  const margem = receitaRealizada ? (lucro / receitaRealizada) * 100 : 0;
 
-  document.getElementById('pl-receita').textContent = BRL(totalRec);
+  // P&L: mostra ambas as métricas — lucro é calculado sobre a realizada (faz sentido contábil)
+  const elReceita = document.getElementById('pl-receita');
+  if (elReceita) {
+    elReceita.innerHTML = `${BRL(receitaRealizada)}
+      <div style="font-size:11px;color:#94a3b8;font-weight:500;margin-top:2px;">Bruto emitido: ${BRL(faturamentoBruto)}${aReceber > 0 ? ` · A receber: ${BRL(aReceber)}` : ''}</div>`;
+  }
   document.getElementById('pl-despesas').textContent = BRL(totalDesp);
   document.getElementById('pl-lucro').textContent = BRL(lucro);
   document.getElementById('pl-margem').textContent = PCT(margem);
@@ -2635,11 +3280,11 @@ function renderDespesas() {
   tbody.innerHTML = data.map((r, i) => `
     <tr class="border-b border-gray-50 hover:bg-gray-50">
       <td class="px-4 py-3 text-gray-600">${formatDate(r.data)}</td>
-      <td class="px-4 py-3 text-gray-900">${r.descricao}</td>
-      <td class="px-4 py-3 text-gray-600">${r.categoria}</td>
-      <td class="px-4 py-3"><span class="badge ${r.tipo === 'Fixo' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}">${r.tipo}</span></td>
+      <td class="px-4 py-3 text-gray-900">${_esc(r.descricao)}</td>
+      <td class="px-4 py-3 text-gray-600">${_esc(r.categoria)}</td>
+      <td class="px-4 py-3"><span class="badge ${r.tipo === 'Fixo' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}">${_esc(r.tipo)}</span></td>
       <td class="px-4 py-3 font-semibold text-red-600">${BRL(r.valor)}</td>
-      <td class="px-4 py-3 text-gray-600">${r.formaPgto}</td>
+      <td class="px-4 py-3 text-gray-600">${_esc(r.formaPgto)}</td>
       <td class="px-4 py-3" style="white-space:nowrap;">
         <button onclick="editRow('despesas',${i})" class="text-blue-400 hover:text-blue-600 text-xs mr-2" title="Editar">✏️</button>
         <button onclick="deleteRow('despesas',${i})" class="text-red-400 hover:text-red-600 text-xs" title="Excluir">🗑️</button>
@@ -2867,10 +3512,10 @@ function renderInsightCards(insights, ts) {
       <div class="kpi-card" style="padding:14px 16px;background:${c.bg};border-left:3px solid ${c.border};">
         <div style="font-size:11px;font-weight:700;color:${c.titulo};text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
           <span>${c.icone}</span>
-          <span>${ins.titulo || ''}</span>
+          <span>${_esc(ins.titulo || '')}</span>
         </div>
-        <div style="font-size:12.5px;color:#334155;line-height:1.4;">${ins.descricao || ''}</div>
-        ${ins.acao ? `<div style="font-size:11px;color:${c.titulo};font-weight:600;margin-top:8px;">→ ${ins.acao}</div>` : ''}
+        <div style="font-size:12.5px;color:#334155;line-height:1.4;">${_esc(ins.descricao || '')}</div>
+        ${ins.acao ? `<div style="font-size:11px;color:${c.titulo};font-weight:600;margin-top:8px;">→ ${_esc(ins.acao)}</div>` : ''}
       </div>`;
   }).join('');
 
@@ -2897,7 +3542,7 @@ async function gerarInsightsSofia(force = false) {
     }
   }
 
-  const key = localStorage.getItem('consult_gemini_key');
+  const key = getGeminiKey();
   if (!key) {
     renderInsightCards([{ tipo:'info', titulo:'Configure a MaestrIA', descricao:'Clique no botão flutuante no canto inferior direito e configure a chave da MaestrIA para gerar insights automáticos.', acao:'' }]);
     return;
@@ -3079,7 +3724,7 @@ function renderRetencao() {
     lista.innerHTML = abandonados.slice(0, 15).map(p => `
       <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-bottom:1px solid #f8fafc;">
         <div style="flex:1;">
-          <div style="font-weight:600;color:#0f172a;font-size:13.5px;">${p.nome}</div>
+          <div style="font-weight:600;color:#0f172a;font-size:13.5px;">${_esc(p.nome)}</div>
           <div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">Última: ${formatDate(p.ultData)} · ${p.totalConsultas} consulta${p.totalConsultas > 1 ? 's' : ''} · LTV ${BRL(p.receita)}</div>
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
@@ -3559,10 +4204,14 @@ function renderDashboard(mes) {
   const crm   = DB.get('crm').filter(c => getMes(c.data) === mes);
   const agenda = DB.get('agenda').filter(a => getMes(a.data) === mes);
 
-  const fat       = pacs.reduce((s, p) => s + p.valor, 0);
+  // Padronização de métricas (idem renderDespesas e renderRelatorio):
+  // - fat = faturamento bruto (tudo emitido) — usado para KPI principal
+  // - receitaRealizada = só pagos — base de lucro contábil
+  const fat              = pacs.reduce((s, p) => s + p.valor, 0); // bruto
+  const receitaRealizada = pacs.filter(p => p.statusPgto === 'Pago').reduce((s, p) => s + (p.valor || 0), 0);
   const totalDesp = desps.reduce((s, d) => s + d.valor, 0);
-  const lucro     = fat - totalDesp;
-  const margem    = fat ? (lucro / fat) * 100 : 0;
+  const lucro     = receitaRealizada - totalDesp; // ALINHADO com Despesas (lucro sobre realizado)
+  const margem    = receitaRealizada ? (lucro / receitaRealizada) * 100 : 0;
   const ticket    = pacs.length ? fat / pacs.length : 0;
   const inad      = pacs.filter(p => p.statusPgto === 'Pendente').reduce((s, p) => s + p.valor, 0);
   const inadPct   = fat ? (inad / fat) * 100 : 0;
@@ -3577,9 +4226,10 @@ function renderDashboard(mes) {
   const prevAgenda = DB.get('agenda').filter(a => getMes(a.data) === prevMes);
   const prevCrm    = DB.get('crm').filter(c => getMes(c.data) === prevMes);
   const prevFat    = prevPacs.reduce((s, p) => s + p.valor, 0);
+  const prevRec    = prevPacs.filter(p => p.statusPgto === 'Pago').reduce((s, p) => s + (p.valor || 0), 0);
   const prevDesp   = prevDesps.reduce((s, d) => s + d.valor, 0);
   const prevPacN   = prevPacs.length;
-  const prevLucro  = prevFat - prevDesp;
+  const prevLucro  = prevRec - prevDesp; // lucro sobre realizado (consistente)
   const prevTotVagas = prevAgenda.reduce((s, a) => s + a.vagas, 0);
   const prevTotOcup  = prevAgenda.reduce((s, a) => s + a.ocupadas, 0);
   const prevOcup     = prevTotVagas ? (prevTotOcup / prevTotVagas) * 100 : 0;
@@ -3884,8 +4534,8 @@ function renderAlertasProativos({ fat, totalDesp, lucro, ocup, noshowPct, inadPc
       <div style="display:flex;align-items:flex-start;gap:12px;padding:14px 18px;background:${c.bg};border-radius:10px;border:1px solid ${c.bodyBorder};border-left:3px solid ${c.border};">
         <span style="font-size:20px;flex-shrink:0;line-height:1.4;">${a.icone}</span>
         <div style="flex:1;">
-          <div style="font-size:13px;font-weight:700;color:${c.titleColor};">${a.titulo}</div>
-          <div style="font-size:12px;color:#64748b;margin-top:3px;line-height:1.5;">${a.descricao}</div>
+          <div style="font-size:13px;font-weight:700;color:${c.titleColor};">${_esc(a.titulo)}</div>
+          <div style="font-size:12px;color:#64748b;margin-top:3px;line-height:1.5;">${_esc(a.descricao)}</div>
         </div>
       </div>`;
   }).join('');
@@ -4128,7 +4778,7 @@ function gerarPDF(mes) {
       <thead><tr><th>Data</th><th>Paciente</th><th>Procedimento</th><th class="r">Valor</th><th>Pagamento</th><th>Status</th></tr></thead>
       <tbody>
         ${pacs.sort((a,b) => (b.data||'').localeCompare(a.data||'')).map(p => `
-        <tr><td>${formatDate(p.data)}</td><td>${p.nome}</td><td>${p.tipo||'—'}</td><td class="r">${brl(p.valor)}</td><td>${p.pagamento||'—'}</td><td class="${p.statusPgto==='Pago'?'green':p.statusPgto==='Pendente'?'red-t':'gray'}">${p.statusPgto}</td></tr>`).join('')}
+        <tr><td>${formatDate(p.data)}</td><td>${_esc(p.nome)}</td><td>${_esc(p.tipo||'—')}</td><td class="r">${brl(p.valor)}</td><td>${_esc(p.pagamento||'—')}</td><td class="${p.statusPgto==='Pago'?'green':p.statusPgto==='Pendente'?'red-t':'gray'}">${_esc(p.statusPgto)}</td></tr>`).join('')}
         <tr class="total"><td colspan="3">Total</td><td class="r">${brl(fat)}</td><td colspan="2">${pacs.length} atendimento(s)</td></tr>
       </tbody>
     </table>
@@ -4159,12 +4809,15 @@ function renderRelatorio(mes) {
   const metas = DB.getObj('metas', { fat: 0, pac: 0, desp: 0 });
   const todosPacs = DB.get('pacientes');
 
-  const fat = pacs.reduce((s, p) => s + p.valor, 0);
+  // Métricas padronizadas (Dashboard, Despesas e Relatório agora batem)
+  const fat              = pacs.reduce((s, p) => s + (p.valor || 0), 0); // bruto emitido
+  const receitaRealizada = pacs.filter(p => p.statusPgto === 'Pago').reduce((s, p) => s + (p.valor || 0), 0);
+  const aReceber         = pacs.filter(p => p.statusPgto === 'Pendente').reduce((s, p) => s + (p.valor || 0), 0);
   const totalDesp = desps.reduce((s, d) => s + d.valor, 0);
-  const lucro = fat - totalDesp;
-  const margem = fat ? (lucro / fat) * 100 : 0;
-  const atend = crm.filter(c => c.status === 'Atendeu').length;
-  const conv = crm.length ? (atend / crm.length) * 100 : 0;
+  const lucro  = receitaRealizada - totalDesp; // lucro sobre realizado (consistente com Despesas)
+  const margem = receitaRealizada ? (lucro / receitaRealizada) * 100 : 0;
+  const atend  = crm.filter(c => c.status === 'Atendeu').length;
+  const conv   = crm.length ? (atend / crm.length) * 100 : 0;
   const ticket = pacs.length ? fat / pacs.length : 0;
 
   const statusIcon = (real, meta, inverted = false) => {
@@ -4258,15 +4911,34 @@ function renderRelatorio(mes) {
   const fixas  = desps.filter(d => d.tipo === 'Fixo').reduce((s, d) => s + d.valor, 0);
   const varRel = desps.filter(d => d.tipo === 'Variável').reduce((s, d) => s + d.valor, 0);
 
+  // ===== Programas de Acompanhamento (no mês) =====
+  const inscricoesAll = getInscricoes();
+  const inscricoesAtivas = inscricoesAll.filter(i => i.status === 'Ativo');
+  const marcosPrevistosMes = inscricoesAll.flatMap(i => i.registros.filter(r => getMes(r.dataPrevista) === mes));
+  const marcosFeitosMes    = marcosPrevistosMes.filter(r => r.dataReal && getMes(r.dataReal) === mes);
+  const cumprimentoPct     = marcosPrevistosMes.length ? (marcosFeitosMes.length / marcosPrevistosMes.length) * 100 : 0;
+  // Aderência por programa
+  const progsAll = getProgramas();
+  const aderPorPrograma = progsAll.map(p => {
+    const ins = inscricoesAll.filter(i => i.programaId === p.id);
+    const previstos = ins.flatMap(i => i.registros.filter(r => getMes(r.dataPrevista) === mes));
+    const feitos    = previstos.filter(r => r.dataReal);
+    return { nome: p.nome, tipo: p.tipo, ativos: ins.filter(i=>i.status==='Ativo').length,
+             previstos: previstos.length, feitos: feitos.length,
+             pct: previstos.length ? (feitos.length/previstos.length)*100 : 0 };
+  }).filter(p => p.ativos > 0 || p.previstos > 0);
+
   document.getElementById('relatorio-content').innerHTML = `
     <div class="chart-card">
       <h3 class="font-bold text-gray-800 mb-4 text-base">1. Resultado Financeiro</h3>
       <table class="w-full text-sm">
         <thead><tr class="border-b"><th class="text-left py-2 text-gray-600">Indicador</th><th class="text-right py-2 text-gray-600">Realizado</th><th class="text-right py-2 text-gray-600">Meta</th><th class="text-right py-2 text-gray-600">% Meta</th><th class="text-right py-2 text-gray-600">Status</th></tr></thead>
         <tbody>
-          <tr class="border-b border-gray-50"><td class="py-2 text-gray-700">Faturamento</td><td class="py-2 text-right font-semibold">${BRL(fat)}</td><td class="py-2 text-right text-gray-500">${BRL(metas.fat)}</td><td class="py-2 text-right">${metas.fat ? PCT((fat/metas.fat)*100) : '—'}</td><td class="py-2 text-right">${statusIcon(fat, metas.fat)}</td></tr>
+          <tr class="border-b border-gray-50"><td class="py-2 text-gray-700">Faturamento bruto <span style="font-size:10.5px;color:#94a3b8;font-weight:400;">(tudo emitido)</span></td><td class="py-2 text-right font-semibold">${BRL(fat)}</td><td class="py-2 text-right text-gray-500">${BRL(metas.fat)}</td><td class="py-2 text-right">${metas.fat ? PCT((fat/metas.fat)*100) : '—'}</td><td class="py-2 text-right">${statusIcon(fat, metas.fat)}</td></tr>
+          <tr class="border-b border-gray-50"><td class="py-2 text-gray-700">Receita realizada <span style="font-size:10.5px;color:#94a3b8;font-weight:400;">(só pagos)</span></td><td class="py-2 text-right font-semibold text-green-700">${BRL(receitaRealizada)}</td><td class="py-2 text-right text-gray-500">—</td><td class="py-2 text-right text-gray-600">${fat ? PCT((receitaRealizada/fat)*100) : '—'} do bruto</td><td class="py-2 text-right">—</td></tr>
+          ${aReceber > 0 ? `<tr class="border-b border-gray-50"><td class="py-2 text-gray-700">A receber <span style="font-size:10.5px;color:#94a3b8;font-weight:400;">(pendente)</span></td><td class="py-2 text-right font-semibold text-amber-600">${BRL(aReceber)}</td><td class="py-2 text-right text-gray-500">—</td><td class="py-2 text-right text-gray-600">${PCT((aReceber/fat)*100)}</td><td class="py-2 text-right">—</td></tr>` : ''}
           <tr class="border-b border-gray-50"><td class="py-2 text-gray-700">Despesas Totais</td><td class="py-2 text-right font-semibold text-red-600">${BRL(totalDesp)}</td><td class="py-2 text-right text-gray-500">${BRL(metas.desp)}</td><td class="py-2 text-right">${metas.desp ? PCT((totalDesp/metas.desp)*100) : '—'}</td><td class="py-2 text-right">${statusIcon(totalDesp, metas.desp, true)}</td></tr>
-          <tr class="border-b border-gray-50"><td class="py-2 font-semibold text-gray-800">Lucro Líquido</td><td class="py-2 text-right font-bold text-green-600">${BRL(lucro)}</td><td class="py-2 text-right text-gray-500">—</td><td class="py-2 text-right">—</td><td class="py-2 text-right">—</td></tr>
+          <tr class="border-b border-gray-50"><td class="py-2 font-semibold text-gray-800">Lucro Líquido <span style="font-size:10.5px;color:#94a3b8;font-weight:400;">(realizada − despesas)</span></td><td class="py-2 text-right font-bold ${lucro<0?'text-red-600':'text-green-600'}">${BRL(lucro)}</td><td class="py-2 text-right text-gray-500">—</td><td class="py-2 text-right">—</td><td class="py-2 text-right">—</td></tr>
           <tr><td class="py-2 text-gray-700">Margem Líquida</td><td class="py-2 text-right font-semibold">${PCT(margem)}</td><td class="py-2 text-right text-gray-500">—</td><td class="py-2 text-right">—</td><td class="py-2 text-right">—</td></tr>
         </tbody>
       </table>
@@ -4451,6 +5123,43 @@ function renderRelatorio(mes) {
           📈 Variáveis: <strong>${BRL(varRel)}</strong> (${PCT(totalDesp ? (varRel/totalDesp)*100 : 0)})
         </div>
       </div>
+    </div>` : ''}
+
+    ${aderPorPrograma.length ? `
+    <div class="chart-card">
+      <h3 class="font-bold text-gray-800 mb-4 text-base">9. Programas de Acompanhamento</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px;">
+        <div style="background:#eff6ff;border-radius:8px;padding:10px 14px;">
+          <div style="font-size:10.5px;font-weight:700;color:#1d4ed8;text-transform:uppercase;">Inscritos ativos</div>
+          <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${inscricoesAtivas.length}</div>
+        </div>
+        <div style="background:#f0fdf4;border-radius:8px;padding:10px 14px;">
+          <div style="font-size:10.5px;font-weight:700;color:#15803d;text-transform:uppercase;">Marcos previstos</div>
+          <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${marcosPrevistosMes.length}</div>
+        </div>
+        <div style="background:#f0fdf4;border-radius:8px;padding:10px 14px;">
+          <div style="font-size:10.5px;font-weight:700;color:#15803d;text-transform:uppercase;">Marcos cumpridos</div>
+          <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${marcosFeitosMes.length}</div>
+        </div>
+        <div style="background:${cumprimentoPct>=80?'#f0fdf4':cumprimentoPct>=50?'#fefce8':'#fef2f2'};border-radius:8px;padding:10px 14px;">
+          <div style="font-size:10.5px;font-weight:700;color:${cumprimentoPct>=80?'#15803d':cumprimentoPct>=50?'#a16207':'#b91c1c'};text-transform:uppercase;">% Cumprimento</div>
+          <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${PCT(cumprimentoPct)}</div>
+        </div>
+      </div>
+      <table class="w-full text-sm">
+        <thead><tr class="border-b"><th class="text-left py-2 text-gray-600">Programa</th><th class="text-right py-2 text-gray-600">Tipo</th><th class="text-right py-2 text-gray-600">Ativos</th><th class="text-right py-2 text-gray-600">Previstos</th><th class="text-right py-2 text-gray-600">Cumpridos</th><th class="text-right py-2 text-gray-600">% Aderência</th></tr></thead>
+        <tbody>
+          ${aderPorPrograma.map(p => `
+            <tr class="border-b border-gray-50">
+              <td class="py-2 text-gray-700">${_esc(p.nome)}</td>
+              <td class="py-2 text-right text-gray-500">${p.tipo}</td>
+              <td class="py-2 text-right">${p.ativos}</td>
+              <td class="py-2 text-right">${p.previstos}</td>
+              <td class="py-2 text-right text-green-700 font-semibold">${p.feitos}</td>
+              <td class="py-2 text-right font-semibold" style="color:${p.pct>=80?'#15803d':p.pct>=50?'#a16207':'#b91c1c'};">${p.previstos ? PCT(p.pct) : '—'}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
     </div>` : ''}
 `;
 }
@@ -4785,9 +5494,9 @@ function renderUltimasConsultas() {
   }
   tbody.innerHTML = pacs.map(p => `
     <tr>
-      <td style="font-weight:500;color:#0f172a;">${p.nome}</td>
+      <td style="font-weight:500;color:#0f172a;">${_esc(p.nome)}</td>
       <td style="color:#64748b;">${formatDate(p.data)}</td>
-      <td><span class="badge badge-blue">${p.tipo}</span></td>
+      <td><span class="badge badge-blue">${_esc(p.tipo)}</span></td>
       <td style="font-weight:600;color:#0f172a;">${BRL(p.valor)}</td>
       <td>${statusBadge(p.statusPgto)}</td>
     </tr>`).join('');
@@ -5007,7 +5716,7 @@ async function sendAIMessage() {
   const msg = input.value.trim();
   if (!msg) return;
 
-  const key = localStorage.getItem('consult_gemini_key');
+  const key = getGeminiKey();
   if (!key) {
     appendChatMsg('sofia', 'Preciso da chave para funcionar. Clique em ⚙️ acima.');
     return;
@@ -5317,7 +6026,7 @@ function toggleChat() {
   const isOpen = panel.style.display !== 'none';
   panel.style.display = isOpen ? 'none' : 'flex';
   if (!isOpen) {
-    const key = localStorage.getItem('consult_gemini_key');
+    const key = getGeminiKey();
     if (key) {
       document.getElementById('gemini-setup').style.display = 'none';
       document.getElementById('chat-main').style.display = 'flex';
@@ -5367,7 +6076,7 @@ function toggleChat() {
 function saveGeminiKey() {
   const key = document.getElementById('gemini-key-input').value.trim();
   if (!key) return;
-  localStorage.setItem('consult_gemini_key', key);
+  setGeminiKey(key);
   document.getElementById('gemini-setup').style.display = 'none';
   document.getElementById('chat-main').style.display = 'flex';
   chatHistory = [];
@@ -5439,7 +6148,7 @@ function stopVoice() {
 function openChatSettings() {
   document.getElementById('gemini-setup').style.display = 'flex';
   document.getElementById('chat-main').style.display = 'none';
-  const existingKey = localStorage.getItem('consult_gemini_key') || '';
+  const existingKey = getGeminiKey() || '';
   document.getElementById('gemini-key-input').value = existingKey;
 }
 
@@ -5612,16 +6321,16 @@ function abrirPerfilPaciente(nomeEnc) {
       tabCrm.innerHTML = crm.map(c => `
         <div style="border:1px solid #f1f5f9;border-radius:10px;padding:14px 16px;margin-bottom:10px;">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
-            <span style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;">${c.canal || '—'}</span>
+            <span style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;">${_esc(c.canal || '—')}</span>
             ${statusBadge(c.status || '—')}
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:12px;color:#374151;">
             <div>📅 ${formatDate(c.data)}</div>
-            ${c.whatsapp ? `<div>📱 ${c.whatsapp}</div>` : ''}
-            ${c.idade    ? `<div>🎂 ${c.idade} anos</div>` : ''}
-            ${c.tipo     ? `<div>🩺 ${c.tipo}</div>` : ''}
+            ${c.whatsapp ? `<div>📱 ${_esc(c.whatsapp)}</div>` : ''}
+            ${c.idade    ? `<div>🎂 ${_esc(c.idade)} anos</div>` : ''}
+            ${c.tipo     ? `<div>🩺 ${_esc(c.tipo)}</div>` : ''}
           </div>
-          ${c.obs ? `<div style="margin-top:8px;font-size:12px;color:#64748b;font-style:italic;">${c.obs}</div>` : ''}
+          ${c.obs ? `<div style="margin-top:8px;font-size:12px;color:#64748b;font-style:italic;">${_esc(c.obs)}</div>` : ''}
         </div>`).join('');
     }
   }
@@ -5821,9 +6530,11 @@ async function loadChatHistory(phone) {
     return;
   }
   try {
+    if (!currentUser) { container.innerHTML = '<div style="text-align:center;color:#94a3b8;font-size:12.5px;padding:32px;">Sem sessão</div>'; return; }
     const { data, error } = await _supa
       .from('crm_messages')
       .select('*')
+      .eq('user_id', currentUser.id)
       .eq('whatsapp', phone)
       .order('created_at', { ascending: true })
       .limit(100);
@@ -5843,7 +6554,7 @@ function _renderChatMessages(container, msgs) {
     const isOut = m.remetente === 'consultorio';
     const time  = new Date(m.created_at).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
     return `<div class="chat-msg-wrap ${isOut ? 'out' : 'in'}">
-      <div class="chat-bubble ${isOut ? 'out' : 'in'}">${m.mensagem.replace(/\n/g,'<br>')}</div>
+      <div class="chat-bubble ${isOut ? 'out' : 'in'}">${_esc(m.mensagem).replace(/\n/g,'<br>')}</div>
       <div class="chat-ts">${time}</div>
     </div>`;
   }).join('');
@@ -5861,7 +6572,7 @@ function _appendChatMessage(m) {
   const time  = new Date(m.created_at || Date.now()).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
   const el    = document.createElement('div');
   el.className = `chat-msg-wrap ${isOut ? 'out' : 'in'}`;
-  el.innerHTML = `<div class="chat-bubble ${isOut ? 'out' : 'in'}">${m.mensagem.replace(/\n/g,'<br>')}</div>
+  el.innerHTML = `<div class="chat-bubble ${isOut ? 'out' : 'in'}">${_esc(m.mensagem).replace(/\n/g,'<br>')}</div>
     <div class="chat-ts">${time}</div>`;
   container.appendChild(el);
   container.scrollTop = container.scrollHeight;
@@ -5904,9 +6615,9 @@ async function sendChatMessage() {
     );
     if (!res.ok) throw new Error('Z-API error ' + res.status);
     // Persiste no Supabase
-    if (_supa) {
+    if (_supa && currentUser) {
       await _supa.from('crm_messages').insert({
-        whatsapp: _chatPhone, remetente: 'consultorio', mensagem: text
+        user_id: currentUser.id, whatsapp: _chatPhone, remetente: 'consultorio', mensagem: text
       });
     }
   } catch(e) {
@@ -5920,21 +6631,25 @@ async function sendChatMessage() {
 // ====================== REALTIME: LEADS DO WHATSAPP ======================
 
 function initLeadsRealtime() {
-  if (!_supa) return;
+  if (!_supa || !currentUser) return;
   _supa
-    .channel('new-wa-leads')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'crm_leads' }, () => {
+    .channel('new-wa-leads-' + currentUser.id)
+    .on('postgres_changes', {
+      event: 'INSERT', schema: 'public', table: 'crm_leads',
+      filter: `user_id=eq.${currentUser.id}`
+    }, () => {
       syncLeadsFromSupabase();
     })
     .subscribe();
 }
 
 async function syncLeadsFromSupabase() {
-  if (!_supa) return;
+  if (!_supa || !currentUser) return;
   try {
     const { data, error } = await _supa
       .from('crm_leads')
       .select('*')
+      .eq('user_id', currentUser.id)
       .eq('processado', false)
       .order('created_at', { ascending: true });
     if (error || !data || data.length === 0) return;
@@ -6647,7 +7362,7 @@ function renderChartOcupacao() {
 }
 
 async function saudacaoDiaria() {
-  const key = localStorage.getItem('consult_gemini_key');
+  const key = getGeminiKey();
   if (!key) return;
   const hoje = new Date().toISOString().split('T')[0];
   const ultimaSaudacao = localStorage.getItem('consult_saudacao_dia');
