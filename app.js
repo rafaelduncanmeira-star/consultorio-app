@@ -800,7 +800,9 @@ function renderCrm() {
       <tr data-search="${r.nome} ${r.canal||''} ${r.status||''} ${r.tipo||''}" data-status="${r.status}">
         <td>${formatDate(r.data)}</td>
         <td style="font-weight:600;color:#0f172a;">${r.nome}</td>
-        <td>${r.whatsapp ? `<button onclick="openCrmChat(${i})" style="background:none;border:none;cursor:pointer;color:#10b981;font-weight:600;font-size:13px;padding:0;font-family:'Inter',sans-serif;">💬 ${r.whatsapp}</button>` : '—'}</td>
+        <td>${r.whatsapp ? (getZapiConfig().enabled
+          ? `<button onclick="openCrmChat(${i})" style="background:none;border:none;cursor:pointer;color:#10b981;font-weight:600;font-size:13px;padding:0;font-family:'Inter',sans-serif;">💬 ${r.whatsapp}</button>`
+          : `<a href="https://wa.me/55${r.whatsapp.replace(/\D/g,'')}" target="_blank" style="color:#10b981;font-weight:600;text-decoration:none;">💬 ${r.whatsapp}</a>`) : '—'}</td>
         <td style="color:#475569;">${r.canal||'—'}</td>
         <td style="color:#475569;">${r.tipo||'—'}</td>
         <td>${statusSelect(r.status, i)}</td>
@@ -999,13 +1001,21 @@ function _kanbanCardHtml(r, col) {
   const nextCol  = KANBAN_COLUNAS[colIdx + 1];
   const badge    = _canalBadge(r.canal);
   const dias     = _diasDesde(r.data);
+  const _zapiOn = getZapiConfig().enabled;
   const whatsBtn = r.whatsapp
-    ? `<button onclick="openCrmChat(${idx})"
-          style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#10b981;font-weight:600;
-                 background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:4px 9px;
-                 cursor:pointer;margin-bottom:9px;font-family:'Inter',sans-serif;">
-          💬 ${r.whatsapp}
-       </button>`
+    ? (_zapiOn
+        ? `<button onclick="openCrmChat(${idx})"
+              style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#10b981;font-weight:600;
+                     background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:4px 9px;
+                     cursor:pointer;margin-bottom:9px;font-family:'Inter',sans-serif;">
+              💬 ${r.whatsapp}
+           </button>`
+        : `<a href="https://wa.me/55${r.whatsapp.replace(/\D/g,'')}" target="_blank"
+              style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#10b981;font-weight:600;
+                     background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:4px 9px;
+                     text-decoration:none;margin-bottom:9px;">
+              💬 ${r.whatsapp}
+           </a>`)
     : '';
 
   const nextLabel = nextCol ? nextCol.label.replace(/^[^\s]+\s/, '') : ''; // strip emoji
