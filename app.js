@@ -6630,17 +6630,24 @@ async function sendChatMessage() {
 
 // ====================== REALTIME: LEADS DO WHATSAPP ======================
 
+let _leadsChannel = null;
+
 function initLeadsRealtime() {
   if (!_supa || !currentUser) return;
-  _supa
+  // Remove canal anterior (evita "cannot add callbacks after subscribe")
+  if (_leadsChannel) {
+    _supa.removeChannel(_leadsChannel).catch(() => {});
+    _leadsChannel = null;
+  }
+  _leadsChannel = _supa
     .channel('new-wa-leads-' + currentUser.id)
     .on('postgres_changes', {
       event: 'INSERT', schema: 'public', table: 'crm_leads',
       filter: `user_id=eq.${currentUser.id}`
     }, () => {
       syncLeadsFromSupabase();
-    })
-    .subscribe();
+    });
+  _leadsChannel.subscribe();
 }
 
 async function syncLeadsFromSupabase() {
