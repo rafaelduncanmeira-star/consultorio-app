@@ -2484,13 +2484,14 @@ function renderDespesas() {
 // ====================== DASHBOARD ======================
 // ====================== TOGGLE DE SEÇÕES DO DASHBOARD ======================
 const SECTION_LABELS = {
-  procedimentos:   '📊 Receita por Procedimento',
-  insights:        '🧠 Insights da MaestrIA',
-  retencao:        '💎 Retenção e LTV',
-  marketing:       '📣 Aquisição e Marketing',
-  financeiro:      '💰 Inteligência Financeira',
-  graficos:        '📈 Tendências e Gráficos',
-  'funil-ultimas': '🔽 Funil e Últimas Consultas',
+  procedimentos:          '📊 Receita por Procedimento',
+  insights:               '🧠 Insights da MaestrIA',
+  retencao:               '💎 Retenção e LTV',
+  marketing:              '📣 Aquisição e Marketing',
+  financeiro:             '💰 Inteligência Financeira',
+  graficos:               '📈 Tendências e Gráficos',
+  'graficos-operacionais':'📊 Gráficos Operacionais',
+  'funil-ultimas':        '🔽 Funil e Últimas Consultas',
 };
 
 function getHiddenSections() {
