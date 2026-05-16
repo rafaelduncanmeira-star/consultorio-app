@@ -294,6 +294,7 @@ function _iniciarApp() {
   _applyRole();
   // Inicializa ícones e dashboard
   if (window.lucide) lucide.createIcons();
+  applyClinicaConfig();
   renderDashboard();
   saudacaoDiaria();
   // Sincroniza UI mobile com página inicial
@@ -5448,7 +5449,7 @@ function gerarPDF(mes) {
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Relatório ${mesLabel} — Dr. Rafael Duncan</title>
+<title>Relatório ${mesLabel} — ${_esc(getClinicaConfig().nome || currentNome || 'Consultório')}</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #1e293b; background:#fff; padding: 0; }
@@ -5501,8 +5502,8 @@ function gerarPDF(mes) {
   <!-- HEADER -->
   <div class="header">
     <div class="header-left">
-      <h1>Dr. Rafael Duncan</h1>
-      <p>Geriatria · Relatório Mensal de Gestão</p>
+      <h1>${_esc((getClinicaConfig().nome ? (currentRole==='medico'?'Dr. ':'')+getClinicaConfig().nome : currentNome ? (currentRole==='medico'?'Dr. ':'')+currentNome : 'Consultório'))}</h1>
+      <p>${_esc(getClinicaConfig().especialidade || 'Medicina')} · Relatório Mensal de Gestão${getClinicaConfig().crm ? ' · '+_esc(getClinicaConfig().crm) : ''}</p>
     </div>
     <div class="header-right">
       <div class="mes">${mesLabel.charAt(0).toUpperCase() + mesLabel.slice(1)}</div>
@@ -5618,9 +5619,86 @@ function gerarPDF(mes) {
     </table>
   </div>` : ''}
 
+  ${(() => {
+    const inscricoes = getInscricoes();
+    const programas  = getProgramas();
+    const today = new Date().toISOString().substring(0,10);
+
+    // Assinaturas ativas no mês
+    const ativas = inscricoes.filter(i => {
+      if (i.status !== 'Ativo') return false;
+      const prog = programas.find(p => p.id === i.programaId);
+      if (!prog || prog.tipo !== 'Assinatura') return false;
+      const venc = _vencimentoInscricao(i, prog);
+      return !venc || venc >= mes + '-01';
+    });
+    if (!ativas.length) return '';
+
+    // Novas inscrições no mês
+    const novasMes = inscricoes.filter(i => (i.dataInicio || '').startsWith(mes));
+    const cancelMes = inscricoes.filter(i => i.status === 'Cancelado' && (i.dataFim || '').startsWith(mes));
+
+    // MRR total
+    let mrr = 0;
+    ativas.forEach(i => {
+      const prog = programas.find(p => p.id === i.programaId);
+      mrr += _mrrDeInscricao(i, prog);
+    });
+
+    // Vencendo nos próximos 30 dias a partir de hoje
+    const em30 = _addDaysIso(today, 30);
+    const vencendo = ativas.filter(i => {
+      const prog = programas.find(p => p.id === i.programaId);
+      const venc = _vencimentoInscricao(i, prog);
+      return venc && venc >= today && venc <= em30;
+    });
+
+    // Taxa de retenção do mês: (ativas - novas) / ativas_mes_anterior (estimativa)
+    const retencao = ativas.length > 0
+      ? ((ativas.length - novasMes.length) / Math.max(ativas.length, 1) * 100).toFixed(0)
+      : 0;
+
+    // Breakdown por programa
+    const porProg = {};
+    ativas.forEach(i => {
+      const prog = programas.find(p => p.id === i.programaId);
+      const key  = prog ? prog.nome : 'Desconhecido';
+      if (!porProg[key]) porProg[key] = { qtd: 0, mrr: 0, prog };
+      porProg[key].qtd++;
+      porProg[key].mrr += _mrrDeInscricao(i, prog);
+    });
+
+    return `
+  <div class="section no-break" style="break-before:auto;">
+    <h2>7. Programas de Acompanhamento</h2>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">
+      <div class="kpi blue"><label>Assinaturas Ativas</label><div class="value">${ativas.length}</div></div>
+      <div class="kpi"><label>MRR</label><div class="value">${brl(Math.round(mrr))}</div></div>
+      <div class="kpi"><label>Novas no Mês</label><div class="value">${novasMes.length}</div></div>
+      <div class="kpi ${cancelMes.length > 0 ? 'red' : ''}"><label>Cancelamentos</label><div class="value">${cancelMes.length}</div></div>
+    </div>
+    <table>
+      <thead><tr><th>Programa</th><th class="r">Inscritos</th><th class="r">MRR do programa</th></tr></thead>
+      <tbody>
+        ${Object.entries(porProg).sort((a,b) => b[1].mrr - a[1].mrr).map(([nome, d]) =>
+          `<tr><td>${_esc(nome)}</td><td class="r">${d.qtd}</td><td class="r">${brl(Math.round(d.mrr))}</td></tr>`
+        ).join('')}
+        <tr class="total"><td>Total</td><td class="r">${ativas.length}</td><td class="r">${brl(Math.round(mrr))}</td></tr>
+      </tbody>
+    </table>
+    ${vencendo.length ? `
+    <div style="margin-top:12px;padding:8px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;font-size:11px;color:#92400e;">
+      ⚠️ <strong>${vencendo.length} renovação(ões)</strong> prevista(s) nos próximos 30 dias · ${vencendo.map(i => _esc(i.pacienteNome)).join(', ')}
+    </div>` : `
+    <div style="margin-top:12px;padding:8px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;font-size:11px;color:#166534;">
+      ✅ Nenhuma renovação pendente nos próximos 30 dias.
+    </div>`}
+  </div>`;
+  })()}
+
   <!-- FOOTER -->
   <div class="footer">
-    <p>Dr. Rafael Duncan · Geriatria · Consultório App</p>
+    <p>${_esc(getClinicaConfig().nome || currentNome || 'Consultório')} · ${_esc(getClinicaConfig().especialidade || 'Medicina')} · Consultório App</p>
     <p>Gerado em ${agora} · Documento confidencial</p>
   </div>
 
@@ -7240,7 +7318,73 @@ function getZapiConfig() {
   return DB.getObj('zapi_config', { enabled: false, instanceId: '', token: '' });
 }
 
+// ====================== CONFIGURAÇÕES DO CONSULTÓRIO ======================
+function getClinicaConfig() {
+  return DB.getObj('clinica_config', {
+    nome: '', especialidade: '', nomeClinica: '', cidade: '', crm: '', cor: '#10b981'
+  });
+}
+
+function saveClinicaConfig() {
+  const cfg = {
+    nome:         (document.getElementById('clinica-nome')?.value || '').trim(),
+    especialidade:(document.getElementById('clinica-especialidade')?.value || '').trim(),
+    nomeClinica:  (document.getElementById('clinica-nome-clinica')?.value || '').trim(),
+    cidade:       (document.getElementById('clinica-cidade')?.value || '').trim(),
+    crm:          (document.getElementById('clinica-crm')?.value || '').trim(),
+    cor:           document.getElementById('clinica-cor')?.value || '#10b981',
+  };
+  DB.setObj('clinica_config', cfg);
+  applyClinicaConfig(cfg);
+  toast('✅ Configurações salvas!');
+}
+
+function applyClinicaConfig(cfg) {
+  if (!cfg) cfg = getClinicaConfig();
+  const nomeMed   = cfg.nome || currentNome || '';
+  const esp       = cfg.especialidade || '';
+  const nomeClini = cfg.nomeClinica || (nomeMed ? `Consultório ${nomeMed}` : 'Consultório');
+  const cor       = cfg.cor || '#10b981';
+
+  // Sidebar
+  const hNome = document.getElementById('sidebar-header-nome');
+  const hEsp  = document.getElementById('sidebar-header-esp');
+  if (hNome && nomeMed) hNome.textContent = (currentRole === 'medico' ? 'Dr. ' : '') + nomeMed;
+  if (hEsp  && esp)     hEsp.textContent  = esp;
+
+  // Dashboard subtítulo
+  const subEl = document.getElementById('dash-subtitulo');
+  const parts = [nomeClini, esp].filter(Boolean);
+  if (subEl && parts.length) subEl.textContent = parts.join(' · ') + ' · ' + _mesAtualLabel();
+
+  // Login page
+  const loginNomeEl = document.querySelector('#login-page [style*="font-size:18px"]');
+  if (loginNomeEl && nomeClini) loginNomeEl.textContent = nomeClini;
+  const loginSubEl  = document.querySelector('#login-page [style*="font-size:12.5px"][style*="color:#9ca3af"]');
+  if (loginSubEl && esp) loginSubEl.textContent = esp;
+
+  // Cor de destaque (variável CSS) — aplica nas bordas esquerda dos KPIs principais
+  document.documentElement.style.setProperty('--accent', cor);
+}
+
+function _mesAtualLabel() {
+  return new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+}
+
 function renderConfiguracoes() {
+  // Clinica config
+  const clinica = getClinicaConfig();
+  const fields = { 'clinica-nome': clinica.nome, 'clinica-especialidade': clinica.especialidade,
+    'clinica-nome-clinica': clinica.nomeClinica, 'clinica-cidade': clinica.cidade,
+    'clinica-crm': clinica.crm };
+  Object.entries(fields).forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if (el) el.value = val || '';
+  });
+  const corEl = document.getElementById('clinica-cor');
+  if (corEl) corEl.value = clinica.cor || '#10b981';
+
+  // Z-API config
   const cfg = getZapiConfig();
   const toggle = document.getElementById('zapi-enabled-toggle');
   if (toggle) toggle.checked = cfg.enabled;
