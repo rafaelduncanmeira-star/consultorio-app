@@ -1670,6 +1670,8 @@ function getAgConfig() {
     horaInicio: '07:00', horaFim: '20:00', slotDuracao: 60,
     almocoInicio: '12:00', almocoFim: '13:30',
     diasUteis: [1, 2, 3, 4, 5],
+    // slotsSemanais[0]=Dom … [6]=Sáb — slots de consultório por dia
+    slotsSemanais: [0, 5, 0, 5, 5, 0, 0],
   });
 }
 function getAgendamentos() { return DB.get('agendamentos'); }
@@ -1973,10 +1975,35 @@ function openModalConfigHorarios() {
   form.almocoInicio.value = cfg.almocoInicio || '';
   form.almocoFim.value = cfg.almocoFim || '';
   form.slotDuracao.value = cfg.slotDuracao;
-  form.slotsConsultorioDia.value = cfg.slotsConsultorioDia || 6;
-  // Dias da semana
-  const dias = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-  document.getElementById('cfg-dias').innerHTML = dias.map((nome, i) => {
+
+  // Migra configs antigas que usavam slotsConsultorioDia único
+  const semanalSalvo = cfg.slotsSemanais
+    || (cfg.slotsConsultorioDia ? [0, cfg.slotsConsultorioDia, cfg.slotsConsultorioDia, cfg.slotsConsultorioDia, cfg.slotsConsultorioDia, cfg.slotsConsultorioDia, 0]
+    : [0, 5, 0, 5, 5, 0, 0]);
+
+  // Tabela per-day
+  const diasNomes = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+  const slotsCont = document.getElementById('cfg-slots-semana');
+  slotsCont.innerHTML = diasNomes.map((nome, i) => {
+    const val = semanalSalvo[i] || 0;
+    const barW = Math.round((val / 10) * 100);
+    return `<div style="display:grid;grid-template-columns:34px 1fr 80px;align-items:center;gap:8px;">
+      <span style="font-size:12px;font-weight:600;color:#166534;">${nome}</span>
+      <div style="height:8px;background:#dcfce7;border-radius:4px;overflow:hidden;">
+        <div id="cfg-bar-${i}" style="height:100%;width:${barW}%;background:#16a34a;border-radius:4px;transition:width .2s;"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;">
+        <input type="number" id="cfg-slot-dia-${i}" name="slotDia-${i}" value="${val}" min="0" max="20"
+          style="width:46px;padding:2px 4px;border:1.5px solid #bbf7d0;border-radius:6px;font-size:13px;font-weight:700;color:#166534;text-align:center;background:#fff;"
+          oninput="_cfgSlotsUpdate()" />
+        <span style="font-size:11px;color:#4ade80;">slots</span>
+      </div>
+    </div>`;
+  }).join('');
+  _cfgSlotsUpdate();
+
+  // Dias da semana (checkboxes existentes)
+  document.getElementById('cfg-dias').innerHTML = diasNomes.map((nome, i) => {
     const ativo = cfg.diasUteis.includes(i);
     return `<label style="display:flex;align-items:center;gap:6px;padding:6px 10px;border:1.5px solid ${ativo ? '#10b981' : '#e2e8f0'};border-radius:8px;cursor:pointer;background:${ativo ? '#ecfdf5' : '#fff'};font-size:12.5px;font-weight:600;color:${ativo ? '#065f46' : '#64748b'};">
       <input type="checkbox" name="dia-${i}" ${ativo ? 'checked' : ''} style="cursor:pointer;" />
@@ -1985,18 +2012,35 @@ function openModalConfigHorarios() {
   }).join('');
 }
 
+function _cfgSlotsUpdate() {
+  let total = 0;
+  for (let i = 0; i < 7; i++) {
+    const inp = document.getElementById(`cfg-slot-dia-${i}`);
+    if (!inp) continue;
+    const v = parseInt(inp.value) || 0;
+    total += v;
+    const bar = document.getElementById(`cfg-bar-${i}`);
+    if (bar) bar.style.width = Math.round((v / 10) * 100) + '%';
+  }
+  const resumo = document.getElementById('cfg-slots-resumo');
+  if (resumo) resumo.textContent = `Semana: ${total} slots · Mês: ~${total * 4} slots`;
+}
+
 function saveConfigHorarios(e) {
   e.preventDefault();
   const fd = new FormData(e.target);
   const diasUteis = [];
   for (let i = 0; i < 7; i++) if (fd.get('dia-' + i)) diasUteis.push(i);
+  // Coleta slots por dia
+  const slotsSemanais = [];
+  for (let i = 0; i < 7; i++) slotsSemanais.push(parseInt(fd.get('slotDia-' + i)) || 0);
   const cfg = {
     horaInicio: fd.get('horaInicio'),
     horaFim: fd.get('horaFim'),
     almocoInicio: fd.get('almocoInicio') || null,
     almocoFim: fd.get('almocoFim') || null,
     slotDuracao: parseInt(fd.get('slotDuracao')) || 60,
-    slotsConsultorioDia: parseInt(fd.get('slotsConsultorioDia')) || 6,
+    slotsSemanais,
     diasUteis: diasUteis.length ? diasUteis : [1,2,3,4,5],
   };
   DB.setObj('agenda_config', cfg);
@@ -2144,14 +2188,14 @@ function _renderAgendaKPIs() {
   const noshow       = ativos.filter(a => a.status === 'No-show').length;
   const total        = confirmados + compareceram + noshow;
 
-  // Ocupação: só conta consultas no consultório vs. slots configurados
+  // Ocupação: só conta consultas no consultório vs. slots configurados por dia
   const cfg2 = getAgConfig();
-  const slotsConsultorioDia = cfg2.slotsConsultorioDia || Math.floor(((_toMin(cfg2.horaFim) - _toMin(cfg2.horaInicio)) / (cfg2.slotDuracao || 60)));
-  let diasUteis = 0;
+  const slotsSemanais = cfg2.slotsSemanais
+    || (cfg2.slotsConsultorioDia ? Array(7).fill(0).map((_, i) => (cfg2.diasUteis.includes(i) ? cfg2.slotsConsultorioDia : 0)) : [0,5,0,5,5,0,0]);
+  let slotsDispo = 0;
   for (let d = new Date(ini); d <= fim; d = _addDays(d, 1)) {
-    if (cfg2.diasUteis.includes(d.getDay())) diasUteis++;
+    slotsDispo += slotsSemanais[d.getDay()] || 0;
   }
-  const slotsDispo  = slotsConsultorioDia * diasUteis;
   const slotsUsados = ativos.filter(a => a.status !== 'Cancelado' && (!a.tipoAtividade || a.tipoAtividade === 'Consultório')).length;
   const ocup = slotsDispo ? (slotsUsados / slotsDispo) * 100 : 0;
 
@@ -4165,6 +4209,55 @@ function renderRelatorio(mes) {
   const novosUnicos = new Set(pacsNovos.map(p => (p.nome || '').toLowerCase().trim())).size;
   const recUnicos = new Set(pacsRecorrentes.map(p => (p.nome || '').toLowerCase().trim())).size;
 
+  // ===== Ocupação do consultório =====
+  const cfgRel = getAgConfig();
+  const slotsSemanaisRel = cfgRel.slotsSemanais
+    || (cfgRel.slotsConsultorioDia
+        ? Array(7).fill(0).map((_, i) => cfgRel.diasUteis.includes(i) ? cfgRel.slotsConsultorioDia : 0)
+        : [0, 5, 0, 5, 5, 0, 0]);
+  // Soma slots disponíveis para cada dia do mês
+  let slotsMesDisp = 0;
+  const mesAno = mes.split('-');
+  const diasNoMes = new Date(parseInt(mesAno[0]), parseInt(mesAno[1]), 0).getDate();
+  for (let d = 1; d <= diasNoMes; d++) {
+    const dt = new Date(parseInt(mesAno[0]), parseInt(mesAno[1]) - 1, d);
+    slotsMesDisp += slotsSemanaisRel[dt.getDay()] || 0;
+  }
+  const todasAgs = getAgendamentos().filter(a => getMes(a.data) === mes);
+  const agsConsult = todasAgs.filter(a => !a.tipoAtividade || a.tipoAtividade === 'Consultório');
+  const agsConfirmados = agsConsult.filter(a => a.status === 'Confirmado').length;
+  const agsCompareceu  = agsConsult.filter(a => a.status === 'Compareceu').length;
+  const agsNoShow      = agsConsult.filter(a => a.status === 'No-show').length;
+  const agsCancelado   = agsConsult.filter(a => a.status === 'Cancelado').length;
+  const slotsMesUsados = agsConfirmados + agsCompareceu + agsNoShow; // não cancela slot
+  const taxaOcup = slotsMesDisp ? (slotsMesUsados / slotsMesDisp) * 100 : 0;
+  const taxaNoShow = slotsMesUsados ? (agsNoShow / slotsMesUsados) * 100 : 0;
+
+  // ===== Breakdown por tipo de atividade (agenda) =====
+  const tiposAtiv = ['Consultório', 'Visita Domiciliar', 'Visita Hospitalar', 'Outro'];
+  const tipoIcons = { 'Consultório': '🏥', 'Visita Domiciliar': '🏠', 'Visita Hospitalar': '🏨', 'Outro': '📌' };
+  const tipoStats = tiposAtiv.map(tipo => {
+    const lista = todasAgs.filter(a => (a.tipoAtividade || 'Consultório') === tipo);
+    return {
+      tipo, icon: tipoIcons[tipo],
+      total: lista.length,
+      confirmado: lista.filter(a => a.status === 'Confirmado').length,
+      compareceu: lista.filter(a => a.status === 'Compareceu').length,
+      noshow:     lista.filter(a => a.status === 'No-show').length,
+      cancelado:  lista.filter(a => a.status === 'Cancelado').length,
+    };
+  }).filter(t => t.total > 0);
+  const totalAgs = todasAgs.length;
+
+  // ===== Despesas por categoria =====
+  const CATS_DESP = ['Estrutura','Pessoal','Marketing','Materiais','Profissional','Impostos','Outros'];
+  const catStats = CATS_DESP.map(c => {
+    const val = desps.filter(d => d.categoria === c).reduce((s, d) => s + d.valor, 0);
+    return { cat: c, val, pct: totalDesp ? (val / totalDesp) * 100 : 0 };
+  }).filter(c => c.val > 0).sort((a, b) => b.val - a.val);
+  const fixas  = desps.filter(d => d.tipo === 'Fixo').reduce((s, d) => s + d.valor, 0);
+  const varRel = desps.filter(d => d.tipo === 'Variável').reduce((s, d) => s + d.valor, 0);
+
   document.getElementById('relatorio-content').innerHTML = `
     <div class="chart-card">
       <h3 class="font-bold text-gray-800 mb-4 text-base">1. Resultado Financeiro</h3>
@@ -4271,7 +4364,95 @@ function renderRelatorio(mes) {
       <div style="margin-top:12px;padding:10px 14px;background:#eff6ff;border-radius:8px;font-size:12.5px;color:#1e40af;">
         💡 ${fat ? PCT((fatRecorrentes / fat) * 100) : '0%'} do faturamento veio de pacientes que já estavam na base — ${fatRecorrentes >= fatNovos ? 'sinal de boa retenção 👏' : 'oportunidade para fortalecer follow-up e fidelização'}.
       </div>` : '<p class="text-gray-400 text-sm">Sem atendimentos neste mês.</p>'}
-    </div>`;
+    </div>
+
+    <div class="chart-card">
+      <h3 class="font-bold text-gray-800 mb-4 text-base">6. Ocupação do Consultório</h3>
+      ${slotsMesDisp > 0 ? `
+      <table class="w-full text-sm mb-3">
+        <thead><tr class="border-b"><th class="text-left py-2 text-gray-600">Indicador</th><th class="text-right py-2 text-gray-600">Valor</th></tr></thead>
+        <tbody>
+          <tr class="border-b border-gray-50"><td class="py-2 text-gray-700">Slots disponíveis no mês</td><td class="py-2 text-right font-semibold">${slotsMesDisp}</td></tr>
+          <tr class="border-b border-gray-50"><td class="py-2 text-gray-700">Slots ocupados</td><td class="py-2 text-right font-semibold">${slotsMesUsados}</td></tr>
+          <tr class="border-b border-gray-50"><td class="py-2 text-gray-700">Compareceram</td><td class="py-2 text-right text-green-600 font-semibold">${agsCompareceu}</td></tr>
+          <tr class="border-b border-gray-50"><td class="py-2 text-gray-700">Confirmados (pendente)</td><td class="py-2 text-right text-blue-600">${agsConfirmados}</td></tr>
+          <tr class="border-b border-gray-50"><td class="py-2 text-gray-700">No-show</td><td class="py-2 text-right text-red-500">${agsNoShow}</td></tr>
+          <tr class="border-b border-gray-50"><td class="py-2 text-gray-700">Cancelados</td><td class="py-2 text-right text-gray-400">${agsCancelado}</td></tr>
+          <tr style="background:#f0fdf4;"><td class="py-2 font-bold text-green-800">Taxa de Ocupação</td><td class="py-2 text-right font-bold text-green-700 text-base">${PCT(taxaOcup)}</td></tr>
+        </tbody>
+      </table>
+      <div style="background:#e2e8f0;border-radius:6px;height:10px;margin-bottom:10px;overflow:hidden;">
+        <div style="height:100%;width:${Math.min(taxaOcup,100).toFixed(1)}%;background:${taxaOcup>=80?'#16a34a':taxaOcup>=50?'#f59e0b':'#ef4444'};border-radius:6px;transition:width .4s;"></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <div style="padding:8px 12px;background:${taxaOcup>=80?'#f0fdf4':taxaOcup>=50?'#fefce8':'#fef2f2'};border-radius:8px;font-size:12px;color:${taxaOcup>=80?'#15803d':taxaOcup>=50?'#92400e':'#b91c1c'};flex:1;min-width:180px;">
+          📊 Ocupação: ${PCT(taxaOcup)} ${taxaOcup>=80?'— agenda bem preenchida 💪':taxaOcup>=50?'— há espaço para crescer':'— agenda com baixa ocupação'}
+        </div>
+        ${agsNoShow > 0 ? `<div style="padding:8px 12px;background:#fef2f2;border-radius:8px;font-size:12px;color:#b91c1c;flex:1;min-width:180px;">
+          ⚠️ No-show: ${PCT(taxaNoShow)} das consultas — considere confirmação ativa por WhatsApp
+        </div>` : ''}
+      </div>` : `
+      <p class="text-gray-400 text-sm">Configure os slots por dia em <strong>Agenda → ⚙️ Configurar Agenda</strong> para ver a taxa de ocupação.</p>`}
+    </div>
+
+    ${tipoStats.length ? `
+    <div class="chart-card">
+      <h3 class="font-bold text-gray-800 mb-4 text-base">7. Atividades da Agenda por tipo</h3>
+      <table class="w-full text-sm">
+        <thead><tr class="border-b"><th class="text-left py-2 text-gray-600">Tipo</th><th class="text-right py-2 text-gray-600">Total</th><th class="text-right py-2 text-gray-600">Compareceu</th><th class="text-right py-2 text-gray-600">No-show</th><th class="text-right py-2 text-gray-600">Cancelado</th><th class="text-right py-2 text-gray-600">% agenda</th></tr></thead>
+        <tbody>
+          ${tipoStats.map(t => `
+            <tr class="border-b border-gray-50">
+              <td class="py-2 text-gray-700">${t.icon} ${t.tipo}</td>
+              <td class="py-2 text-right font-semibold">${t.total}</td>
+              <td class="py-2 text-right text-green-600">${t.compareceu}</td>
+              <td class="py-2 text-right text-red-500">${t.noshow || '—'}</td>
+              <td class="py-2 text-right text-gray-400">${t.cancelado || '—'}</td>
+              <td class="py-2 text-right text-gray-500">${PCT(totalAgs ? (t.total / totalAgs) * 100 : 0)}</td>
+            </tr>`).join('')}
+          <tr style="background:#f8fafc;border-top:2px solid #e2e8f0;">
+            <td class="py-2 font-bold text-gray-800">Total</td>
+            <td class="py-2 text-right font-bold">${totalAgs}</td>
+            <td class="py-2 text-right font-bold text-green-600">${todasAgs.filter(a=>a.status==='Compareceu').length}</td>
+            <td class="py-2 text-right font-bold text-red-500">${todasAgs.filter(a=>a.status==='No-show').length || '—'}</td>
+            <td class="py-2 text-right font-bold text-gray-400">${todasAgs.filter(a=>a.status==='Cancelado').length || '—'}</td>
+            <td class="py-2 text-right font-bold">100%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>` : ''}
+
+    ${catStats.length ? `
+    <div class="chart-card">
+      <h3 class="font-bold text-gray-800 mb-4 text-base">${tipoStats.length ? '8' : '7'}. Despesas por categoria</h3>
+      <table class="w-full text-sm mb-3">
+        <thead><tr class="border-b"><th class="text-left py-2 text-gray-600">Categoria</th><th class="text-right py-2 text-gray-600">Total</th><th class="text-right py-2 text-gray-600">% das despesas</th></tr></thead>
+        <tbody>
+          ${catStats.map(c => `
+            <tr class="border-b border-gray-50">
+              <td class="py-2 text-gray-700">${c.cat}</td>
+              <td class="py-2 text-right font-semibold text-red-600">${BRL(c.val)}</td>
+              <td class="py-2 text-right">
+                <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;">
+                  <div style="width:60px;height:6px;background:#f1f5f9;border-radius:3px;overflow:hidden;">
+                    <div style="height:100%;width:${c.pct.toFixed(1)}%;background:#ef4444;border-radius:3px;"></div>
+                  </div>
+                  <span>${PCT(c.pct)}</span>
+                </div>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;padding:8px 12px;background:#f0fdf4;border-radius:8px;font-size:12px;color:#15803d;">
+          🔒 Fixas: <strong>${BRL(fixas)}</strong> (${PCT(totalDesp ? (fixas/totalDesp)*100 : 0)})
+        </div>
+        <div style="flex:1;padding:8px 12px;background:#fff7ed;border-radius:8px;font-size:12px;color:#9a3412;">
+          📈 Variáveis: <strong>${BRL(varRel)}</strong> (${PCT(totalDesp ? (varRel/totalDesp)*100 : 0)})
+        </div>
+      </div>
+    </div>` : ''}
+`;
 }
 
 function updateRelatorio(val) { renderRelatorio(val); }
