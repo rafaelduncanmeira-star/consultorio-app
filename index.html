@@ -784,6 +784,41 @@
 
       </div>
 
+      <!-- ===== RECEITA RECORRENTE (PROGRAMAS DE ASSINATURA) ===== -->
+      <div id="dash-mrr-section" style="margin-bottom:24px;display:none;" data-section="mrr">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <div style="font-size:11.5px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.07em;">🔁 Receita Recorrente</div>
+          <div style="flex:1;height:1px;background:#e2e8f0;"></div>
+          <div style="font-size:11px;color:#64748b;">Programas de assinatura ativos</div>
+          <button onclick="showPage('programas')" style="background:#eff6ff;color:#1d4ed8;border:none;border-radius:6px;padding:5px 10px;font-size:11.5px;font-weight:600;cursor:pointer;">Ver programas →</button>
+          <button onclick="toggleSection('mrr')" class="btn-section-toggle" title="Ocultar seção">−</button>
+        </div>
+        <div data-section-body="mrr">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+            <div class="kpi-card" style="padding:16px 18px;border-left:3px solid #3b82f6;">
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">MRR</div>
+              <div style="font-size:24px;font-weight:800;color:#1d4ed8;letter-spacing:-0.5px;" id="dash-mrr">R$ 0</div>
+              <div style="font-size:11px;color:#64748b;margin-top:4px;">ARR: <span style="font-weight:600;" id="dash-arr">R$ 0</span></div>
+            </div>
+            <div class="kpi-card" style="padding:16px 18px;border-left:3px solid #10b981;">
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Assinaturas Ativas</div>
+              <div style="font-size:24px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;" id="dash-subs-ativas">0</div>
+              <div style="font-size:11px;color:#64748b;margin-top:4px;" id="dash-subs-breakdown">—</div>
+            </div>
+            <div class="kpi-card" style="padding:16px 18px;border-left:3px solid #8b5cf6;">
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Novas no Mês</div>
+              <div style="font-size:24px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;" id="dash-subs-novas">0</div>
+              <div style="font-size:11px;color:#64748b;margin-top:4px;" id="dash-subs-novas-receita">— em receita</div>
+            </div>
+            <div class="kpi-card" style="padding:16px 18px;border-left:3px solid #f59e0b;cursor:pointer;" onclick="showPage('programas')" title="Ver assinaturas a vencer">
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">A Vencer (30 dias)</div>
+              <div style="font-size:24px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;" id="dash-subs-vencendo">0</div>
+              <div style="font-size:11px;color:#64748b;margin-top:4px;" id="dash-subs-vencendo-receita">Renovações necessárias</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- ===== RECEITA POR PROCEDIMENTO ===== -->
       <div style="margin-bottom:24px;" data-section="procedimentos">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">

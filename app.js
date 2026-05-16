@@ -4724,6 +4724,99 @@ function renderProcBreakdown(pacs) {
     </table>`;
 }
 
+// ====================== MRR / RECEITA RECORRENTE ======================
+function _mrrDeInscricao(ins, prog) {
+  // MRR de uma inscrição = preçoÀVista / vigênciaDias * 30
+  if (!prog || prog.tipo !== 'Assinatura') return 0;
+  const dias = _vigenciaDias(prog.vigencia);
+  if (!dias || !prog.precoAVista) return 0;
+  return (prog.precoAVista / dias) * 30;
+}
+
+function _vencimentoInscricao(ins, prog) {
+  if (!prog || prog.tipo !== 'Assinatura' || !ins.dataInicio) return null;
+  return _addDaysIso(ins.dataInicio, _vigenciaDias(prog.vigencia));
+}
+
+function renderDashboardMRR(mes) {
+  const sec = document.getElementById('dash-mrr-section');
+  if (!sec) return;
+
+  const inscricoes = getInscricoes();
+  const programas  = getProgramas();
+  const today = new Date().toISOString().substring(0, 10);
+
+  // Considera ativas: status Ativo + vencimento futuro (ou sem vencimento, p/ não-Assinatura — ignoradas)
+  let mrr = 0;
+  const tipoCount = { Assinatura: 0, Fixo: 0, 'Contínuo': 0 };
+  let subsAtivas = 0;
+  let subsVencendo = 0;
+  let receitaVencendo = 0;
+  const ativasAssinatura = [];
+
+  inscricoes.forEach(ins => {
+    if (ins.status !== 'Ativo') return;
+    const prog = programas.find(p => p.id === ins.programaId);
+    if (!prog) return;
+    if (prog.tipo === 'Assinatura') {
+      const venc = _vencimentoInscricao(ins, prog);
+      if (venc && venc < today) return; // já venceu, não conta como ativa
+      ativasAssinatura.push({ ins, prog, venc });
+      subsAtivas++;
+      mrr += _mrrDeInscricao(ins, prog);
+      // Vencendo nos próximos 30 dias
+      const em30 = _addDaysIso(today, 30);
+      if (venc && venc <= em30) {
+        subsVencendo++;
+        receitaVencendo += prog.precoAVista || 0;
+      }
+    }
+    tipoCount[prog.tipo] = (tipoCount[prog.tipo] || 0) + 1;
+  });
+
+  // Novas no mês
+  const novasMes = inscricoes.filter(i => {
+    const prog = programas.find(p => p.id === i.programaId);
+    return prog && prog.tipo === 'Assinatura' && (i.dataInicio || '').startsWith(mes);
+  });
+  const receitaNovas = novasMes.reduce((s, i) => {
+    const prog = programas.find(p => p.id === i.programaId);
+    return s + (prog ? (prog.precoAVista || 0) : 0);
+  }, 0);
+
+  // Esconde a seção se não houver nenhum programa ativo nem inscrição
+  if (!ativasAssinatura.length && !novasMes.length) {
+    sec.style.display = 'none';
+    return;
+  }
+  sec.style.display = '';
+
+  setText('dash-mrr', BRL(Math.round(mrr)));
+  setText('dash-arr', BRL(Math.round(mrr * 12)));
+  setText('dash-subs-ativas', subsAtivas);
+
+  // Breakdown por vigência (Mensal/Trimestral/Semestral/Anual)
+  const porVigencia = {};
+  ativasAssinatura.forEach(({ prog }) => {
+    porVigencia[prog.vigencia] = (porVigencia[prog.vigencia] || 0) + 1;
+  });
+  const ordem = ['Mensal','Trimestral','Semestral','Anual'];
+  const breakdown = ordem.filter(v => porVigencia[v]).map(v => `${porVigencia[v]} ${v.toLowerCase()}`).join(' · ') || 'Concierge medicine';
+  setText('dash-subs-breakdown', breakdown);
+
+  setText('dash-subs-novas', novasMes.length);
+  setText('dash-subs-novas-receita', novasMes.length ? `${BRL(receitaNovas)} em receita` : 'Nenhuma nova inscrição');
+
+  setText('dash-subs-vencendo', subsVencendo);
+  setText('dash-subs-vencendo-receita', subsVencendo ? `${BRL(receitaVencendo)} a renovar` : 'Tudo em dia ✓');
+
+  // Cor do card "A vencer" muda conforme criticidade
+  const vencCard = document.getElementById('dash-subs-vencendo')?.closest('.kpi-card');
+  if (vencCard) {
+    vencCard.style.borderLeftColor = subsVencendo === 0 ? '#10b981' : subsVencendo <= 2 ? '#f59e0b' : '#ef4444';
+  }
+}
+
 function renderDashboard(mes) {
   _populateMesSelect('dash-mes-filter', { selected: mes });
   mes = document.getElementById('dash-mes-filter')?.value || new Date().toISOString().substring(0, 7);
@@ -4846,6 +4939,8 @@ function renderDashboard(mes) {
   const convTrendEl = document.getElementById('kpi-conv-trend');
   if (convTrendEl) convTrendEl.innerHTML = varHtml(conv, prevConv);
 
+  // MRR / Receita Recorrente (programas de assinatura)
+  renderDashboardMRR(mes);
   // Breakdown por procedimento
   renderProcBreakdown(pacs);
   // Pacote 3 — Retenção e LTV (independe do mês: usa todo o histórico)
