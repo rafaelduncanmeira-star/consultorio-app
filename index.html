@@ -43,14 +43,15 @@
     .sidebar { background: #111318; border-right: 1px solid rgba(255,255,255,0.05); }
     .sidebar-logo-bg { background: #1a1f2e; border: 1px solid rgba(255,255,255,0.08); }
 
-    .nav-section { font-size: 10px; font-weight: 600; letter-spacing: 0.1em; color: #3d4454; text-transform: uppercase; padding: 18px 12px 5px; }
-    .nav-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 6px; font-size: 13px; font-weight: 450; color: #6b7280; cursor: pointer; transition: background 0.12s, color 0.12s; margin-bottom: 1px; position: relative; }
-    .nav-item:hover { background: rgba(255,255,255,0.05); color: #c9d1d9; }
-    .nav-item.active { background: rgba(255,255,255,0.07); color: #f1f5f9; font-weight: 500; }
-    .nav-item.active::before { content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 2.5px; height: 14px; background: #10b981; border-radius: 0 2px 2px 0; }
-    .nav-item .icon { width: 16px; height: 16px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; opacity: 0.7; }
-    .nav-item.active .icon { opacity: 1; }
-    .nav-item i { width: 15px; height: 15px; stroke-width: 1.75; }
+    .nav-section { font-size: 10.5px; font-weight: 700; letter-spacing: 0.12em; color: #7c8ba1; text-transform: uppercase; padding: 18px 12px 6px; }
+    .nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 7px; font-size: 13.5px; font-weight: 500; color: #cbd5e1; cursor: pointer; transition: background 0.15s, color 0.15s, transform 0.15s; margin-bottom: 2px; position: relative; }
+    .nav-item:hover { background: rgba(255,255,255,0.08); color: #ffffff; }
+    .nav-item.active { background: linear-gradient(90deg, rgba(16,185,129,0.15), rgba(16,185,129,0.05)); color: #ffffff; font-weight: 600; box-shadow: inset 0 0 0 1px rgba(16,185,129,0.2); }
+    .nav-item.active::before { content: ''; position: absolute; left: -1px; top: 50%; transform: translateY(-50%); width: 3px; height: 18px; background: #10b981; border-radius: 0 3px 3px 0; box-shadow: 0 0 8px rgba(16,185,129,0.5); }
+    .nav-item .icon { width: 16px; height: 16px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; opacity: 0.85; transition: opacity 0.15s; }
+    .nav-item:hover .icon { opacity: 1; }
+    .nav-item.active .icon { opacity: 1; color: #10b981; }
+    .nav-item i { width: 16px; height: 16px; stroke-width: 2; }
 
     /* ── Cards ── */
     .kpi-card { background: #fff; border-radius: 10px; padding: 20px 22px; border: 1px solid #e8eaed; box-shadow: 0 1px 2px rgba(0,0,0,0.04); transition: box-shadow 0.18s; }
@@ -554,7 +555,7 @@
         </div>
         <div>
           <div id="sidebar-header-nome" style="font-size:12.5px;font-weight:600;color:#e2e8f0;letter-spacing:-0.01em;line-height:1.25;">Dr. Rafael Duncan</div>
-          <div id="sidebar-header-esp" style="font-size:10.5px;color:#3d4454;font-weight:400;margin-top:1px;">Geriatria</div>
+          <div id="sidebar-header-esp" style="font-size:10.5px;color:#94a3b8;font-weight:500;margin-top:1px;">Geriatria</div>
         </div>
       </div>
     </div>
@@ -639,16 +640,16 @@
         style="margin-bottom:8px;padding:6px 8px;background:rgba(255,255,255,0.03);border-radius:7px;cursor:pointer;transition:background 0.15s;"
         onmouseover="this.style.background='rgba(255,255,255,0.07)'" onmouseout="this.style.background='rgba(255,255,255,0.03)'">
         <!-- preenchido por _atualizarSidebarMaestria() -->
-        <div style="font-size:10px;font-weight:700;color:#475569;letter-spacing:0.04em;">🎵 APRENDIZ</div>
-        <div style="height:3px;background:#1e293b;border-radius:999px;margin-top:4px;"><div style="height:100%;width:0%;background:linear-gradient(90deg,#10b981,#34d399);border-radius:999px;"></div></div>
+        <div style="font-size:10.5px;font-weight:700;color:#a5b4cb;letter-spacing:0.06em;">🎵 APRENDIZ</div>
+        <div style="height:4px;background:#1e293b;border-radius:999px;margin-top:5px;"><div style="height:100%;width:0%;background:linear-gradient(90deg,#10b981,#34d399);border-radius:999px;"></div></div>
       </div>
       <div style="display:flex;align-items:center;gap:9px;">
-        <div id="sidebar-avatar" style="width:28px;height:28px;background:#1e293b;border:1px solid rgba(255,255,255,0.1);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#94a3b8;flex-shrink:0;">R</div>
+        <div id="sidebar-avatar" style="width:30px;height:30px;background:linear-gradient(135deg,#10b981,#059669);border:1px solid rgba(255,255,255,0.15);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0;box-shadow:0 2px 6px rgba(16,185,129,0.25);">R</div>
         <div style="flex:1;min-width:0;">
-          <div id="sidebar-nome" style="font-size:11.5px;font-weight:500;color:#c9d1d9;letter-spacing:-0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Rafael Duncan</div>
-          <div id="sidebar-role" style="font-size:10px;color:#3d4454;">Médico</div>
+          <div id="sidebar-nome" style="font-size:12px;font-weight:600;color:#f1f5f9;letter-spacing:-0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Rafael Duncan</div>
+          <div id="sidebar-role" style="font-size:10.5px;color:#94a3b8;font-weight:500;">Médico</div>
         </div>
-        <button onclick="logoutUser()" title="Sair" style="background:transparent;border:none;cursor:pointer;padding:4px;border-radius:5px;color:#3d4454;transition:color 0.15s;" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='#3d4454'">
+        <button onclick="logoutUser()" title="Sair" style="background:transparent;border:none;cursor:pointer;padding:5px;border-radius:6px;color:#94a3b8;transition:color 0.15s,background 0.15s;" onmouseover="this.style.color='#ef4444';this.style.background='rgba(239,68,68,0.1)';" onmouseout="this.style.color='#94a3b8';this.style.background='transparent';">
           <i data-lucide="log-out" style="width:14px;height:14px;stroke-width:2;"></i>
         </button>
       </div>

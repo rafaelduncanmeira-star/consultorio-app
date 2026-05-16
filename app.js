@@ -7975,14 +7975,14 @@ function _atualizarSidebarMaestria() {
 
   const pctBar = prox ? Math.round(((qtd - nivel.min) / (prox.min - nivel.min)) * 100) : 100;
   el.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-      <span style="font-size:10px;font-weight:700;color:#475569;letter-spacing:0.04em;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">
+      <span style="font-size:10.5px;font-weight:700;color:#a5b4cb;letter-spacing:0.06em;">
         ${nivel.icone} ${nivel.titulo.toUpperCase()}
       </span>
-      <span style="font-size:9.5px;color:#3d4454;">${qtd}/${ACHIEVEMENTS.length}</span>
+      <span style="font-size:10px;color:#94a3b8;font-weight:600;">${qtd}/${ACHIEVEMENTS.length}</span>
     </div>
-    <div style="height:3px;background:#1e293b;border-radius:999px;overflow:hidden;">
-      <div style="height:100%;width:${pctBar}%;background:linear-gradient(90deg,#10b981,#34d399);border-radius:999px;transition:width 0.6s ease;"></div>
+    <div style="height:4px;background:#1e293b;border-radius:999px;overflow:hidden;">
+      <div style="height:100%;width:${pctBar}%;background:linear-gradient(90deg,#10b981,#34d399);border-radius:999px;transition:width 0.6s ease;box-shadow:0 0 6px rgba(16,185,129,0.4);"></div>
     </div>`;
 }
 
