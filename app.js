@@ -354,18 +354,28 @@ function openModal(id) {
     const mp     = DB.getObj('metas_proc', {});
     const mpVal  = DB.getObj('metas_proc_valor', {});
     const procs  = getProcedimentos();
-    const chaves = ['1ª vez','Consulta','Retorno','Domiciliar','Hospitalar','Telemedicina'];
-    const ids    = ['1vez','consulta','retorno','domiciliar','hospitalar','telemedicina'];
+    const chaves = ['1ª vez','Consulta','Retorno','Domiciliar','Hospitalar','Telemedicina','Programa'];
+    const ids    = ['1vez','consulta','retorno','domiciliar','hospitalar','telemedicina','programa'];
 
     chaves.forEach((tipo, i) => {
       const qtdEl = document.getElementById(`mm-${ids[i]}-qtd`);
       const valEl = document.getElementById(`mm-${ids[i]}-val`);
       if (qtdEl) qtdEl.value = mp[tipo] || '';
       if (valEl) {
-        // Usa valor salvo anteriormente; se não houver, busca da tabela de preços
         const valorSalvo = mpVal[tipo];
-        const proc = procs.find(p => p.nome === tipo || p.nome.toLowerCase().includes(tipo.toLowerCase().split(' ')[0]));
-        valEl.value = valorSalvo || (proc ? proc.valorPix : '') || '';
+        if (tipo === 'Programa') {
+          // Sugere ticket médio mensal (MRR) dos programas Assinatura ativos
+          const progs = getProgramas().filter(p => p.ativo !== false && p.tipo === 'Assinatura');
+          let mrrMed = 0;
+          if (progs.length) {
+            const mrrs = progs.map(p => (p.precoAVista || 0) / _vigenciaDias(p.vigencia) * 30);
+            mrrMed = Math.round(mrrs.reduce((a,b)=>a+b,0) / mrrs.length);
+          }
+          valEl.value = valorSalvo || mrrMed || '';
+        } else {
+          const proc = procs.find(p => p.nome === tipo || p.nome.toLowerCase().includes(tipo.toLowerCase().split(' ')[0]));
+          valEl.value = valorSalvo || (proc ? proc.valorPix : '') || '';
+        }
       }
     });
     document.getElementById('input-meta-desp').value = metas.desp || '';
@@ -2708,21 +2718,55 @@ function toggleFollowupFeito(i) {
   renderFollowup();
 }
 
+let _followupTab = 'regular'; // 'regular' | 'programa'
+
+function setFollowupTab(tab) {
+  _followupTab = tab;
+  const tR = document.getElementById('fu-tab-regular');
+  const tP = document.getElementById('fu-tab-programa');
+  if (tR && tP) {
+    if (tab === 'regular') {
+      tR.style.color = '#0f172a'; tR.style.borderBottomColor = '#10b981';
+      tP.style.color = '#94a3b8'; tP.style.borderBottomColor = 'transparent';
+    } else {
+      tP.style.color = '#0f172a'; tP.style.borderBottomColor = '#3b82f6';
+      tR.style.color = '#94a3b8'; tR.style.borderBottomColor = 'transparent';
+    }
+  }
+  renderFollowup();
+}
+
 function renderFollowup() {
-  renderAtendidosSemFollowup();
-  const data = DB.get('followup');
+  // Só renderiza o banner "atendidos sem follow-up" na aba Regular
+  if (_followupTab === 'regular') renderAtendidosSemFollowup();
+  else { const b = document.getElementById('atendidos-sem-followup'); if (b) b.innerHTML = ''; }
+
+  const all = DB.get('followup');
   const today = new Date().toISOString().split('T')[0];
   const tbody = document.getElementById('followup-tbody');
   const alertas = document.getElementById('alertas-container');
 
+  // Separa regular vs programa e atualiza contadores
+  const regularAll  = all.filter(r => !r.programaInscricaoId);
+  const programaAll = all.filter(r =>  r.programaInscricaoId);
+  const cR = document.getElementById('fu-count-regular');
+  const cP = document.getElementById('fu-count-programa');
+  if (cR) cR.textContent = regularAll.length;
+  if (cP) cP.textContent = programaAll.length;
+
+  const data = _followupTab === 'programa' ? programaAll : regularAll;
+  // Mantém índice original pra edit/delete funcionarem
+  const dataIdx = data.map(r => all.indexOf(r));
+
   const vencidos = data.filter(r => !r.feito && r.dataContato && r.dataContato <= today);
 
   if (vencidos.length > 0) {
+    const labelAba = _followupTab === 'programa' ? 'de programa' : 'regulares';
     alertas.innerHTML = `
       <div class="bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-start gap-3 mb-4">
         <span class="text-2xl">⚠️</span>
         <div>
-          <div class="font-semibold text-orange-800">${vencidos.length} follow-up(s) pendente(s) hoje</div>
+          <div class="font-semibold text-orange-800">${vencidos.length} follow-up(s) ${labelAba} pendente(s) hoje</div>
           <div class="text-sm text-orange-700 mt-1">${vencidos.map(r => r.nome).join(', ')}</div>
         </div>
       </div>`;
@@ -2731,15 +2775,29 @@ function renderFollowup() {
   }
 
   if (!data.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="text-center py-12 text-gray-400">Nenhum follow-up registrado.</td></tr>';
+    const msg = _followupTab === 'programa'
+      ? 'Nenhum follow-up de programa. Inscreva um paciente em um Programa de Acompanhamento na aba Programas.'
+      : 'Nenhum follow-up regular registrado.';
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center py-12 text-gray-400">${msg}</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = data.map((r, i) => {
+  const inscricoes = getInscricoes();
+  const programas  = getProgramas();
+
+  tbody.innerHTML = data.map((r, localI) => {
+    const i = dataIdx[localI];
     const atrasado = !r.feito && r.dataContato && r.dataContato < today;
+    let badge = '';
+    if (r.programaInscricaoId) {
+      const ins  = inscricoes.find(x => x.id === r.programaInscricaoId);
+      const prog = ins ? programas.find(p => p.id === ins.programaId) : null;
+      const nomeProg = prog ? prog.nome : 'Programa';
+      badge = ` <span title="${_esc(nomeProg)}" style="background:#dbeafe;color:#1d4ed8;font-size:10px;padding:2px 6px;border-radius:999px;margin-left:4px;font-weight:700;">🔁 ${_esc(nomeProg)}</span>`;
+    }
     return `
     <tr class="border-b border-gray-50 hover:bg-gray-50 ${atrasado ? 'bg-orange-50' : ''}">
-      <td class="px-4 py-3 font-medium text-gray-900">${_esc(r.nome)}${r.programaInscricaoId ? ' <span title="Vinculado a programa de acompanhamento" style="background:#dbeafe;color:#1d4ed8;font-size:10px;padding:2px 6px;border-radius:999px;margin-left:4px;font-weight:700;">🔁 Programa</span>' : ''}</td>
+      <td class="px-4 py-3 font-medium text-gray-900">${_esc(r.nome)}${badge}</td>
       <td class="px-4 py-3 text-gray-600">${formatDate(r.ultConsulta)}</td>
       <td class="px-4 py-3 text-gray-600 ${atrasado ? 'text-orange-600 font-semibold' : ''}">${formatDate(r.dataContato)}</td>
       <td class="px-4 py-3 text-gray-600">${_esc(r.tipoContato)}</td>
@@ -5638,8 +5696,8 @@ function updateRelatorio(val) { renderRelatorio(val); }
 
 // ====================== METAS ======================
 function atualizarPreviewMetas() {
-  const chaves = ['1ª vez','Consulta','Retorno','Domiciliar','Hospitalar','Telemedicina'];
-  const ids    = ['1vez','consulta','retorno','domiciliar','hospitalar','telemedicina'];
+  const chaves = ['1ª vez','Consulta','Retorno','Domiciliar','Hospitalar','Telemedicina','Programa'];
+  const ids    = ['1vez','consulta','retorno','domiciliar','hospitalar','telemedicina','programa'];
   let totalFat = 0, totalPac = 0;
 
   chaves.forEach((tipo, i) => {
@@ -5661,8 +5719,8 @@ function atualizarPreviewMetas() {
 function saveMetas(e) {
   e.preventDefault();
   const fd = new FormData(e.target);
-  const chaves = ['1ª vez','Consulta','Retorno','Domiciliar','Hospitalar','Telemedicina'];
-  const ids    = ['1vez','consulta','retorno','domiciliar','hospitalar','telemedicina'];
+  const chaves = ['1ª vez','Consulta','Retorno','Domiciliar','Hospitalar','Telemedicina','Programa'];
+  const ids    = ['1vez','consulta','retorno','domiciliar','hospitalar','telemedicina','programa'];
 
   // Lê qtd e valor por procedimento
   const mp = {}, mpVal = {};
@@ -5783,7 +5841,14 @@ function renderMetasProc() {
     'Domiciliar':  { bg:'#fef3c7', cor:'#92400e', icon:'🏠' },
     'Hospitalar':  { bg:'#fee2e2', cor:'#991b1b', icon:'🏥' },
     'Telemedicina':{ bg:'#e0f2fe', cor:'#0c4a6e', icon:'💻' },
+    'Programa':    { bg:'#eff6ff', cor:'#1d4ed8', icon:'🔁' },
   };
+
+  // Inscrições para a linha "Programa"
+  const allIns = getInscricoes();
+  function inscricoesNoMes(mes) {
+    return allIns.filter(i => (i.dataInicio || '').startsWith(mes)).length;
+  }
 
   const tipos = Object.keys(corPorTipo);
   const temMeta = tipos.some(t => (mp[t] || 0) > 0);
@@ -5827,7 +5892,10 @@ function renderMetasProc() {
           ${tiposAtivos.map(tipo => {
             const meta = mp[tipo] || 0;
             const c = corPorTipo[tipo];
-            const totAnual = allPacs.filter(p => getMes(p.data).startsWith(String(anoAtual)) && (p.tipo||'Consulta') === tipo).length;
+            const isProg = tipo === 'Programa';
+            const totAnual = isProg
+              ? allIns.filter(i => (i.dataInicio || '').startsWith(String(anoAtual))).length
+              : allPacs.filter(p => getMes(p.data).startsWith(String(anoAtual)) && (p.tipo||'Consulta') === tipo).length;
             return `
               <tr style="border-bottom:1px solid #f8fafc;">
                 <td style="padding:9px 12px;">
@@ -5840,7 +5908,9 @@ function renderMetasProc() {
                   <span style="background:${c.bg};color:${c.cor};padding:2px 9px;border-radius:999px;font-size:12px;font-weight:700;">${meta}</span>
                 </td>
                 ${colunas.map(col => {
-                  const real = allPacs.filter(p => getMes(p.data) === col.mes && (p.tipo||'Consulta') === tipo).length;
+                  const real = isProg
+                    ? inscricoesNoMes(col.mes)
+                    : allPacs.filter(p => getMes(p.data) === col.mes && (p.tipo||'Consulta') === tipo).length;
                   const pct = meta ? (real / meta) * 100 : 0;
                   const cor = real === 0 ? '#d1d5db' : real >= meta ? '#10b981' : real >= meta * 0.7 ? '#f59e0b' : '#ef4444';
                   const bg  = col.isAtual ? '#f0fdf4' : '';

@@ -1258,7 +1258,16 @@
         <button class="btn-primary" onclick="openModal('modal-followup')">+ Novo Follow-Up</button>
       </div>
       <div id="alertas-container"></div>
-      <!-- Banner: atendidos sem follow-up -->
+      <!-- Tabs: Regular vs Programa -->
+      <div style="display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid #e2e8f0;">
+        <button id="fu-tab-regular" type="button" onclick="setFollowupTab('regular')" style="background:none;border:none;padding:10px 16px;font-size:13px;font-weight:600;color:#0f172a;border-bottom:2px solid #10b981;cursor:pointer;">
+          📞 Follow-up Regular <span id="fu-count-regular" style="background:#f1f5f9;color:#64748b;padding:1px 8px;border-radius:999px;font-size:11px;margin-left:4px;">0</span>
+        </button>
+        <button id="fu-tab-programa" type="button" onclick="setFollowupTab('programa')" style="background:none;border:none;padding:10px 16px;font-size:13px;font-weight:600;color:#94a3b8;border-bottom:2px solid transparent;cursor:pointer;">
+          🔁 Programas <span id="fu-count-programa" style="background:#dbeafe;color:#1d4ed8;padding:1px 8px;border-radius:999px;font-size:11px;margin-left:4px;">0</span>
+        </button>
+      </div>
+      <!-- Banner: atendidos sem follow-up (só na aba regular) -->
       <div id="atendidos-sem-followup"></div>
       <div class="chart-card" style="padding:0;overflow:hidden;">
         <table class="data-table">
@@ -2200,6 +2209,12 @@
             <td style="padding:6px 8px;"><input type="number" class="input" name="meta_telemedicina" id="mm-telemedicina-qtd" min="0" placeholder="0" oninput="atualizarPreviewMetas()" style="text-align:center;padding:6px 8px;" /></td>
             <td style="padding:6px 8px;"><input type="number" class="input" name="valor_telemedicina" id="mm-telemedicina-val" min="0" placeholder="0" oninput="atualizarPreviewMetas()" style="text-align:center;padding:6px 8px;" /></td>
             <td style="padding:8px 8px;text-align:right;font-weight:600;color:#0f172a;" id="mm-telemedicina-total">—</td>
+          </tr>
+          <tr style="background:#eff6ff;">
+            <td style="padding:8px 8px;"><span style="font-size:13px;">🔁 Programa (assinaturas)</span><div style="font-size:10.5px;color:#64748b;margin-top:2px;">Novas inscrições/mês × ticket médio</div></td>
+            <td style="padding:6px 8px;"><input type="number" class="input" name="meta_programa" id="mm-programa-qtd" min="0" placeholder="0" oninput="atualizarPreviewMetas()" style="text-align:center;padding:6px 8px;" /></td>
+            <td style="padding:6px 8px;"><input type="number" class="input" name="valor_programa" id="mm-programa-val" min="0" placeholder="0" oninput="atualizarPreviewMetas()" style="text-align:center;padding:6px 8px;" /></td>
+            <td style="padding:8px 8px;text-align:right;font-weight:600;color:#0f172a;" id="mm-programa-total">—</td>
           </tr>
         </tbody>
         <tfoot>
