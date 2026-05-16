@@ -1043,37 +1043,44 @@
         </div>
       </div>
 
-      <!-- Bottom row: Funil + Últimos -->
-      <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:20px;">
-
-        <!-- Funil CRM -->
-        <div class="chart-card">
-          <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:16px;">Funil CRM</div>
-          <div id="funil-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+      <!-- Bottom row: Funil + Últimas Consultas -->
+      <div style="margin-bottom:0;" data-section="funil-ultimas">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <div style="font-size:10.5px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.08em;">🔽 Funil e Últimas Consultas</div>
+          <div style="flex:1;height:1px;background:#e2e8f0;"></div>
+          <button onclick="toggleSection('funil-ultimas')" class="btn-section-toggle" title="Ocultar seção">−</button>
         </div>
+        <div data-section-body="funil-ultimas" style="display:grid;grid-template-columns:1fr 1.4fr;gap:20px;">
 
-        <!-- Últimas consultas -->
-        <div class="chart-card" style="padding:0;overflow:hidden;">
-          <div style="padding:20px 20px 12px;display:flex;align-items:center;justify-content:space-between;">
-            <div style="font-size:14px;font-weight:700;color:#0f172a;">Últimas Consultas</div>
-            <button class="btn-ghost" style="font-size:12px;" onclick="showPage('pacientes')">Ver todas →</button>
+          <!-- Funil CRM -->
+          <div class="chart-card">
+            <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:16px;">Funil CRM</div>
+            <div id="funil-list" style="display:flex;flex-direction:column;gap:8px;"></div>
           </div>
-          <table class="data-table" id="dash-ultimas">
-            <thead>
-              <tr>
-                <th>Paciente</th>
-                <th>Data</th>
-                <th>Tipo</th>
-                <th>Valor</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody id="dash-ultimas-tbody">
-              <tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:32px;">Nenhuma consulta registrada</td></tr>
-            </tbody>
-          </table>
-        </div>
 
+          <!-- Últimas consultas -->
+          <div class="chart-card" style="padding:0;overflow:hidden;">
+            <div style="padding:20px 20px 12px;display:flex;align-items:center;justify-content:space-between;">
+              <div style="font-size:14px;font-weight:700;color:#0f172a;">Últimas Consultas</div>
+              <button class="btn-ghost" style="font-size:12px;" onclick="showPage('pacientes')">Ver todas →</button>
+            </div>
+            <table class="data-table" id="dash-ultimas">
+              <thead>
+                <tr>
+                  <th>Paciente</th>
+                  <th>Data</th>
+                  <th>Tipo</th>
+                  <th>Valor</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="dash-ultimas-tbody">
+                <tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:32px;">Nenhuma consulta registrada</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+        </div>
       </div>
     </div>
 
