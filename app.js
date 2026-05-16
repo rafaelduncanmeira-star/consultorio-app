@@ -1809,6 +1809,7 @@ function editAgendamento(id) {
   form.procedimento.value = a.procedimento || '';
   form.status.value = a.status || 'Confirmado';
   form.obs.value = a.obs || '';
+  _setTipoAtividade(a.tipoAtividade || 'Consultório');
   document.querySelector('#modal-agendamento .modal-title').textContent = 'Editar Agendamento';
   document.getElementById('ag-conflito-aviso').style.display = 'none';
   modal.style.display = 'flex';
@@ -1828,6 +1829,7 @@ function saveAgendamento(e) {
     procedimento: fd.get('procedimento') || '',
     status: fd.get('status') || 'Confirmado',
     obs: (fd.get('obs') || '').trim(),
+    tipoAtividade: fd.get('tipoAtividade') || 'Consultório',
     crmIdx: editState.crmIdx ?? null,
     pacIdx: editState.pacIdx ?? null,
   };
@@ -1971,6 +1973,7 @@ function openModalConfigHorarios() {
   form.almocoInicio.value = cfg.almocoInicio || '';
   form.almocoFim.value = cfg.almocoFim || '';
   form.slotDuracao.value = cfg.slotDuracao;
+  form.slotsConsultorioDia.value = cfg.slotsConsultorioDia || 6;
   // Dias da semana
   const dias = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
   document.getElementById('cfg-dias').innerHTML = dias.map((nome, i) => {
@@ -1993,6 +1996,7 @@ function saveConfigHorarios(e) {
     almocoInicio: fd.get('almocoInicio') || null,
     almocoFim: fd.get('almocoFim') || null,
     slotDuracao: parseInt(fd.get('slotDuracao')) || 60,
+    slotsConsultorioDia: parseInt(fd.get('slotsConsultorioDia')) || 6,
     diasUteis: diasUteis.length ? diasUteis : [1,2,3,4,5],
   };
   DB.setObj('agenda_config', cfg);
@@ -2135,17 +2139,20 @@ function _renderAgendaKPIs() {
   const iniStr = _ymd(ini), fimStr = _ymd(fim);
   const ativos = ags.filter(a => a.data >= iniStr && a.data <= fimStr);
 
-  const confirmados = ativos.filter(a => a.status === 'Confirmado').length;
+  const confirmados  = ativos.filter(a => a.status === 'Confirmado').length;
   const compareceram = ativos.filter(a => a.status === 'Compareceu').length;
-  const noshow = ativos.filter(a => a.status === 'No-show').length;
-  const total = confirmados + compareceram + noshow; // exclui cancelados
+  const noshow       = ativos.filter(a => a.status === 'No-show').length;
+  const total        = confirmados + compareceram + noshow;
 
-  // Ocupação = slots usados ÷ slots disponíveis no período
-  let slotsDispo = 0;
+  // Ocupação: só conta consultas no consultório vs. slots configurados
+  const cfg2 = getAgConfig();
+  const slotsConsultorioDia = cfg2.slotsConsultorioDia || Math.floor(((_toMin(cfg2.horaFim) - _toMin(cfg2.horaInicio)) / (cfg2.slotDuracao || 60)));
+  let diasUteis = 0;
   for (let d = new Date(ini); d <= fim; d = _addDays(d, 1)) {
-    slotsDispo += _slotsDoDia(_ymd(d)).length;
+    if (cfg2.diasUteis.includes(d.getDay())) diasUteis++;
   }
-  const slotsUsados = ativos.filter(a => a.status !== 'Cancelado').length;
+  const slotsDispo  = slotsConsultorioDia * diasUteis;
+  const slotsUsados = ativos.filter(a => a.status !== 'Cancelado' && (!a.tipoAtividade || a.tipoAtividade === 'Consultório')).length;
   const ocup = slotsDispo ? (slotsUsados / slotsDispo) * 100 : 0;
 
   // Receita perdida = no-shows × ticket médio do procedimento
@@ -2206,18 +2213,50 @@ function _viewMes() {
 function _viewSemana() { return _viewWeekOrDay(7); }
 function _viewDia()    { return _viewWeekOrDay(1); }
 
+// Cores e estilos por tipo de atividade
+const _TIPO_STYLE = {
+  'Consultório':      { bg:'#eff6ff', color:'#1d4ed8', border:'#3b82f6', icon:'🏥' },
+  'Visita Domiciliar':{ bg:'#fff7ed', color:'#9a3412', border:'#f97316', icon:'🏠' },
+  'Visita Hospitalar':{ bg:'#fdf4ff', color:'#7e22ce', border:'#a855f7', icon:'🏨' },
+  'Outro':            { bg:'#f8fafc', color:'#475569', border:'#94a3b8', icon:'📌' },
+};
+
+function _setTipoAtividade(tipo) {
+  document.getElementById('ag-tipo-hidden').value = tipo;
+  document.querySelectorAll('.ag-tipo-btn').forEach(btn => {
+    const t = btn.dataset.tipo;
+    const s = _TIPO_STYLE[t] || _TIPO_STYLE['Outro'];
+    if (t === tipo) {
+      btn.style.border = `2px solid ${s.border}`;
+      btn.style.background = s.bg;
+      btn.style.color = s.color;
+    } else {
+      btn.style.border = '2px solid #e2e8f0';
+      btn.style.background = '#f8fafc';
+      btn.style.color = '#64748b';
+    }
+  });
+  // Duração: domiciliar/hospitalar não têm slot padrão
+  const durEl = document.querySelector('#modal-agendamento [name="duracao"]');
+  if (durEl && (tipo === 'Visita Domiciliar' || tipo === 'Visita Hospitalar')) {
+    durEl.value = durEl.value || 60;
+  }
+}
+
 function _viewWeekOrDay(numDias) {
   const cfg    = getAgConfig();
   const ini    = numDias === 7 ? _startOfWeek(agAnchor) : new Date(agAnchor);
   const ags    = getAgendamentos();
   const hojeStr = _ymd(new Date());
 
-  const SNAP       = 10;          // granularidade drag em minutos
-  const PX_MIN     = 1.4;         // pixels por minuto (84px/hora)
-  const iniMin     = _toMin(cfg.horaInicio);
-  const fimMin     = _toMin(cfg.horaFim);
-  const totalMin   = fimMin - iniMin;
-  const totalH     = totalMin * PX_MIN;
+  const SNAP    = 10;
+  const iniMin  = _toMin(cfg.horaInicio);
+  const fimMin  = _toMin(cfg.horaFim);
+  const totalMin = fimMin - iniMin;
+  // PX_MIN dinâmico: cabe o dia inteiro sem scroll (alvo ~620px)
+  const targetH = Math.max(window.innerHeight - 300, 400);
+  const PX_MIN  = targetH / totalMin;
+  const totalH  = totalMin * PX_MIN;
 
   // ── Cabeçalho ──────────────────────────────────────────────
   let headHtml = `<div style="width:52px;flex-shrink:0;background:#fafafa;border-bottom:2px solid #e5e7eb;border-right:1px solid #e5e7eb;"></div>`;
@@ -2281,28 +2320,32 @@ function _viewWeekOrDay(numDias) {
       const dur      = parseInt(a.duracao) || 60;
       const top      = (startMin - iniMin) * PX_MIN;
       const height   = Math.max(dur * PX_MIN - 2, 18);
+      const tipo     = a.tipoAtividade || 'Consultório';
+      const ts       = _TIPO_STYLE[tipo] || _TIPO_STYLE['Consultório'];
       const ec       = (a.status || 'confirmado').toLowerCase().replace('no-show', 'noshow');
-      const showDur  = height >= 36;
+      const showDur  = height >= 30;
+      const isCancelado = ec === 'cancelado';
       evts += `<div class="week-evt ${ec}"
-        style="position:absolute;top:${top}px;left:3px;right:3px;height:${height}px;z-index:3;overflow:hidden;cursor:grab;"
+        style="position:absolute;top:${top}px;left:3px;right:3px;height:${height}px;z-index:3;overflow:hidden;
+               cursor:grab;background:${isCancelado ? '#f5f5f5' : ts.bg};
+               color:${isCancelado ? '#9ca3af' : ts.color};border-left:3px solid ${isCancelado ? '#d1d5db' : ts.border};"
         draggable="true"
         ondragstart="_agDragStart(event,'${a.id}')"
         ondragend="_agDragEnd(event)"
         onclick="event.stopPropagation();editAgendamento('${a.id}')"
-        title="${a.pacienteNome} — ${a.procedimento || ''} (${dur}min)">
-        <strong style="font-size:10.5px;">${a.pacienteNome}</strong>
-        ${showDur ? `<br><span style="font-size:9.5px;opacity:0.8;">${a.procedimento || '—'} · ${dur}min</span>` : ''}
+        title="${ts.icon} ${a.pacienteNome} — ${a.procedimento || tipo} (${dur}min)">
+        <strong style="font-size:10.5px;">${ts.icon} ${a.pacienteNome}</strong>
+        ${showDur ? `<br><span style="font-size:9px;opacity:0.75;">${a.procedimento || tipo} · ${dur}min</span>` : ''}
       </div>`;
     });
 
     dayCols += `<div style="flex:1;position:relative;height:${totalH}px;border-right:1px solid #e5e7eb;background:${naoUtil ? '#fafafa' : '#fff'};">${guides}${drops}${evts}</div>`;
   }
 
-  const maxH = Math.min(totalH, 560);
   return `<div style="padding:14px;">
     <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
       <div style="display:flex;background:#fafafa;border-bottom:2px solid #e5e7eb;">${headHtml}</div>
-      <div style="display:flex;overflow-y:auto;max-height:${maxH}px;">
+      <div style="display:flex;">
         ${timeAxis}
         <div style="display:flex;flex:1;">${dayCols}</div>
       </div>

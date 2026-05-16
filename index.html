@@ -1773,12 +1773,20 @@
       <button onclick="closeModal('modal-agendamento')" style="background:none;border:none;cursor:pointer;font-size:22px;color:#94a3b8;line-height:1;">×</button>
     </div>
     <form style="padding:20px 24px 24px;" onsubmit="saveAgendamento(event)">
+      <!-- Tipo de atividade — determina se conta como slot -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;" id="ag-tipo-atividade-btns">
+        <button type="button" class="ag-tipo-btn active" data-tipo="Consultório"     onclick="_setTipoAtividade('Consultório')"     style="padding:7px 4px;border-radius:7px;font-size:11.5px;font-weight:600;border:2px solid #3b82f6;background:#eff6ff;color:#1d4ed8;cursor:pointer;">🏥 Consultório</button>
+        <button type="button" class="ag-tipo-btn"        data-tipo="Visita Domiciliar" onclick="_setTipoAtividade('Visita Domiciliar')" style="padding:7px 4px;border-radius:7px;font-size:11.5px;font-weight:600;border:2px solid #e2e8f0;background:#f8fafc;color:#64748b;cursor:pointer;">🏠 Domiciliar</button>
+        <button type="button" class="ag-tipo-btn"        data-tipo="Visita Hospitalar" onclick="_setTipoAtividade('Visita Hospitalar')" style="padding:7px 4px;border-radius:7px;font-size:11.5px;font-weight:600;border:2px solid #e2e8f0;background:#f8fafc;color:#64748b;cursor:pointer;">🏨 Hospitalar</button>
+        <button type="button" class="ag-tipo-btn"        data-tipo="Outro"            onclick="_setTipoAtividade('Outro')"            style="padding:7px 4px;border-radius:7px;font-size:11.5px;font-weight:600;border:2px solid #e2e8f0;background:#f8fafc;color:#64748b;cursor:pointer;">📌 Outro</button>
+      </div>
+      <input type="hidden" name="tipoAtividade" id="ag-tipo-hidden" value="Consultório" />
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px;">
         <div><label>Data</label><input type="date" class="input" name="data" required /></div>
         <div><label>Hora</label><input type="time" class="input" name="hora" required /></div>
-        <div><label>Duração (min)</label><input type="number" class="input" name="duracao" value="60" min="15" step="15" /></div>
+        <div><label>Duração (min)</label><input type="number" class="input" name="duracao" value="60" min="10" step="5" /></div>
       </div>
-      <div style="margin-bottom:14px;"><label>Paciente</label><input type="text" class="input" name="pacienteNome" required placeholder="Nome completo" /></div>
+      <div style="margin-bottom:14px;"><label>Paciente / Descrição</label><input type="text" class="input" name="pacienteNome" required placeholder="Nome completo" /></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
         <div><label>WhatsApp</label><input type="text" class="input" name="whatsapp" placeholder="(11) 99999-9999" /></div>
         <div><label>Procedimento</label><select class="select" name="procedimento" id="ag-procedimento"></select></div>
@@ -1846,7 +1854,14 @@
         <div><label>Almoço Início</label><input type="time" class="input" name="almocoInicio" value="12:00" /></div>
         <div><label>Almoço Fim</label><input type="time" class="input" name="almocoFim" value="13:30" /></div>
       </div>
-      <div style="margin-bottom:14px;"><label>Duração padrão do slot (min)</label><input type="number" class="input" name="slotDuracao" value="60" min="15" step="15" required /></div>
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px 14px;margin-bottom:14px;">
+        <div style="font-size:12px;font-weight:600;color:#166534;margin-bottom:8px;">🏥 Slots do Consultório</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div><label style="font-size:11.5px;">Slots por dia</label><input type="number" class="input" name="slotsConsultorioDia" value="6" min="1" max="20" /></div>
+          <div><label style="font-size:11.5px;">Duração padrão (min)</label><input type="number" class="input" name="slotDuracao" value="60" min="10" step="5" required /></div>
+        </div>
+        <div style="font-size:11px;color:#16a34a;margin-top:6px;">Apenas consultas no consultório contam para a taxa de ocupação</div>
+      </div>
       <div style="margin-bottom:20px;">
         <label>Dias de Atendimento</label>
         <div id="cfg-dias" style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
