@@ -1740,6 +1740,19 @@ function agendaNavegar(dir) {
 function agendaHoje() { agAnchor = new Date(); renderAgenda(); }
 
 // ===== Modais =====
+// Infere duração padrão pelo nome do procedimento
+function _inferirDuracao(nomeProc) {
+  if (!nomeProc) return null;
+  const n = nomeProc.toLowerCase();
+  if (n.includes('primeira') || n.includes('inicial') || n.includes('1ª') || n.includes('novo')) return 80;
+  if (n.includes('retorno') || n.includes('seguimento') || n.includes('revisão') || n.includes('revisao')) return 50;
+  // Tenta ler da tabela de preços se tiver campo duração
+  const procs = getProcedimentos();
+  const p = procs.find(x => x.nome === nomeProc);
+  if (p && p.duracao) return parseInt(p.duracao);
+  return null;
+}
+
 function openNovoAgendamento(prefill = {}) {
   editState = { col: null, idx: null, crmIdx: prefill.crmIdx || null, pacIdx: null, agId: null };
   const modal = document.getElementById('modal-agendamento');
@@ -1752,10 +1765,13 @@ function openNovoAgendamento(prefill = {}) {
   // Pré-preenche
   form.data.value = prefill.data || _ymd(new Date());
   form.hora.value = prefill.hora || '09:00';
-  form.duracao.value = prefill.duracao || getAgConfig().slotDuracao || 60;
   if (prefill.pacienteNome) form.pacienteNome.value = prefill.pacienteNome;
   if (prefill.whatsapp) form.whatsapp.value = prefill.whatsapp;
   if (prefill.procedimento && procs.some(p => p.nome === prefill.procedimento)) form.procedimento.value = prefill.procedimento;
+  // Duração: prefill > inferir pelo procedimento > config padrão
+  form.duracao.value = prefill.duracao || _inferirDuracao(form.procedimento.value) || getAgConfig().slotDuracao || 60;
+  // Atualiza duração ao trocar procedimento
+  form.procedimento.onchange = () => { form.duracao.value = _inferirDuracao(form.procedimento.value) || form.duracao.value; };
   form.status.value = 'Confirmado';
   document.querySelector('#modal-agendamento .modal-title').textContent = 'Novo Agendamento';
   document.getElementById('ag-conflito-aviso').style.display = 'none';
@@ -2181,60 +2197,106 @@ function _viewSemana() { return _viewWeekOrDay(7); }
 function _viewDia()    { return _viewWeekOrDay(1); }
 
 function _viewWeekOrDay(numDias) {
-  const cfg = getAgConfig();
-  const ini = numDias === 7 ? _startOfWeek(agAnchor) : new Date(agAnchor);
-  const ags = getAgendamentos();
-  const bloqs = getBloqueios();
+  const cfg    = getAgConfig();
+  const ini    = numDias === 7 ? _startOfWeek(agAnchor) : new Date(agAnchor);
+  const ags    = getAgendamentos();
   const hojeStr = _ymd(new Date());
 
-  const slot = cfg.slotDuracao;
-  const iniMin = _toMin(cfg.horaInicio);
-  const fimMin = _toMin(cfg.horaFim);
-  const slotsHoras = [];
-  for (let m = iniMin; m + slot <= fimMin; m += slot) slotsHoras.push(_toHHMM(m));
+  const SNAP       = 10;          // granularidade drag em minutos
+  const PX_MIN     = 1.4;         // pixels por minuto (84px/hora)
+  const iniMin     = _toMin(cfg.horaInicio);
+  const fimMin     = _toMin(cfg.horaFim);
+  const totalMin   = fimMin - iniMin;
+  const totalH     = totalMin * PX_MIN;
 
-  // Cabeçalho
-  let head = '<div class="week-head"></div>';
+  // ── Cabeçalho ──────────────────────────────────────────────
+  let headHtml = `<div style="width:52px;flex-shrink:0;background:#fafafa;border-bottom:2px solid #e5e7eb;border-right:1px solid #e5e7eb;"></div>`;
   for (let i = 0; i < numDias; i++) {
-    const d = _addDays(ini, i);
-    const ds = _ymd(d);
+    const d     = _addDays(ini, i);
+    const ds    = _ymd(d);
     const today = ds === hojeStr;
     const naoUtil = !cfg.diasUteis.includes(d.getDay());
-    head += `<div class="week-head ${today ? 'today' : ''}" style="${naoUtil ? 'color:#cbd5e1;' : ''}">${DIAS[d.getDay()]}<br><span style="font-size:13px;color:${today ? '#065f46' : '#0f172a'};font-weight:800;">${d.getDate()}/${String(d.getMonth() + 1).padStart(2, '0')}</span></div>`;
+    headHtml += `<div class="week-head ${today ? 'today' : ''}" style="flex:1;${naoUtil ? 'color:#cbd5e1;' : ''}">${DIAS[d.getDay()]}<br><span style="font-size:13px;color:${today ? '#065f46' : '#0f172a'};font-weight:800;">${d.getDate()}/${String(d.getMonth() + 1).padStart(2, '0')}</span></div>`;
   }
 
-  // Linhas de slot
-  let rows = '';
-  slotsHoras.forEach(hora => {
-    rows += `<div class="week-slot-time">${hora}</div>`;
-    for (let i = 0; i < numDias; i++) {
-      const d = _addDays(ini, i);
-      const ds = _ymd(d);
-      const naoUtil = !cfg.diasUteis.includes(d.getDay());
-      const bloqueado = _isBloqueado(ds, hora, slot);
-      // Eventos que começam neste slot
-      const eventos = ags.filter(a => a.data === ds && a.hora === hora);
-      const cls = ['week-slot', naoUtil && 'fora', bloqueado && 'bloqueado'].filter(Boolean).join(' ');
-      const onclick = (naoUtil || bloqueado) ? '' : `onclick="openNovoAgendamento({data:'${ds}', hora:'${hora}'})"`;
-      const evtHtml = eventos.map(a => {
-        const ec = (a.status || 'confirmado').toLowerCase().replace('no-show', 'noshow');
-        return `<div class="week-evt ${ec}" draggable="true"
-          ondragstart="_agDragStart(event,'${a.id}')"
-          ondragend="_agDragEnd(event)"
-          onclick="event.stopPropagation();editAgendamento('${a.id}')"
-          title="${a.pacienteNome} — ${a.procedimento || ''} (${a.duracao}min)"
-          style="cursor:grab;"><strong>${a.pacienteNome}</strong><br><span style="font-size:10px;opacity:0.8;">${a.procedimento || '—'}</span></div>`;
-      }).join('');
-      rows += `<div class="${cls}" ${onclick}
+  // ── Eixo de horas ──────────────────────────────────────────
+  let timeAxis = `<div style="position:relative;width:52px;flex-shrink:0;border-right:1px solid #e5e7eb;">`;
+  for (let m = iniMin; m <= fimMin; m += 60) {
+    const top = (m - iniMin) * PX_MIN;
+    timeAxis += `<div style="position:absolute;top:${top}px;right:7px;transform:translateY(-50%);font-size:10px;color:#9ca3af;white-space:nowrap;line-height:1;">${_toHHMM(m)}</div>`;
+  }
+  timeAxis += `</div>`;
+
+  // ── Colunas de dias ────────────────────────────────────────
+  let dayCols = '';
+  for (let i = 0; i < numDias; i++) {
+    const d       = _addDays(ini, i);
+    const ds      = _ymd(d);
+    const naoUtil = !cfg.diasUteis.includes(d.getDay());
+
+    // Linhas de hora (guias visuais)
+    let guides = '';
+    for (let m = iniMin; m <= fimMin; m += 60) {
+      const top = (m - iniMin) * PX_MIN;
+      guides += `<div style="position:absolute;top:${top}px;left:0;right:0;height:1px;background:#e5e7eb;pointer-events:none;z-index:0;"></div>`;
+    }
+    for (let m = iniMin + 30; m < fimMin; m += 60) {
+      const top = (m - iniMin) * PX_MIN;
+      guides += `<div style="position:absolute;top:${top}px;left:0;right:0;height:1px;background:#f3f4f6;pointer-events:none;z-index:0;"></div>`;
+    }
+
+    // Drop targets (10 em 10 minutos)
+    let drops = '';
+    for (let m = iniMin; m < fimMin; m += SNAP) {
+      const top      = (m - iniMin) * PX_MIN;
+      const h        = SNAP * PX_MIN;
+      const hora     = _toHHMM(m);
+      const bloq     = _isBloqueado(ds, hora, SNAP);
+      const disabled = naoUtil || bloq;
+      const bgBloq   = bloq ? 'background:repeating-linear-gradient(45deg,transparent,transparent 4px,rgba(251,191,36,0.08) 4px,rgba(251,191,36,0.08) 8px);' : '';
+      drops += `<div
+        style="position:absolute;top:${top}px;left:0;right:0;height:${h}px;z-index:1;cursor:${disabled ? 'not-allowed' : 'pointer'};${bgBloq}"
+        class="week-slot-micro${disabled ? ' fora' : ''}"
+        ${!disabled ? `onclick="openNovoAgendamento({data:'${ds}', hora:'${hora}'})"` : ''}
         ondragover="_agDragOver(event)"
         ondragleave="_agDragLeave(event)"
-        ondrop="_agDrop(event,'${ds}','${hora}')">${evtHtml}</div>`;
+        ondrop="_agDrop(event,'${ds}','${hora}')"></div>`;
     }
-  });
 
-  const gridStyle = numDias === 1 ? 'grid-template-columns: 60px 1fr;' : '';
+    // Eventos
+    const dayAgs = ags.filter(a => a.data === ds);
+    let evts = '';
+    dayAgs.forEach(a => {
+      const startMin = _toMin(a.hora);
+      const dur      = parseInt(a.duracao) || 60;
+      const top      = (startMin - iniMin) * PX_MIN;
+      const height   = Math.max(dur * PX_MIN - 2, 18);
+      const ec       = (a.status || 'confirmado').toLowerCase().replace('no-show', 'noshow');
+      const showDur  = height >= 36;
+      evts += `<div class="week-evt ${ec}"
+        style="position:absolute;top:${top}px;left:3px;right:3px;height:${height}px;z-index:3;overflow:hidden;cursor:grab;"
+        draggable="true"
+        ondragstart="_agDragStart(event,'${a.id}')"
+        ondragend="_agDragEnd(event)"
+        onclick="event.stopPropagation();editAgendamento('${a.id}')"
+        title="${a.pacienteNome} — ${a.procedimento || ''} (${dur}min)">
+        <strong style="font-size:10.5px;">${a.pacienteNome}</strong>
+        ${showDur ? `<br><span style="font-size:9.5px;opacity:0.8;">${a.procedimento || '—'} · ${dur}min</span>` : ''}
+      </div>`;
+    });
+
+    dayCols += `<div style="flex:1;position:relative;height:${totalH}px;border-right:1px solid #e5e7eb;background:${naoUtil ? '#fafafa' : '#fff'};">${guides}${drops}${evts}</div>`;
+  }
+
+  const maxH = Math.min(totalH, 560);
   return `<div style="padding:14px;">
-    <div class="week-grid" style="${gridStyle}">${head}${rows}</div>
+    <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+      <div style="display:flex;background:#fafafa;border-bottom:2px solid #e5e7eb;">${headHtml}</div>
+      <div style="display:flex;overflow-y:auto;max-height:${maxH}px;">
+        ${timeAxis}
+        <div style="display:flex;flex:1;">${dayCols}</div>
+      </div>
+    </div>
   </div>`;
 }
 

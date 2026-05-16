@@ -112,6 +112,10 @@
     .week-slot.bloqueado { background-image: repeating-linear-gradient(45deg, #fff, #fff 6px, #fffbeb 6px, #fffbeb 10px); cursor:not-allowed; }
     .week-slot.fora { background:#fafafa; cursor:not-allowed; }
     .week-slot.ag-drop-hover { background:#eff6ff !important; outline:2px dashed #3b82f6; outline-offset:-2px; }
+    .week-slot-micro { transition:background 0.1s; }
+    .week-slot-micro:hover { background:rgba(59,130,246,0.05); }
+    .week-slot-micro.ag-drop-hover { background:#eff6ff !important; outline:2px dashed #3b82f6; outline-offset:-2px; }
+    .week-slot-micro.fora { pointer-events:none; }
     .week-evt { font-size:10.5px; padding:3px 7px; border-radius:4px; cursor:grab; line-height:1.35; margin-bottom:2px; transition:opacity 0.15s; }
     .week-evt:active { cursor:grabbing; }
     .week-evt.confirmado { background:#eff6ff; color:#1d4ed8; border-left:2px solid #3b82f6; }
