@@ -2246,7 +2246,29 @@ function saveDespesa(e) {
 }
 
 // ====================== RECEITA ======================
+const _MESES_FULL = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+function _populateRecMesFilter() {
+  const el = document.getElementById('rec-mes-filter');
+  if (!el) return;
+  const prevVal = el.value; // preserva seleção atual
+  const hoje = new Date();
+  const opts = [];
+  // Últimos 24 meses até o mês atual (ordem decrescente)
+  for (let i = 0; i < 24; i++) {
+    const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+    const key = d.toISOString().substring(0, 7);
+    const label = `${_MESES_FULL[d.getMonth()]} ${d.getFullYear()}`;
+    opts.push(`<option value="${key}">${label}</option>`);
+  }
+  opts.push('<option value="todos">Todos</option>');
+  el.innerHTML = opts.join('');
+  // Restaura ou seleciona o mês atual
+  el.value = prevVal && Array.from(el.options).some(o => o.value === prevVal) ? prevVal : hoje.toISOString().substring(0, 7);
+}
+
 function renderReceita() {
+  _populateRecMesFilter();
   const mesEl = document.getElementById('rec-mes-filter');
   const buscaEl = document.getElementById('rec-busca');
   const statusEl = document.getElementById('rec-status-filter');
