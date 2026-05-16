@@ -1821,6 +1821,24 @@
         <div><label>WhatsApp</label><input type="text" class="input" name="pacienteWhatsapp" id="ins-paciente-whats" placeholder="(11) 99999-9999" /></div>
         <div><label>Data de início</label><input type="date" class="input" name="dataInicio" id="ins-data-inicio" required /></div>
       </div>
+      <!-- Seção de pagamento (apenas para Assinatura) -->
+      <div id="ins-pagamento-wrap" style="display:none;background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:14px;margin-bottom:14px;">
+        <div style="font-size:11.5px;font-weight:700;color:#7c3aed;margin-bottom:10px;">Pagamento</div>
+        <div class="form-group" style="margin-bottom:10px;">
+          <label>Forma de pagamento</label>
+          <select id="ins-forma-pgto" name="formaPagamento" class="select" onchange="_atualizarPagamentoInscrever()">
+            <option value="À vista">À vista (Pix/Cartão)</option>
+            <option value="Parcelado">Parcelado</option>
+          </select>
+        </div>
+        <div id="ins-parcelas-wrap" style="display:none;margin-bottom:10px;">
+          <div class="form-group">
+            <label>Opção de parcelamento</label>
+            <select id="ins-parcelas-sel" name="nParcelas" class="select" onchange="_atualizarPagamentoInscrever()"></select>
+          </div>
+        </div>
+        <div id="ins-valor-total" style="font-size:13px;font-weight:700;color:#0f172a;margin-top:4px;"></div>
+      </div>
       <div style="background:#eff6ff;border-radius:8px;padding:10px 12px;font-size:11.5px;color:#1d4ed8;margin-bottom:18px;">
         💡 Ao confirmar, o sistema criará automaticamente os agendamentos na Agenda e os lembretes no Follow-Up.
       </div>
@@ -1849,6 +1867,7 @@
           <select class="select" name="tipo" id="tpl-tipo" onchange="_atualizarTipoPrograma()">
             <option value="Fixo">Fixo (acaba após marcos)</option>
             <option value="Contínuo">Contínuo (sem fim)</option>
+            <option value="Assinatura">Assinatura (concierge)</option>
           </select>
         </div>
         <div id="tpl-intervalo-wrap" style="display:none;"><label>Intervalo (dias)</label><input type="number" class="input" name="intervaloDias" id="tpl-intervalo" min="1" value="90" /></div>
@@ -1857,9 +1876,44 @@
         <label style="display:flex;align-items:center;justify-content:space-between;">Marcos<button type="button" onclick="_addMarcoTpl()" style="background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;">+ Marco</button></label>
         <div id="tpl-marcos" style="display:flex;flex-direction:column;gap:6px;margin-top:6px;"></div>
       </div>
-      <div style="margin-bottom:14px;">
+      <div id="tpl-campos-wrap" style="margin-bottom:14px;">
         <label style="display:flex;align-items:center;justify-content:space-between;">Campos clínicos a registrar<button type="button" onclick="_addCampoClinicoTpl()" style="background:#10b981;color:#fff;border:none;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;">+ Campo</button></label>
         <div id="tpl-campos" style="display:flex;flex-direction:column;gap:6px;margin-top:6px;"></div>
+      </div>
+      <!-- Tipo Assinatura (mostrar/esconder via JS) -->
+      <div id="tpl-assinatura-wrap" style="display:none;">
+        <div style="margin-bottom:14px;">
+          <label>Vigência</label>
+          <select id="tpl-vigencia" name="vigencia" class="select">
+            <option value="Mensal">Mensal</option>
+            <option value="Semestral">Semestral</option>
+            <option value="Anual" selected>Anual</option>
+          </select>
+        </div>
+        <div style="margin-bottom:14px;">
+          <label>Benefícios inclusos</label>
+          <div id="tpl-beneficios"></div>
+          <button type="button" onclick="_addBeneficioTpl()" style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;color:#475569;cursor:pointer;margin-top:6px;">+ Benefício</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+          <div>
+            <label>Preço à vista (R$)</label>
+            <input type="number" id="tpl-preco-avista" name="precoAVista" class="input" min="0" step="0.01" placeholder="6480" />
+          </div>
+          <div>
+            <label>Consulta avulsa (R$)</label>
+            <input type="number" id="tpl-consulta-avulsa" name="consultaAvulsa" class="input" min="0" step="0.01" placeholder="1500" />
+          </div>
+        </div>
+        <div style="margin-bottom:14px;">
+          <label>Opções de parcelamento</label>
+          <div id="tpl-parcelas"></div>
+          <button type="button" onclick="_addParcelaTpl()" style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;color:#475569;cursor:pointer;margin-top:6px;">+ Opção de parcela</button>
+        </div>
+        <div style="margin-bottom:14px;">
+          <label>Políticas e regras</label>
+          <textarea id="tpl-politicas" name="politicas" class="input" rows="3" placeholder="Cancelamento com 24h de antecedência..."></textarea>
+        </div>
       </div>
       <div style="display:flex;gap:10px;">
         <button type="submit" class="btn-primary" style="flex:1;justify-content:center;">Salvar template</button>
@@ -1885,6 +1939,38 @@
       <div style="display:flex;gap:10px;">
         <button type="submit" class="btn-primary" style="flex:1;justify-content:center;">Registrar</button>
         <button type="button" onclick="closeModal('modal-registrar-marco')" class="btn-ghost">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===== MODAL: RENOVAR ASSINATURA ===== -->
+<div class="modal-overlay" id="modal-renovar" style="display:none;">
+  <div class="modal" style="max-width:480px;">
+    <div style="padding:24px 24px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+      <div class="modal-title" style="font-size:16px;font-weight:700;color:#0f172a;">Renovar Programa</div>
+      <button onclick="closeModal('modal-renovar')" style="background:none;border:none;cursor:pointer;font-size:22px;color:#94a3b8;line-height:1;">×</button>
+    </div>
+    <form style="padding:20px 24px 24px;" onsubmit="saveRenovacao(event)">
+      <input type="hidden" id="renovar-id" name="inscricaoId" />
+      <div id="renovar-info" style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:10px 12px;font-size:12px;color:#5b21b6;margin-bottom:14px;"></div>
+      <div style="margin-bottom:14px;">
+        <label>Nova forma de pagamento</label>
+        <select id="renovar-forma" name="formaPagamento" class="select" onchange="_atualizarRenovacao()">
+          <option value="À vista">À vista (Pix/Cartão)</option>
+          <option value="Parcelado">Parcelado</option>
+        </select>
+      </div>
+      <div id="renovar-parcelas-wrap" style="display:none;margin-bottom:10px;">
+        <div>
+          <label>Opção de parcelamento</label>
+          <select id="renovar-parcelas-sel" name="nParcelas" class="select" onchange="_atualizarRenovacao()"></select>
+        </div>
+      </div>
+      <div id="renovar-valor-total" style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:18px;"></div>
+      <div style="display:flex;gap:10px;">
+        <button type="button" class="btn-ghost" onclick="closeModal('modal-renovar')">Cancelar</button>
+        <button type="submit" class="btn-primary" style="flex:1;justify-content:center;">Confirmar Renovação</button>
       </div>
     </form>
   </div>

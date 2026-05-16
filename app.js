@@ -450,10 +450,59 @@ function getProcedimentos() {
 //                          registros: [{ marcoIdx, dataPrevista, dataReal, agendamentoId,
 //                                        followupIdx, valoresClinicos, obs }],
 //                          obs }]
+// Helper: converte vigência de Assinatura em dias
+function _vigenciaDias(vigencia) {
+  if (vigencia === 'Mensal')    return 30;
+  if (vigencia === 'Semestral') return 180;
+  if (vigencia === 'Anual')     return 365;
+  return 365;
+}
+
 function getProgramas() {
   let arr = DB.get('programas');
   if (!arr.length && !localStorage.getItem('consult_progs_seeded')) {
     arr = [
+      {
+        id: 'pg_compagni',
+        nome: 'Programa Compagni',
+        tipo: 'Assinatura',
+        descricao: 'Concierge medicine — cuidado longitudinal ilimitado',
+        vigencia: 'Anual',
+        beneficios: [
+          'Consultas presenciais ilimitadas',
+          'Telemedicina ilimitada',
+          'Prioridade na agenda',
+          'Emissão de receitas e laudos',
+        ],
+        precoAVista: 6480,
+        descontoAVista: 10,
+        parcelas: [{ n: 6, valor: 1200 }],
+        consultaAvulsa: 1500,
+        politicas: 'Cancelamento com mínimo 24h de antecedência. Após 5 atendimentos, sem devolução.',
+        ativo: true,
+      },
+      {
+        id: 'pg_attento',
+        nome: 'Programa Attento',
+        tipo: 'Assinatura',
+        descricao: 'Cuidado domiciliar para pacientes frágeis — visitas + telemedicina ilimitada',
+        vigencia: 'Anual',
+        beneficios: [
+          'Visitas domiciliares ilimitadas',
+          'Telemedicina ilimitada',
+          'Gestão integrada de saúde',
+          'Suporte a cuidadores',
+        ],
+        precoAVista: 8820,
+        descontoAVista: 10,
+        parcelas: [
+          { n: 10, valor: 980 },
+          { n: 6,  valor: 980 },
+        ],
+        consultaAvulsa: 1500,
+        politicas: 'Semestral: 6x R$980 ou R$5.292 à vista. Anual: 10x R$980 ou R$8.820 à vista. Consulta extra domicílio: R$1.500 / consultório: R$750.',
+        ativo: true,
+      },
       {
         id: 'pg_posop',
         nome: 'Pós-operatório 6 meses',
@@ -535,7 +584,7 @@ function _addDaysIso(isoDate, dias) {
 }
 
 // Cria inscrição + agendamentos + follow-ups automaticamente
-function inscreverEmPrograma(programaId, pacienteRef, dataInicio, horaPadrao = '08:00') {
+function inscreverEmPrograma(programaId, pacienteRef, dataInicio, horaPadrao = '08:00', pagamentoOpts = {}) {
   const prog = getProgramas().find(p => p.id === programaId);
   if (!prog) { alert('Programa não encontrado.'); return null; }
   // pacienteRef pode ser { nome, whatsapp, pacIdx }
@@ -550,6 +599,55 @@ function inscreverEmPrograma(programaId, pacienteRef, dataInicio, horaPadrao = '
     registros: [], obs: ''
   };
 
+  // ── Programa tipo Assinatura ──
+  if (prog.tipo === 'Assinatura') {
+    const formaPagamento = pagamentoOpts.formaPagamento || 'À vista';
+    const nParcelas      = pagamentoOpts.nParcelas || null;
+    let valorTotal;
+    if (formaPagamento === 'À vista') {
+      valorTotal = prog.precoAVista || 0;
+    } else {
+      const opt = (prog.parcelas || []).find(p => p.n === nParcelas);
+      valorTotal = opt ? opt.n * opt.valor : (prog.precoAVista || 0);
+    }
+    const dataFim = _addDaysIso(dataInicio, _vigenciaDias(prog.vigencia));
+    inscricao.dataFim        = dataFim;
+    inscricao.formaPagamento = formaPagamento;
+    inscricao.nParcelas      = nParcelas;
+    inscricao.valorTotal     = valorTotal;
+
+    // Lançamento financeiro
+    const pacs = DB.get('pacientes');
+    pacs.push({
+      nome, whatsapp, data: dataInicio,
+      procedimento: prog.nome,
+      tipoAtividade: 'Consultório',
+      valor: valorTotal,
+      statusPgto: formaPagamento === 'À vista' ? 'Pago' : 'Parcial',
+      obs: '[Programa Assinatura]',
+      pacIdx,
+    });
+    DB.set('pacientes', pacs);
+
+    // Follow-up de renovação 30 dias antes do vencimento
+    const fus = DB.get('followup');
+    fus.push({
+      nome, ultConsulta: dataInicio,
+      dataContato: _addDaysIso(dataFim, -30),
+      tipoContato: 'WhatsApp', feito: false,
+      dataReav: dataFim,
+      obs: `Renovar programa ${prog.nome}`,
+      programaInscricaoId: inscricao.id,
+    });
+    DB.set('followup', fus);
+
+    const inscricoes = DB.get('inscricoes');
+    inscricoes.push(inscricao);
+    DB.set('inscricoes', inscricoes);
+    return inscricao;
+  }
+
+  // ── Programas Fixo / Contínuo ──
   // Para Fixo: usa os marcos do template. Para Contínuo: cria 1 marco inicial.
   const marcos = prog.tipo === 'Fixo' && prog.marcos.length
     ? prog.marcos
@@ -595,6 +693,110 @@ function inscreverEmPrograma(programaId, pacienteRef, dataInicio, horaPadrao = '
   inscricoes.push(inscricao);
   DB.set('inscricoes', inscricoes);
   return inscricao;
+}
+
+// Renova uma inscrição de Assinatura
+function renovarInscricao(id) {
+  const ins = getInscricoes().find(i => i.id === id);
+  if (!ins) return;
+  const prog = getProgramas().find(p => p.id === ins.programaId);
+  if (!prog || prog.tipo !== 'Assinatura') return;
+
+  // Popula modal
+  document.getElementById('renovar-id').value = id;
+  const infoEl = document.getElementById('renovar-info');
+  if (infoEl) {
+    infoEl.innerHTML = `<strong>${_esc(ins.pacienteNome)}</strong> · ${_esc(prog.nome)}<br>
+      Vencimento atual: <strong>${formatDate(ins.dataFim || '—')}</strong><br>
+      Novo vencimento após renovação: <strong>${formatDate(_addDaysIso(ins.dataFim || ins.dataInicio, _vigenciaDias(prog.vigencia)))}</strong>`;
+  }
+  // Popula selects de parcelamento
+  _atualizarRenovacao();
+  openModal('modal-renovar');
+}
+
+function _atualizarRenovacao() {
+  const id  = document.getElementById('renovar-id').value;
+  const ins = getInscricoes().find(i => i.id === id);
+  if (!ins) return;
+  const prog = getProgramas().find(p => p.id === ins.programaId);
+  if (!prog) return;
+  const forma = document.getElementById('renovar-forma').value;
+  const wrapParcelas = document.getElementById('renovar-parcelas-wrap');
+  const selParcelas  = document.getElementById('renovar-parcelas-sel');
+  const valEl        = document.getElementById('renovar-valor-total');
+
+  if (forma === 'Parcelado') {
+    wrapParcelas.style.display = '';
+    selParcelas.innerHTML = (prog.parcelas || []).map(p =>
+      `<option value="${p.n}">${p.n}x ${BRL(p.valor)} (total ${BRL(p.n * p.valor)})</option>`
+    ).join('');
+    const nSel = parseInt(selParcelas.value) || (prog.parcelas?.[0]?.n);
+    const opt  = (prog.parcelas || []).find(p => p.n === nSel);
+    if (opt && valEl) valEl.textContent = `Valor total: ${BRL(opt.n * opt.valor)}`;
+  } else {
+    wrapParcelas.style.display = 'none';
+    if (valEl) valEl.textContent = `Valor total: ${BRL(prog.precoAVista || 0)} (à vista)`;
+  }
+}
+
+function saveRenovacao(e) {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const id = fd.get('inscricaoId');
+  const inscricoes = DB.get('inscricoes');
+  const ins = inscricoes.find(i => i.id === id);
+  if (!ins) return;
+  const prog = getProgramas().find(p => p.id === ins.programaId);
+  if (!prog) return;
+
+  const formaPagamento = fd.get('formaPagamento');
+  const nParcelas      = parseInt(fd.get('nParcelas')) || null;
+  let valorTotal;
+  if (formaPagamento === 'À vista') {
+    valorTotal = prog.precoAVista || 0;
+  } else {
+    const opt = (prog.parcelas || []).find(p => p.n === nParcelas);
+    valorTotal = opt ? opt.n * opt.valor : (prog.precoAVista || 0);
+  }
+
+  const novaDataFim = _addDaysIso(ins.dataFim || ins.dataInicio, _vigenciaDias(prog.vigencia));
+  ins.dataFim        = novaDataFim;
+  ins.status         = 'Ativo';
+  ins.formaPagamento = formaPagamento;
+  ins.nParcelas      = nParcelas;
+  ins.valorTotal     = valorTotal;
+  DB.set('inscricoes', inscricoes);
+
+  // Novo follow-up de renovação
+  const fus = DB.get('followup');
+  fus.push({
+    nome: ins.pacienteNome, ultConsulta: new Date().toISOString().substring(0, 10),
+    dataContato: _addDaysIso(novaDataFim, -30),
+    tipoContato: 'WhatsApp', feito: false,
+    dataReav: novaDataFim,
+    obs: `Renovar programa ${prog.nome}`,
+    programaInscricaoId: ins.id,
+  });
+  DB.set('followup', fus);
+
+  // Novo lançamento financeiro
+  const pacs = DB.get('pacientes');
+  pacs.push({
+    nome: ins.pacienteNome, whatsapp: ins.pacienteWhatsapp || '',
+    data: new Date().toISOString().substring(0, 10),
+    procedimento: prog.nome + ' (Renovação)',
+    tipoAtividade: 'Consultório',
+    valor: valorTotal,
+    statusPgto: formaPagamento === 'À vista' ? 'Pago' : 'Parcial',
+    obs: '[Programa Assinatura — Renovação]',
+    pacIdx: ins.pacIdx,
+  });
+  DB.set('pacientes', pacs);
+
+  closeModal('modal-renovar');
+  renderProgramas();
+  toast(`✅ Programa renovado para ${ins.pacienteNome} até ${formatDate(novaDataFim)}`);
 }
 
 // Registra a realização de um marco e dispara o próximo (programa contínuo)
@@ -707,6 +909,13 @@ function renderProgramas() {
   }).length;
   const concluidos = inscricoes.filter(i => i.status === 'Concluído').length;
 
+  // MRR: soma (valorTotal / vigenciaDias) * 30 para cada assinatura ativa
+  const mrr = ativas.reduce((sum, ins) => {
+    const p = progs.find(x => x.id === ins.programaId);
+    if (!p || p.tipo !== 'Assinatura' || !ins.valorTotal) return sum;
+    return sum + (ins.valorTotal / _vigenciaDias(p.vigencia)) * 30;
+  }, 0);
+
   const kpis = document.getElementById('prog-kpis');
   if (kpis) {
     kpis.innerHTML = `
@@ -725,6 +934,10 @@ function renderProgramas() {
       <div class="chart-card" style="padding:14px 18px;">
         <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">Concluídos</div>
         <div style="font-size:24px;font-weight:800;color:#0f172a;margin-top:4px;">${concluidos}</div>
+      </div>
+      <div class="chart-card" style="padding:14px 18px;">
+        <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">MRR (Assinaturas)</div>
+        <div style="font-size:24px;font-weight:800;color:#7c3aed;margin-top:4px;">R$ ${BRL(mrr)}</div>
       </div>`;
   }
 
@@ -738,7 +951,7 @@ function renderProgramas() {
     } else {
       elPac.innerHTML = `<div class="chart-card" style="padding:0;overflow:hidden;">
         <table class="data-table">
-          <thead><tr><th>Paciente</th><th>Programa</th><th>Progresso</th><th>Próximo marco</th><th>Status</th><th>Ações</th></tr></thead>
+          <thead><tr><th>Paciente</th><th>Programa</th><th>Progresso / Validade</th><th>Próximo marco / Dias restantes</th><th>Status</th><th>Ações</th></tr></thead>
           <tbody>
             ${inscricoes.map(i => _rowInscricao(i, hoje, progs)).join('')}
           </tbody>
@@ -757,14 +970,20 @@ function renderProgramas() {
       elTpl.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;">
         ${progs.map(p => {
           const inscritos = inscricoes.filter(i => i.programaId === p.id).length;
+          const tipoCor = p.tipo === 'Fixo' ? '#1d4ed8' : p.tipo === 'Contínuo' ? '#15803d' : '#7c3aed';
+          const tipoBg  = p.tipo === 'Fixo' ? '#eff6ff' : p.tipo === 'Contínuo' ? '#f0fdf4' : '#f5f3ff';
+          let detalhes = '';
+          if (p.tipo === 'Fixo') detalhes = `${(p.marcos||[]).length} marco(s)`;
+          else if (p.tipo === 'Contínuo') detalhes = `A cada ${p.intervaloDias} dias`;
+          else if (p.tipo === 'Assinatura') detalhes = `${p.vigencia} · ${BRL(p.precoAVista||0)} à vista`;
           return `<div class="chart-card" style="padding:18px;">
             <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px;">
               <div style="font-size:14px;font-weight:700;color:#0f172a;">${_esc(p.nome)}</div>
-              <span style="font-size:10px;font-weight:700;color:${p.tipo==='Fixo'?'#1d4ed8':'#15803d'};background:${p.tipo==='Fixo'?'#eff6ff':'#f0fdf4'};padding:2px 7px;border-radius:999px;">${p.tipo}</span>
+              <span style="font-size:10px;font-weight:700;color:${tipoCor};background:${tipoBg};padding:2px 7px;border-radius:999px;">${p.tipo}</span>
             </div>
             <div style="font-size:12px;color:#64748b;margin-bottom:10px;min-height:32px;">${_esc(p.descricao || '—')}</div>
             <div style="font-size:11.5px;color:#475569;margin-bottom:10px;">
-              ${p.tipo==='Fixo' ? `${p.marcos.length} marco(s)` : `A cada ${p.intervaloDias} dias`} · ${inscritos} inscrito(s)
+              ${detalhes} · ${inscritos} inscrito(s)
             </div>
             <div style="display:flex;gap:6px;">
               <button onclick="openModalTemplatePrograma('${p.id}')" style="flex:1;background:#f1f5f9;border:none;border-radius:6px;padding:6px 10px;font-size:11.5px;font-weight:600;color:#475569;cursor:pointer;">Editar</button>
@@ -780,12 +999,50 @@ function renderProgramas() {
 function _rowInscricao(ins, hoje, progs) {
   const prog = progs.find(p => p.id === ins.programaId);
   const progNome = prog ? prog.nome : '—';
+  const corStatus = ins.status === 'Ativo' ? '#15803d' : ins.status === 'Pausado' ? '#a16207' : ins.status === 'Expirado' ? '#dc2626' : '#64748b';
+
+  // ── Tipo Assinatura ──
+  if (prog && prog.tipo === 'Assinatura') {
+    const dataFim = ins.dataFim || '—';
+    const diasRestantes = ins.dataFim
+      ? Math.round((new Date(ins.dataFim + 'T12:00:00') - new Date(hoje + 'T12:00:00')) / 86400000)
+      : null;
+    const corDias = diasRestantes != null && diasRestantes < 30 ? '#dc2626' : '#475569';
+    const pesoDias = diasRestantes != null && diasRestantes < 30 ? 'font-weight:700;' : '';
+    // Auto-marca como Expirado se passou
+    if (ins.status === 'Ativo' && ins.dataFim && ins.dataFim < hoje) {
+      ins.status = 'Expirado';
+    }
+    return `<tr>
+      <td style="font-weight:600;">${_esc(ins.pacienteNome)}</td>
+      <td>
+        ${_esc(progNome)}
+        <span style="font-size:10px;font-weight:700;color:#7c3aed;background:#f5f3ff;padding:2px 6px;border-radius:999px;margin-left:4px;">Assinatura</span>
+      </td>
+      <td>
+        <div style="font-size:12px;color:#475569;">Validade: <strong>${formatDate(dataFim)}</strong></div>
+        <div style="font-size:11.5px;color:#94a3b8;">${ins.formaPagamento || ''}${ins.nParcelas ? ` · ${ins.nParcelas}x` : ''} · ${BRL(ins.valorTotal || 0)}</div>
+      </td>
+      <td>
+        ${diasRestantes != null
+          ? `<span style="color:${corDias};${pesoDias}">${diasRestantes < 0 ? 'Vencida há ' + Math.abs(diasRestantes) + 'd' : diasRestantes + ' dias restantes'}</span>`
+          : '<span style="color:#94a3b8;">—</span>'}
+      </td>
+      <td><span style="color:${corStatus};font-weight:600;font-size:12px;">${ins.status}</span></td>
+      <td style="white-space:nowrap;">
+        ${ins.status !== 'Cancelado' ? `<button onclick="renovarInscricao('${ins.id}')" style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:600;cursor:pointer;margin-right:4px;">🔄 Renovar</button>` : ''}
+        ${ins.status === 'Ativo' ? `<button onclick="cancelarInscricaoAssinatura('${ins.id}')" title="Cancelar" style="background:#fef2f2;color:#b91c1c;border:none;border-radius:6px;padding:4px 7px;font-size:11px;cursor:pointer;">✕ Cancelar</button>` : ''}
+        <button onclick="excluirInscricao('${ins.id}')" title="Excluir" style="background:#fef2f2;color:#b91c1c;border:none;border-radius:6px;padding:4px 7px;font-size:11px;cursor:pointer;margin-left:2px;">🗑️</button>
+      </td>
+    </tr>`;
+  }
+
+  // ── Tipos Fixo / Contínuo ──
   const totalMarcos = ins.registros.length;
   const realizados  = ins.registros.filter(r => r.dataReal).length;
   const pct = totalMarcos ? (realizados / totalMarcos) * 100 : 0;
   const prox = _proximoMarco(ins);
   const atrasado = prox && prox.dataPrevista < hoje;
-  const corStatus = ins.status === 'Ativo' ? '#15803d' : ins.status === 'Pausado' ? '#a16207' : '#64748b';
 
   return `<tr>
     <td style="font-weight:600;">${_esc(ins.pacienteNome)}</td>
@@ -809,6 +1066,17 @@ function _rowInscricao(ins, hoje, progs) {
   </tr>`;
 }
 
+function cancelarInscricaoAssinatura(id) {
+  if (!confirm('Cancelar esta assinatura?')) return;
+  const inscricoes = DB.get('inscricoes');
+  const ins = inscricoes.find(i => i.id === id);
+  if (!ins) return;
+  ins.status = 'Cancelado';
+  DB.set('inscricoes', inscricoes);
+  renderProgramas();
+  toast('Assinatura cancelada');
+}
+
 // === Modais ===
 function openModalInscrever(programaPreId) {
   const progs = getProgramas().filter(p => p.ativo !== false);
@@ -830,11 +1098,48 @@ function _atualizarInfoPrograma() {
   const id = document.getElementById('ins-programa').value;
   const prog = getProgramas().find(p => p.id === id);
   const info = document.getElementById('ins-prog-info');
+  const pagWrap = document.getElementById('ins-pagamento-wrap');
   if (!prog || !info) return;
+
   if (prog.tipo === 'Fixo') {
     info.innerHTML = `<strong>${_esc(prog.nome)}</strong> · ${prog.marcos.length} marcos: ${prog.marcos.map(m => m.dias + 'd').join(', ')}`;
-  } else {
+    if (pagWrap) pagWrap.style.display = 'none';
+  } else if (prog.tipo === 'Contínuo') {
     info.innerHTML = `<strong>${_esc(prog.nome)}</strong> · Contínuo a cada ${prog.intervaloDias} dias`;
+    if (pagWrap) pagWrap.style.display = 'none';
+  } else if (prog.tipo === 'Assinatura') {
+    info.innerHTML = `<strong>${_esc(prog.nome)}</strong> · Vigência: ${_esc(prog.vigencia)} · À vista: ${BRL(prog.precoAVista || 0)}`;
+    if (pagWrap) {
+      pagWrap.style.display = '';
+      // Popula selects
+      const formaEl = document.getElementById('ins-forma-pgto');
+      if (formaEl) formaEl.value = 'À vista';
+      _atualizarPagamentoInscrever(prog);
+    }
+  }
+}
+function _atualizarPagamentoInscrever(progOverride) {
+  const id = document.getElementById('ins-programa').value;
+  const prog = progOverride || getProgramas().find(p => p.id === id);
+  if (!prog || prog.tipo !== 'Assinatura') return;
+  const forma = document.getElementById('ins-forma-pgto').value;
+  const parcelasWrap = document.getElementById('ins-parcelas-wrap');
+  const parcelasSel  = document.getElementById('ins-parcelas-sel');
+  const valEl        = document.getElementById('ins-valor-total');
+
+  if (forma === 'Parcelado') {
+    if (parcelasWrap) parcelasWrap.style.display = '';
+    if (parcelasSel) {
+      parcelasSel.innerHTML = (prog.parcelas || []).map(p =>
+        `<option value="${p.n}">${p.n}x ${BRL(p.valor)} (total ${BRL(p.n * p.valor)})</option>`
+      ).join('');
+    }
+    const nSel = parseInt(parcelasSel?.value) || (prog.parcelas?.[0]?.n);
+    const opt  = (prog.parcelas || []).find(p => p.n === nSel);
+    if (valEl) valEl.textContent = opt ? `Valor total: ${BRL(opt.n * opt.valor)}` : '';
+  } else {
+    if (parcelasWrap) parcelasWrap.style.display = 'none';
+    if (valEl) valEl.textContent = `Valor total: ${BRL(prog.precoAVista || 0)} (à vista)`;
   }
 }
 function saveInscricao(e) {
@@ -848,16 +1153,31 @@ function saveInscricao(e) {
   // Tenta encontrar pacIdx
   const pacs = DB.get('pacientes');
   const pacIdx = pacs.findIndex(p => p.nome === nome);
-  const ins = inscreverEmPrograma(programaId, { nome, whatsapp, pacIdx: pacIdx >= 0 ? pacIdx : null }, dataInicio);
+
+  // Dados de pagamento (para Assinatura)
+  const prog = getProgramas().find(p => p.id === programaId);
+  let pagamentoOpts = {};
+  if (prog && prog.tipo === 'Assinatura') {
+    const formaPagamento = fd.get('formaPagamento') || 'À vista';
+    const nParcelas = formaPagamento === 'Parcelado' ? (parseInt(fd.get('nParcelas')) || null) : null;
+    pagamentoOpts = { formaPagamento, nParcelas };
+  }
+
+  const ins = inscreverEmPrograma(programaId, { nome, whatsapp, pacIdx: pacIdx >= 0 ? pacIdx : null }, dataInicio, '08:00', pagamentoOpts);
   if (ins) {
     closeModal('modal-inscrever');
     renderProgramas();
-    toast(`✅ ${nome} inscrito(a). Agendamentos e follow-ups criados automaticamente.`);
+    const msg = prog && prog.tipo === 'Assinatura'
+      ? `✅ ${nome} inscrito(a) no programa de assinatura. Lançamento financeiro e follow-up de renovação criados.`
+      : `✅ ${nome} inscrito(a). Agendamentos e follow-ups criados automaticamente.`;
+    toast(msg);
   }
 }
 
 let _marcoBuffer = [];
 let _camposBuffer = [];
+let _beneficiosBuffer = [];
+let _parcelasBuffer = [];
 function openModalTemplatePrograma(id) {
   const progs = getProgramas();
   const p = id ? progs.find(x => x.id === id) : null;
@@ -868,15 +1188,63 @@ function openModalTemplatePrograma(id) {
   document.getElementById('tpl-intervalo').value = p ? (p.intervaloDias || 90) : 90;
   _marcoBuffer = p && p.marcos ? p.marcos.map(m => ({...m})) : [{ dias: 7, descricao: 'Retorno 7 dias', tipoAtividade: 'Consultório', duracao: 30 }];
   _camposBuffer = p && p.camposClinicos ? p.camposClinicos.map(c => ({...c})) : [];
+  _beneficiosBuffer = p && p.beneficios ? [...p.beneficios] : [];
+  _parcelasBuffer   = p && p.parcelas   ? p.parcelas.map(x => ({...x})) : [];
+  // Preenche campos de Assinatura
+  if (p && p.tipo === 'Assinatura') {
+    const vigEl = document.getElementById('tpl-vigencia');
+    if (vigEl) vigEl.value = p.vigencia || 'Anual';
+    const avEl = document.getElementById('tpl-preco-avista');
+    if (avEl) avEl.value = p.precoAVista || '';
+    const caEl = document.getElementById('tpl-consulta-avulsa');
+    if (caEl) caEl.value = p.consultaAvulsa || '';
+    const polEl = document.getElementById('tpl-politicas');
+    if (polEl) polEl.value = p.politicas || '';
+  }
   _atualizarTipoPrograma();
   _renderMarcoBuffer();
   _renderCamposBuffer();
+  _renderBeneficiosBuffer();
+  _renderParcelasBuffer();
   openModal('modal-template-programa');
 }
 function _atualizarTipoPrograma() {
   const tipo = document.getElementById('tpl-tipo').value;
   document.getElementById('tpl-intervalo-wrap').style.display = tipo === 'Contínuo' ? '' : 'none';
   document.getElementById('tpl-marcos-wrap').style.display = tipo === 'Fixo' ? '' : 'none';
+  const asnWrap = document.getElementById('tpl-assinatura-wrap');
+  if (asnWrap) asnWrap.style.display = tipo === 'Assinatura' ? '' : 'none';
+  const camposWrap = document.getElementById('tpl-campos-wrap');
+  if (camposWrap) camposWrap.style.display = tipo !== 'Assinatura' ? '' : 'none';
+}
+function _renderBeneficiosBuffer() {
+  const cont = document.getElementById('tpl-beneficios');
+  if (!cont) return;
+  cont.innerHTML = _beneficiosBuffer.map((b, idx) => `
+    <div style="display:grid;grid-template-columns:1fr 30px;gap:6px;align-items:center;margin-bottom:4px;">
+      <input type="text" value="${_esc(b)}" oninput="_beneficiosBuffer[${idx}]=this.value" class="input" placeholder="Ex: Consultas ilimitadas" />
+      <button type="button" onclick="_beneficiosBuffer.splice(${idx},1);_renderBeneficiosBuffer();" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:14px;">×</button>
+    </div>
+  `).join('');
+}
+function _addBeneficioTpl() {
+  _beneficiosBuffer.push('');
+  _renderBeneficiosBuffer();
+}
+function _renderParcelasBuffer() {
+  const cont = document.getElementById('tpl-parcelas');
+  if (!cont) return;
+  cont.innerHTML = _parcelasBuffer.map((p, idx) => `
+    <div style="display:grid;grid-template-columns:80px 120px 30px;gap:6px;align-items:center;margin-bottom:4px;">
+      <input type="number" min="1" value="${p.n}" onchange="_parcelasBuffer[${idx}].n=parseInt(this.value)||1" class="input" placeholder="Nº parcelas" />
+      <input type="number" min="0" step="0.01" value="${p.valor}" onchange="_parcelasBuffer[${idx}].valor=parseFloat(this.value)||0" class="input" placeholder="Valor (R$)" />
+      <button type="button" onclick="_parcelasBuffer.splice(${idx},1);_renderParcelasBuffer();" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:14px;">×</button>
+    </div>
+  `).join('');
+}
+function _addParcelaTpl() {
+  _parcelasBuffer.push({ n: 12, valor: 0 });
+  _renderParcelasBuffer();
 }
 function _renderMarcoBuffer() {
   const cont = document.getElementById('tpl-marcos');
@@ -920,14 +1288,30 @@ function saveTemplatePrograma(e) {
   const fd = new FormData(e.target);
   const id = fd.get('programaId') || ('pg_' + Date.now());
   const tipo = fd.get('tipo');
-  const programa = {
-    id, nome: fd.get('nome'),
-    tipo, descricao: fd.get('descricao') || '',
-    marcos: tipo === 'Fixo' ? _marcoBuffer.filter(m => m.descricao).sort((a,b)=>a.dias-b.dias) : [],
-    intervaloDias: tipo === 'Contínuo' ? (parseInt(fd.get('intervaloDias'))||90) : null,
-    camposClinicos: _camposBuffer.filter(c => c.nome),
-    ativo: true,
-  };
+  let programa;
+  if (tipo === 'Assinatura') {
+    programa = {
+      id, nome: fd.get('nome'),
+      tipo, descricao: fd.get('descricao') || '',
+      vigencia: fd.get('vigencia') || 'Anual',
+      beneficios: _beneficiosBuffer.filter(b => b.trim()),
+      precoAVista: parseFloat(fd.get('precoAVista')) || 0,
+      descontoAVista: 0,
+      parcelas: _parcelasBuffer.filter(p => p.n && p.valor),
+      consultaAvulsa: parseFloat(fd.get('consultaAvulsa')) || 0,
+      politicas: fd.get('politicas') || '',
+      ativo: true,
+    };
+  } else {
+    programa = {
+      id, nome: fd.get('nome'),
+      tipo, descricao: fd.get('descricao') || '',
+      marcos: tipo === 'Fixo' ? _marcoBuffer.filter(m => m.descricao).sort((a,b)=>a.dias-b.dias) : [],
+      intervaloDias: tipo === 'Contínuo' ? (parseInt(fd.get('intervaloDias'))||90) : null,
+      camposClinicos: _camposBuffer.filter(c => c.nome),
+      ativo: true,
+    };
+  }
   const progs = getProgramas();
   const idx = progs.findIndex(p => p.id === id);
   if (idx >= 0) progs[idx] = programa; else progs.push(programa);
