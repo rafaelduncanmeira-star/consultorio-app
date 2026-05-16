@@ -1,0 +1,41 @@
+{
+  "name": "Consultório App",
+  "short_name": "Consultório",
+  "description": "Sistema completo de gestão de consultório médico — CRM, agenda, programas de acompanhamento e relatórios.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#10b981",
+  "lang": "pt-BR",
+  "categories": ["medical", "productivity", "business"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Agenda",
+      "short_name": "Agenda",
+      "url": "./index.html#agenda",
+      "description": "Ver agendamentos do dia"
+    },
+    {
+      "name": "CRM",
+      "short_name": "CRM",
+      "url": "./index.html#crm",
+      "description": "Contatos do WhatsApp"
+    },
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "url": "./index.html#dashboard",
+      "description": "Visão geral do consultório"
+    }
+  ]
+}

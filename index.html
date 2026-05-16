@@ -2,8 +2,17 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Consultório Dr. Rafael Duncan · Geriatria</title>
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#10b981" />
+  <link rel="icon" type="image/svg+xml" href="icon.svg" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Consultório" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;1,14..32,400&display=swap" rel="stylesheet">
   <!-- TODO: para produção real, migrar para Tailwind CLI local. Versão pinada abaixo. -->
   <script src="https://cdn.tailwindcss.com/3.4.16"></script>
@@ -616,6 +625,12 @@
         <span class="icon"><i data-lucide="settings"></i></span> Configurações
       </div>
     </nav>
+
+    <!-- Botão flutuante: Instalar PWA -->
+    <button id="pwa-install-btn" onclick="pwaInstall()" title="Instalar como app"
+      style="display:none;position:fixed;bottom:90px;right:24px;background:#10b981;color:#fff;border:none;border-radius:999px;padding:10px 16px;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 8px 20px rgba(16,185,129,0.3);z-index:998;">
+      📱 Instalar app
+    </button>
 
     <!-- Footer -->
     <div style="padding:10px 14px;border-top:1px solid rgba(255,255,255,0.05);">
@@ -1564,7 +1579,8 @@
           <select class="select" id="relatorio-mes-sel" style="width:160px;" onchange="renderRelatorio(this.value)">
             <!-- populado dinamicamente por _populateMesSelect() -->
           </select>
-          <button class="btn-primary" onclick="gerarPDF(document.getElementById('relatorio-mes-sel').value)" style="white-space:nowrap;">🖨️ Gerar PDF</button>
+          <button class="btn-primary" onclick="gerarPDF(document.getElementById('relatorio-mes-sel').value)" style="white-space:nowrap;">🖨️ Mensal</button>
+          <button class="btn-ghost" onclick="gerarRelatorioAnual()" style="white-space:nowrap;">📆 Anual</button>
         </div>
       </div>
       <div id="relatorio-content" style="display:flex;flex-direction:column;gap:20px;"></div>
@@ -1734,6 +1750,42 @@
         </div>
         <div style="padding:10px 13px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:7px;font-size:12px;color:#166534;">
           💡 As informações aparecem no cabeçalho do sistema, na tela de login e nos relatórios impressos.
+        </div>
+      </div>
+
+      <!-- Instalar como App (PWA) -->
+      <div class="chart-card" style="margin-bottom:20px;">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div style="font-size:30px;line-height:1;">📱</div>
+          <div style="flex:1;">
+            <div style="font-size:15px;font-weight:700;color:#0f172a;">Instalar no celular</div>
+            <div style="font-size:12.5px;color:#64748b;margin-top:3px;">Use o sistema como um app nativo, com ícone na tela inicial</div>
+          </div>
+          <button onclick="pwaInstall()" class="btn-primary">📲 Instalar</button>
+        </div>
+        <div style="margin-top:18px;padding-top:18px;border-top:1px solid #f1f5f9;display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+              <span style="font-size:18px;">🤖</span>
+              <span style="font-size:13px;font-weight:700;color:#0f172a;">Android / Chrome</span>
+            </div>
+            <ol style="font-size:12px;color:#475569;line-height:1.7;margin-left:18px;">
+              <li>Toque no botão verde acima 📲</li>
+              <li>Confirme "Instalar"</li>
+              <li>Pronto! O ícone aparece na tela inicial</li>
+            </ol>
+          </div>
+          <div style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+              <span style="font-size:18px;">🍎</span>
+              <span style="font-size:13px;font-weight:700;color:#0f172a;">iPhone / Safari</span>
+            </div>
+            <ol style="font-size:12px;color:#475569;line-height:1.7;margin-left:18px;">
+              <li>Toque no botão Compartilhar (□↑)</li>
+              <li>Role e toque "Adicionar à Tela de Início"</li>
+              <li>Confirme em "Adicionar"</li>
+            </ol>
+          </div>
         </div>
       </div>
 

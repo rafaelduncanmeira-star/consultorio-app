@@ -1,3 +1,44 @@
+// ====================== PWA (Service Worker + Install Prompt) ======================
+let _deferredInstallPrompt = null;
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(err => console.warn('SW register fail:', err));
+  });
+}
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  _deferredInstallPrompt = e;
+  // Mostra o botão flutuante de instalar
+  const btn = document.getElementById('pwa-install-btn');
+  if (btn) btn.style.display = '';
+});
+
+window.addEventListener('appinstalled', () => {
+  _deferredInstallPrompt = null;
+  const btn = document.getElementById('pwa-install-btn');
+  if (btn) btn.style.display = 'none';
+  if (typeof toast === 'function') toast('🎉 App instalado! Abra pelo ícone na tela inicial.');
+});
+
+async function pwaInstall() {
+  if (!_deferredInstallPrompt) {
+    // iOS Safari: instrução manual
+    if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+      alert('Para instalar no iOS:\n\n1. Toque no botão Compartilhar (□↑) na barra do Safari\n2. Role e toque em "Adicionar à Tela de Início"\n3. Confirme tocando em "Adicionar"');
+    } else {
+      alert('Use o menu do navegador (⋮) e selecione "Instalar aplicativo" ou "Adicionar à tela inicial".');
+    }
+    return;
+  }
+  _deferredInstallPrompt.prompt();
+  const { outcome } = await _deferredInstallPrompt.userChoice;
+  _deferredInstallPrompt = null;
+  const btn = document.getElementById('pwa-install-btn');
+  if (btn) btn.style.display = 'none';
+}
+
 // ====================== SUPABASE ======================
 const SUPA_URL = 'https://ipvztcqlawwslnkzmzzl.supabase.co';
 const SUPA_KEY = 'sb_publishable_-AffRgArhzjeJioFgyzgng_bnSo2F4K';
@@ -4247,7 +4288,10 @@ async function gerarInsightsSofia(force = false) {
 
   try {
     const ctx = buildContext();
-    const prompt = `Você é a MaestrIA, analista do consultório do Dr. Rafael (geriatria).
+    const _clinica = getClinicaConfig();
+    const _nomeDr  = _clinica.nome || currentNome || 'do médico';
+    const _esp     = _clinica.especialidade || 'medicina';
+    const prompt = `Você é a MaestrIA, analista do consultório de ${_esp.toLowerCase()} de ${currentRole==='medico' ? 'Dr(a). '+_nomeDr : _nomeDr}.
 Analise os dados abaixo e gere EXATAMENTE 5 insights acionáveis e específicos sobre o consultório.
 Cada insight DEVE ter: tipo (uma de: "oportunidade", "alerta", "critico", "parabens", "info"), titulo (máx 5 palavras), descricao (1-2 frases com NÚMEROS REAIS dos dados), acao (sugestão de até 8 palavras, obrigatória).
 
@@ -5718,6 +5762,285 @@ function gerarPDF(mes) {
   win.document.close();
 }
 
+// ====================== RELATÓRIO ANUAL ======================
+function gerarRelatorioAnual() {
+  const hoje = new Date();
+  const ano  = hoje.getFullYear();
+  const allPacs  = DB.get('pacientes');
+  const allDesps = DB.get('despesas');
+  const allCrm   = DB.get('crm');
+  const allFu    = DB.get('followup');
+  const inscricoes = getInscricoes();
+  const programas  = getProgramas();
+  const clinica = getClinicaConfig();
+  const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+
+  // Estatísticas por mês
+  const dadosMes = meses.map((nome, i) => {
+    const mes = `${ano}-${String(i+1).padStart(2,'0')}`;
+    const pacs = allPacs.filter(p => getMes(p.data) === mes);
+    const desps = allDesps.filter(d => getMes(d.data) === mes);
+    const fat = pacs.reduce((s,p) => s + (p.valor||0), 0);
+    const desp = desps.reduce((s,d) => s + (d.valor||0), 0);
+    const lucro = fat - desp;
+
+    // Inscrições novas no mês
+    const novas = inscricoes.filter(i => (i.dataInicio||'').startsWith(mes));
+    // Cancelamentos no mês
+    const canc  = inscricoes.filter(i => i.status === 'Cancelado' && (i.dataFim||'').startsWith(mes));
+
+    // MRR ativo ao final desse mês
+    const fimMes = `${mes}-31`;
+    const ativosNoFim = inscricoes.filter(i => {
+      if (i.status === 'Cancelado') return false;
+      if ((i.dataInicio||'') > fimMes) return false;
+      const prog = programas.find(p => p.id === i.programaId);
+      if (!prog || prog.tipo !== 'Assinatura') return false;
+      const venc = _vencimentoInscricao(i, prog);
+      return !venc || venc >= mes + '-01';
+    });
+    let mrr = 0;
+    ativosNoFim.forEach(i => {
+      const prog = programas.find(p => p.id === i.programaId);
+      mrr += _mrrDeInscricao(i, prog);
+    });
+
+    return { mes, nome, pacs, fat, desp, lucro, novas, canc, ativosNoFim, mrr };
+  });
+
+  // Totais
+  const totFat   = dadosMes.reduce((s,d) => s + d.fat, 0);
+  const totDesp  = dadosMes.reduce((s,d) => s + d.desp, 0);
+  const totLucro = totFat - totDesp;
+  const totPacs  = dadosMes.reduce((s,d) => s + d.pacs.length, 0);
+  const margem   = totFat ? (totLucro/totFat)*100 : 0;
+  const ticketMedio = totPacs ? totFat/totPacs : 0;
+
+  // Programas
+  const totNovas = dadosMes.reduce((s,d) => s + d.novas.length, 0);
+  const totCanc  = dadosMes.reduce((s,d) => s + d.canc.length, 0);
+  const churnAnual = totNovas ? (totCanc / totNovas) * 100 : 0;
+  const mrrFinal = dadosMes[hoje.getMonth()]?.mrr || 0;
+  const mrrInicio = dadosMes.find(d => d.mrr > 0)?.mrr || 0;
+  const crescimentoMrr = mrrInicio ? ((mrrFinal - mrrInicio) / mrrInicio * 100) : 0;
+
+  // LTV estimado: ticket médio × tempo médio de vida (em meses)
+  // Assumindo retenção média de 12 meses se não há dados
+  const tempoMedioMeses = totCanc > 0 ? 12 / churnAnual * 100 / 12 * 12 : 24;
+  const ltv = ticketMedio * (tempoMedioMeses / 6); // estimativa conservadora
+
+  // Pacientes únicos no ano
+  const pacUnicos = new Set();
+  allPacs.forEach(p => {
+    if ((p.data||'').startsWith(String(ano))) pacUnicos.add((p.nome||'').toLowerCase());
+  });
+
+  // Conversão CRM anual
+  const crmAno = allCrm.filter(c => (c.data||'').startsWith(String(ano)));
+  const crmAtendidos = crmAno.filter(c => c.status === 'Atendeu').length;
+  const convAnual = crmAno.length ? (crmAtendidos/crmAno.length)*100 : 0;
+
+  // Top 5 procedimentos
+  const procMap = {};
+  allPacs.filter(p => (p.data||'').startsWith(String(ano))).forEach(p => {
+    const k = p.tipo || '(sem)';
+    if (!procMap[k]) procMap[k] = { qtd: 0, total: 0 };
+    procMap[k].qtd++;
+    procMap[k].total += (p.valor||0);
+  });
+  const topProcs = Object.entries(procMap).sort((a,b) => b[1].total - a[1].total).slice(0,5);
+
+  // Top 5 programas
+  const progMap = {};
+  inscricoes.filter(i => (i.dataInicio||'').startsWith(String(ano))).forEach(i => {
+    const prog = programas.find(p => p.id === i.programaId);
+    const k = prog ? prog.nome : 'Desconhecido';
+    if (!progMap[k]) progMap[k] = { qtd: 0, mrr: 0 };
+    progMap[k].qtd++;
+    progMap[k].mrr += _mrrDeInscricao(i, prog);
+  });
+  const topProgs = Object.entries(progMap).sort((a,b) => b[1].mrr - a[1].mrr).slice(0,5);
+
+  const brl = BRL;
+  const pct = v => isFinite(v) ? v.toFixed(1) + '%' : '—';
+  const nomeMed = clinica.nome || currentNome || 'Consultório';
+  const tratamento = currentRole === 'medico' ? `Dr. ${nomeMed}` : nomeMed;
+  const agora = new Date().toLocaleString('pt-BR');
+
+  const maxFat = Math.max(...dadosMes.map(d => d.fat), 1);
+  const maxMrr = Math.max(...dadosMes.map(d => d.mrr), 1);
+
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Relatório Anual ${ano} — ${_esc(nomeMed)}</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Segoe UI',Arial,sans-serif; font-size:12px; color:#1e293b; background:#fff; }
+  .page { padding:36px 44px; }
+  .header { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #3b82f6; padding-bottom:18px; margin-bottom:28px; }
+  .header-left h1 { font-size:22px; font-weight:800; color:#0f172a; letter-spacing:-0.5px; }
+  .header-left p { font-size:12px; color:#64748b; margin-top:3px; }
+  .header-right { text-align:right; }
+  .header-right .ano { font-size:24px; font-weight:800; color:#3b82f6; letter-spacing:-0.5px; }
+  .header-right .gen { font-size:10px; color:#94a3b8; margin-top:4px; }
+  .kpis { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:24px; }
+  .kpi { background:#f8fafc; border-radius:10px; padding:12px 14px; border-left:3px solid #3b82f6; }
+  .kpi.green { border-left-color:#10b981; } .kpi.red { border-left-color:#ef4444; } .kpi.amber { border-left-color:#f59e0b; } .kpi.purple { border-left-color:#8b5cf6; }
+  .kpi label { font-size:9px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:0.07em; display:block; margin-bottom:3px; }
+  .kpi .value { font-size:17px; font-weight:800; color:#0f172a; letter-spacing:-0.5px; }
+  .kpi .sub { font-size:9.5px; color:#64748b; margin-top:2px; }
+  .section { margin-bottom:22px; page-break-inside:avoid; }
+  .section h2 { font-size:13px; font-weight:700; color:#0f172a; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid #e2e8f0; }
+  table { width:100%; border-collapse:collapse; font-size:11px; }
+  th { text-align:left; padding:7px 8px; background:#f1f5f9; color:#475569; font-weight:600; border-bottom:1px solid #e2e8f0; font-size:10px; text-transform:uppercase; letter-spacing:0.04em; }
+  td { padding:7px 8px; border-bottom:1px solid #f1f5f9; color:#334155; }
+  td.r, th.r { text-align:right; }
+  .total { font-weight:700; background:#f0fdf4; color:#065f46; }
+  .total td { border-bottom:none; }
+  .bar-chart { display:flex; align-items:flex-end; gap:6px; height:90px; padding:8px 0; border-bottom:1px solid #e2e8f0; margin-bottom:8px; }
+  .bar { flex:1; background:linear-gradient(to top,#3b82f6,#60a5fa); border-radius:3px 3px 0 0; position:relative; min-height:2px; }
+  .bar.green { background:linear-gradient(to top,#10b981,#34d399); }
+  .bar.gray { background:#e2e8f0; }
+  .bar-label { font-size:9.5px; text-align:center; color:#64748b; margin-top:4px; }
+  .bar-value { position:absolute; top:-14px; left:50%; transform:translateX(-50%); font-size:8.5px; color:#475569; white-space:nowrap; }
+  .legend { display:flex; gap:18px; font-size:10.5px; color:#64748b; }
+  .legend span::before { content:''; display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px; vertical-align:middle; }
+  .legend .l-fat::before { background:#3b82f6; }
+  .legend .l-mrr::before { background:#10b981; }
+  .footer { text-align:center; padding:20px 0 10px; border-top:1px solid #e2e8f0; font-size:10px; color:#94a3b8; margin-top:30px; }
+  @media print {
+    body { font-size:10.5px; }
+    .page { padding:20px 28px; }
+    .section { page-break-inside:avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <div class="header-left">
+      <h1>${_esc(tratamento)}</h1>
+      <p>${_esc(clinica.especialidade || 'Medicina')} · Relatório Anual de Gestão${clinica.crm ? ' · '+_esc(clinica.crm) : ''}</p>
+    </div>
+    <div class="header-right">
+      <div class="ano">${ano}</div>
+      <div class="gen">Gerado em ${agora}</div>
+    </div>
+  </div>
+
+  <!-- KPIs principais -->
+  <div class="kpis">
+    <div class="kpi green"><label>Faturamento</label><div class="value">${brl(totFat)}</div><div class="sub">${totPacs} atendimentos</div></div>
+    <div class="kpi green"><label>Lucro</label><div class="value">${brl(totLucro)}</div><div class="sub">Margem ${pct(margem)}</div></div>
+    <div class="kpi"><label>Pacientes únicos</label><div class="value">${pacUnicos.size}</div><div class="sub">Ticket ${brl(ticketMedio)}</div></div>
+    <div class="kpi purple"><label>MRR atual</label><div class="value">${brl(Math.round(mrrFinal))}</div><div class="sub">${pct(crescimentoMrr)} no ano</div></div>
+    <div class="kpi amber"><label>Conv. CRM</label><div class="value">${pct(convAnual)}</div><div class="sub">${crmAtendidos}/${crmAno.length} contatos</div></div>
+  </div>
+
+  <!-- Gráfico de faturamento mensal -->
+  <div class="section">
+    <h2>1. Evolução Mensal do Faturamento</h2>
+    <div class="bar-chart">
+      ${dadosMes.map(d => {
+        const h = Math.round((d.fat / maxFat) * 80);
+        return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;">
+          <div class="bar" style="height:${h}px;width:100%;${d.fat === 0 ? 'background:#e2e8f0;' : ''}">
+            ${d.fat > 0 ? `<span class="bar-value">${(d.fat/1000).toFixed(0)}k</span>` : ''}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(12,1fr);gap:6px;">
+      ${dadosMes.map(d => `<div class="bar-label">${d.nome}</div>`).join('')}
+    </div>
+  </div>
+
+  <!-- Tabela mensal completa -->
+  <div class="section">
+    <h2>2. Detalhamento Mensal</h2>
+    <table>
+      <thead>
+        <tr><th>Mês</th><th class="r">Pacientes</th><th class="r">Faturamento</th><th class="r">Despesas</th><th class="r">Lucro</th><th class="r">Margem</th></tr>
+      </thead>
+      <tbody>
+        ${dadosMes.map(d => {
+          const m = d.fat ? (d.lucro/d.fat*100) : 0;
+          return `<tr><td><strong>${d.nome}/${String(ano).slice(-2)}</strong></td>
+            <td class="r">${d.pacs.length || '—'}</td>
+            <td class="r">${d.fat ? brl(d.fat) : '—'}</td>
+            <td class="r">${d.desp ? brl(d.desp) : '—'}</td>
+            <td class="r" style="color:${d.lucro>0?'#10b981':d.lucro<0?'#ef4444':'#94a3b8'};">${d.fat ? brl(d.lucro) : '—'}</td>
+            <td class="r">${d.fat ? pct(m) : '—'}</td></tr>`;
+        }).join('')}
+        <tr class="total"><td>Total ${ano}</td><td class="r">${totPacs}</td><td class="r">${brl(totFat)}</td><td class="r">${brl(totDesp)}</td><td class="r">${brl(totLucro)}</td><td class="r">${pct(margem)}</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  ${totNovas > 0 || mrrFinal > 0 ? `
+  <!-- Programas anuais -->
+  <div class="section">
+    <h2>3. Programas de Acompanhamento — Visão Anual</h2>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;">
+      <div class="kpi purple"><label>MRR Final</label><div class="value">${brl(Math.round(mrrFinal))}</div></div>
+      <div class="kpi green"><label>Novas no ano</label><div class="value">${totNovas}</div></div>
+      <div class="kpi red"><label>Cancelamentos</label><div class="value">${totCanc}</div></div>
+      <div class="kpi amber"><label>Churn anual</label><div class="value">${pct(churnAnual)}</div></div>
+    </div>
+
+    <!-- Gráfico MRR mensal -->
+    <div style="font-size:10.5px;font-weight:600;color:#475569;margin:14px 0 6px;">Evolução do MRR ao longo do ano</div>
+    <div class="bar-chart" style="height:60px;">
+      ${dadosMes.map(d => {
+        const h = Math.round((d.mrr / maxMrr) * 50);
+        return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;">
+          <div class="bar green" style="height:${h}px;width:100%;${d.mrr === 0 ? 'background:#e2e8f0;' : ''}">
+            ${d.mrr > 0 ? `<span class="bar-value">${(d.mrr/1000).toFixed(1)}k</span>` : ''}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(12,1fr);gap:6px;margin-bottom:14px;">
+      ${dadosMes.map(d => `<div class="bar-label">${d.nome}</div>`).join('')}
+    </div>
+
+    ${topProgs.length ? `
+    <table>
+      <thead><tr><th>Programa</th><th class="r">Inscritos no ano</th><th class="r">MRR gerado</th></tr></thead>
+      <tbody>
+        ${topProgs.map(([nome, d]) => `<tr><td>${_esc(nome)}</td><td class="r">${d.qtd}</td><td class="r">${brl(Math.round(d.mrr))}</td></tr>`).join('')}
+      </tbody>
+    </table>` : ''}
+  </div>` : ''}
+
+  ${topProcs.length ? `
+  <!-- Top procedimentos -->
+  <div class="section">
+    <h2>${totNovas > 0 || mrrFinal > 0 ? '4' : '3'}. Top 5 Procedimentos do Ano</h2>
+    <table>
+      <thead><tr><th>Procedimento</th><th class="r">Atendimentos</th><th class="r">Faturamento</th><th class="r">% do total</th></tr></thead>
+      <tbody>
+        ${topProcs.map(([nome, d]) => `<tr><td>${_esc(nome)}</td><td class="r">${d.qtd}</td><td class="r">${brl(d.total)}</td><td class="r">${pct(totFat ? d.total/totFat*100 : 0)}</td></tr>`).join('')}
+      </tbody>
+    </table>
+  </div>` : ''}
+
+  <div class="footer">
+    <p>${_esc(tratamento)} · ${_esc(clinica.especialidade || 'Medicina')} · Consultório App</p>
+    <p>Documento confidencial · Gerado em ${agora}</p>
+  </div>
+</div>
+<script>window.onload = () => { window.print(); }<\/script>
+</body>
+</html>`;
+
+  const win = window.open('', '_blank');
+  win.document.write(html);
+  win.document.close();
+}
+
 function renderRelatorio(mes) {
   _populateMesSelect('relatorio-mes-sel', { selected: mes });
   mes = document.getElementById('relatorio-mes-sel')?.value || new Date().toISOString().substring(0, 7);
@@ -6538,7 +6861,12 @@ function buildContext() {
 }
 
 function buildSystemPrompt(ctx) {
-  return `Você é a MaestrIA, assistente inteligente do consultório de geriatria do Dr. Rafael Duncan.
+  const clinica = getClinicaConfig();
+  const nomeDr  = clinica.nome || currentNome || 'do médico';
+  const tratamento = currentRole === 'medico' ? `Dr(a). ${nomeDr}` : nomeDr;
+  const esp     = clinica.especialidade || 'medicina';
+  const local   = clinica.cidade ? ` em ${clinica.cidade}` : '';
+  return `Você é a MaestrIA, assistente inteligente do consultório de ${esp.toLowerCase()} de ${tratamento}${local}.
 Fala em português brasileiro, direta, amigável, OBJETIVA E CONCISA.
 
 ⚠️ NÃO USE markdown decorativo (sem **negrito**, sem títulos com #, sem listas com -). O chat mostra texto puro.
@@ -8633,7 +8961,8 @@ async function saudacaoDiaria() {
   setup.style.display = 'none';
   main.style.display  = 'flex';
 
-  appendChatMsg('sofia', `${saudacao}, Dr. Rafael! 👋 ${resumo}. Como posso ajudar?`);
+  const _trat = currentRole === 'medico' ? `Dr(a). ${getClinicaConfig().nome || currentNome || ''}`.trim() : (getClinicaConfig().nome || currentNome || '');
+  appendChatMsg('sofia', `${saudacao}${_trat ? ', ' + _trat : ''}! 👋 ${resumo}. Como posso ajudar?`);
   localStorage.setItem('consult_saudacao_dia', hoje);
 }
 

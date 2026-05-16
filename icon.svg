@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#0f172a"/>
+  <g transform="translate(256 256)">
+    <!-- Cruz médica simplificada -->
+    <rect x="-30" y="-130" width="60" height="260" rx="14" fill="#10b981"/>
+    <rect x="-130" y="-30" width="260" height="60" rx="14" fill="#10b981"/>
+    <!-- Coração no centro -->
+    <path d="M 0 -10 C -22 -42, -68 -32, -68 4 C -68 36, -22 68, 0 88 C 22 68, 68 36, 68 4 C 68 -32, 22 -42, 0 -10 Z" fill="#0f172a" opacity="0.85"/>
+  </g>
+</svg>
