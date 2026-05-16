@@ -1,3 +1,34 @@
+// ====================== DEMO DATA LOADER (uso manual via console) ======================
+// Uso: abra DevTools (F12) → Console → digite: loadDemoData()
+// Popula uma semana realista de Geriatria + sincroniza no Supabase
+window.loadDemoData = async function loadDemoData() {
+  if (!confirm('Isso vai SUBSTITUIR todos os seus dados atuais por uma simulação de uma semana. Tem certeza?')) return;
+  try {
+    const r = await fetch('demo-data.json');
+    if (!r.ok) throw new Error('Não achei demo-data.json (status ' + r.status + ')');
+    const dump = await r.json();
+
+    console.log('🔄 Carregando simulação...');
+    Object.entries(dump).forEach(([k, v]) => {
+      localStorage.setItem('consult_' + k, JSON.stringify(v));
+    });
+    // Limpa flag de seed de programas pra forçar carregar os templates
+    localStorage.removeItem('consult_progs_seeded_v2');
+
+    console.log('☁️ Sincronizando com Supabase...');
+    const chaves = Object.keys(dump);
+    for (const k of chaves) {
+      await cloudPush(k);
+    }
+
+    console.log('✅ Pronto! Recarregando...');
+    setTimeout(() => location.reload(), 800);
+  } catch(e) {
+    alert('Erro: ' + e.message);
+    console.error(e);
+  }
+};
+
 // ====================== PWA (Service Worker + Install Prompt) ======================
 let _deferredInstallPrompt = null;
 
