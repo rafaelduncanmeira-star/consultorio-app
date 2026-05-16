@@ -261,6 +261,11 @@ function showPage(page) {
   // Close sidebar on mobile when navigating
   closeMobileSidebar();
 
+  // Reset scroll position on every page change
+  const _mc = document.getElementById('main-content');
+  if (_mc) _mc.scrollTop = 0;
+  window.scrollTo(0, 0);
+
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('page-' + page).classList.add('active');
@@ -3360,7 +3365,7 @@ function renderDashboard(mes = '2026-05') {
   setText('kpi-lucro', BRL(lucro));
   setText('kpi-margem', `Margem: ${PCT(margem)}`);
   setText('kpi-pac', pacs.length);
-  setText('kpi-ticket', `Ticket médio: ${BRL(ticket)}`);
+  setText('kpi-ticket', BRL(ticket));
 
   // Sub-linha pacientes: variação real
   const pacSubEl = document.getElementById('kpi-pac-sub');
