@@ -53,8 +53,19 @@ async function loginUser(email, password) {
     currentUser = data.user;
     // Busca role do perfil
     const { data: profile } = await _supa.from('profiles').select('role, nome').eq('id', currentUser.id).single();
-    currentRole = profile?.role || 'secretaria';
-    currentNome  = profile?.nome  || email.split('@')[0];
+    if (!profile) {
+      // Primeiro login após signup com confirmação por email — cria perfil a partir do metadata
+      const meta = currentUser.user_metadata || {};
+      const nomeMeta = meta.nome || email.split('@')[0];
+      const roleMeta = meta.role || 'medico';
+      await _supa.from('profiles').upsert({ id: currentUser.id, nome: nomeMeta, role: roleMeta });
+      currentRole = roleMeta;
+      currentNome = nomeMeta;
+      localStorage.setItem('consult_onboarding_pending', '1');
+    } else {
+      currentRole = profile.role || 'secretaria';
+      currentNome  = profile.nome  || email.split('@')[0];
+    }
     // Sincroniza dados da nuvem
     await cloudPull();
     // Inicia Realtime para leads do WhatsApp
@@ -63,6 +74,101 @@ async function loginUser(email, password) {
     syncLeadsFromSupabase();
     return { ok: true };
   } catch(e) { return { error: e.message }; }
+}
+
+// Cadastro de novo usuário
+async function signUpUser(email, password, nome, role) {
+  if (!_supa) return { error: 'Supabase não carregou. Recarregue a página.' };
+  try {
+    const { data, error } = await _supa.auth.signUp({
+      email, password,
+      options: { data: { nome, role } }
+    });
+    if (error) return { error: _traduzirErroAuth(error.message) };
+    if (!data.user) return { error: 'Não foi possível criar a conta. Tente novamente.' };
+
+    // Cria perfil. Se o Supabase exigir confirmação por email, a sessão ainda não existe — o perfil será criado no primeiro login.
+    if (data.session) {
+      currentUser = data.user;
+      const { error: pErr } = await _supa.from('profiles').upsert({ id: data.user.id, nome, role });
+      if (pErr) console.warn('Erro criando perfil:', pErr.message);
+      currentRole = role;
+      currentNome = nome;
+      localStorage.setItem('consult_onboarding_pending', '1');
+      initLeadsRealtime();
+      return { ok: true, needsConfirmation: false };
+    }
+    return { ok: true, needsConfirmation: true };
+  } catch(e) { return { error: e.message }; }
+}
+
+// Toggle entre abas Login / Cadastro
+function setLoginTab(tab) {
+  const tEnt = document.getElementById('login-tab-entrar');
+  const tCad = document.getElementById('login-tab-cadastro');
+  const fEnt = document.getElementById('login-form-entrar');
+  const fCad = document.getElementById('login-form-cadastro');
+  const errEl = document.getElementById('login-error');
+  const okEl  = document.getElementById('login-success');
+  if (errEl) errEl.style.display = 'none';
+  if (okEl)  okEl.style.display = 'none';
+  if (tab === 'cadastro') {
+    tCad.style.color = '#0f172a'; tCad.style.borderBottomColor = '#0f172a';
+    tEnt.style.color = '#94a3b8'; tEnt.style.borderBottomColor = 'transparent';
+    fEnt.style.display = 'none'; fCad.style.display = '';
+  } else {
+    tEnt.style.color = '#0f172a'; tEnt.style.borderBottomColor = '#0f172a';
+    tCad.style.color = '#94a3b8'; tCad.style.borderBottomColor = 'transparent';
+    fEnt.style.display = ''; fCad.style.display = 'none';
+  }
+}
+
+// Handler do botão Criar conta
+async function doSignup() {
+  const nome     = (document.getElementById('signup-nome').value || '').trim();
+  const email    = (document.getElementById('signup-email').value || '').trim();
+  const password =  document.getElementById('signup-password').value || '';
+  const role     =  document.getElementById('signup-role').value || 'medico';
+  const btn      =  document.getElementById('signup-btn');
+  const errEl    =  document.getElementById('login-error');
+  const okEl     =  document.getElementById('login-success');
+
+  errEl.style.display = 'none'; okEl.style.display = 'none';
+
+  if (!nome || !email || !password) {
+    errEl.textContent = 'Preencha todos os campos.';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (password.length < 8) {
+    errEl.textContent = 'A senha precisa de no mínimo 8 caracteres.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  btn.textContent = 'Criando…';
+  btn.disabled = true;
+  const result = await signUpUser(email, password, nome, role);
+  btn.textContent = 'Criar conta gratuita';
+  btn.disabled = false;
+
+  if (result && result.error) {
+    errEl.textContent = result.error;
+    errEl.style.display = 'block';
+    return;
+  }
+
+  if (result.needsConfirmation) {
+    okEl.innerHTML = `✅ Conta criada! Verifique seu e-mail (<strong>${_esc(email)}</strong>) para confirmar antes de entrar.`;
+    okEl.style.display = 'block';
+    setLoginTab('entrar');
+    document.getElementById('login-email').value = email;
+    return;
+  }
+
+  // Login automático bem-sucedido
+  _iniciarApp();
+  setTimeout(() => mostrarOnboarding(), 400);
 }
 
 // Logout
@@ -89,8 +195,18 @@ async function checkSession() {
     if (!session) return false;
     currentUser = session.user;
     const { data: profile } = await _supa.from('profiles').select('role, nome').eq('id', currentUser.id).single();
-    currentRole = profile?.role || 'secretaria';
-    currentNome  = profile?.nome  || session.user.email.split('@')[0];
+    if (!profile) {
+      const meta = currentUser.user_metadata || {};
+      const nomeMeta = meta.nome || session.user.email.split('@')[0];
+      const roleMeta = meta.role || 'medico';
+      await _supa.from('profiles').upsert({ id: currentUser.id, nome: nomeMeta, role: roleMeta });
+      currentRole = roleMeta;
+      currentNome = nomeMeta;
+      localStorage.setItem('consult_onboarding_pending', '1');
+    } else {
+      currentRole = profile.role || 'secretaria';
+      currentNome  = profile.nome  || session.user.email.split('@')[0];
+    }
     return true;
   } catch(e) { return false; }
 }
@@ -100,6 +216,10 @@ function _traduzirErroAuth(msg) {
   if (msg.includes('Invalid login credentials') || msg.includes('invalid_credentials')) return 'E-mail ou senha incorretos.';
   if (msg.includes('Email not confirmed')) return 'E-mail não confirmado. Verifique sua caixa de entrada.';
   if (msg.includes('Too many requests')) return 'Muitas tentativas. Aguarde alguns minutos.';
+  if (msg.includes('already registered') || msg.includes('User already registered')) return 'Este e-mail já está cadastrado. Use a aba "Entrar".';
+  if (msg.includes('Password should be at least')) return 'A senha precisa de no mínimo 8 caracteres.';
+  if (msg.toLowerCase().includes('invalid email')) return 'E-mail inválido.';
+  if (msg.includes('Signups not allowed')) return 'Cadastro temporariamente desabilitado. Contate o administrador.';
   return msg;
 }
 
@@ -134,6 +254,30 @@ async function doLogin() {
   _iniciarApp();
 }
 
+// Mostra modal de boas-vindas (após signup ou primeiro login)
+function mostrarOnboarding() {
+  if (localStorage.getItem('consult_onboarding_done')) return;
+  const modal = document.getElementById('modal-onboarding');
+  if (!modal) return;
+  const saudacao = document.getElementById('onb-saudacao');
+  if (saudacao && currentNome) {
+    const formatado = currentRole === 'medico' ? `Dr(a). ${currentNome}` : currentNome;
+    saudacao.textContent = `Olá, ${formatado}! Tudo pronto para começar.`;
+  }
+  modal.style.display = 'flex';
+}
+
+function closeOnboarding() {
+  const modal = document.getElementById('modal-onboarding');
+  if (!modal) return;
+  const noShow = document.getElementById('onb-no-show');
+  if (noShow && noShow.checked) {
+    localStorage.setItem('consult_onboarding_done', '1');
+  }
+  localStorage.removeItem('consult_onboarding_pending');
+  modal.style.display = 'none';
+}
+
 // Mostra o app e configura role
 function _iniciarApp() {
   // GUARD: só inicia se houver sessão válida (impede bypass via console)
@@ -154,6 +298,10 @@ function _iniciarApp() {
   saudacaoDiaria();
   // Sincroniza UI mobile com página inicial
   _mobSync('dashboard');
+  // Mostra modal de boas-vindas se for primeiro acesso
+  if (localStorage.getItem('consult_onboarding_pending')) {
+    setTimeout(() => mostrarOnboarding(), 500);
+  }
 }
 
 function _atualizarSidebar() {
@@ -7038,6 +7186,17 @@ function renderConfiguracoes() {
   const tokenEl = document.getElementById('zapi-token');
   if (tokenEl) tokenEl.value = cfg.token || '';
   _applyZapiUI(cfg.enabled, !!(cfg.instanceId && cfg.token));
+  // Popula user_id do usuário logado no tutorial
+  const uEl = document.getElementById('config-user-id');
+  if (uEl && currentUser) uEl.textContent = currentUser.id;
+}
+
+// Copia o user_id pro clipboard (útil pro Make)
+function _copyUserId() {
+  if (!currentUser) return;
+  navigator.clipboard.writeText(currentUser.id).then(() => {
+    if (typeof toast === 'function') toast('✅ user_id copiado!');
+  }).catch(() => alert('Não foi possível copiar. Selecione e copie manualmente: ' + currentUser.id));
 }
 
 function _zapiToggleChange(enabled) {
