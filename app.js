@@ -2248,24 +2248,26 @@ function saveDespesa(e) {
 // ====================== RECEITA ======================
 const _MESES_FULL = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
-function _populateRecMesFilter() {
-  const el = document.getElementById('rec-mes-filter');
+// Popula qualquer select de mês com os últimos 24 meses até hoje (ordem decrescente).
+// Se includeTodos=true, adiciona opção "Todos" no final.
+function _populateMesSelect(id, { includeTodos = false, selected = null } = {}) {
+  const el = document.getElementById(id);
   if (!el) return;
-  const prevVal = el.value; // preserva seleção atual
+  const prevVal = selected ?? el.value;
   const hoje = new Date();
   const opts = [];
-  // Últimos 24 meses até o mês atual (ordem decrescente)
   for (let i = 0; i < 24; i++) {
     const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
     const key = d.toISOString().substring(0, 7);
     const label = `${_MESES_FULL[d.getMonth()]} ${d.getFullYear()}`;
     opts.push(`<option value="${key}">${label}</option>`);
   }
-  opts.push('<option value="todos">Todos</option>');
+  if (includeTodos) opts.push('<option value="todos">Todos</option>');
   el.innerHTML = opts.join('');
-  // Restaura ou seleciona o mês atual
   el.value = prevVal && Array.from(el.options).some(o => o.value === prevVal) ? prevVal : hoje.toISOString().substring(0, 7);
 }
+
+function _populateRecMesFilter() { _populateMesSelect('rec-mes-filter', { includeTodos: true }); }
 
 function renderReceita() {
   _populateRecMesFilter();
@@ -3381,7 +3383,9 @@ function renderProcBreakdown(pacs) {
     </table>`;
 }
 
-function renderDashboard(mes = '2026-05') {
+function renderDashboard(mes) {
+  _populateMesSelect('dash-mes-filter', { selected: mes });
+  mes = document.getElementById('dash-mes-filter')?.value || new Date().toISOString().substring(0, 7);
   const pacs  = DB.get('pacientes').filter(p => getMes(p.data) === mes);
   const desps = DB.get('despesas').filter(d => getMes(d.data) === mes);
   const crm   = DB.get('crm').filter(c => getMes(c.data) === mes);
@@ -3585,8 +3589,9 @@ function renderDashboard(mes = '2026-05') {
 }
 
 function updateDashboard(val) {
-  const mesNomes = { '2026-05': 'Maio/2026', '2026-04': 'Abril/2026', '2026-03': 'Março/2026' };
-  document.getElementById('dash-mes').textContent = mesNomes[val] || val;
+  const [y, m] = val.split('-');
+  const label = `${_MESES_FULL[parseInt(m,10)-1]}/${y}`;
+  document.getElementById('dash-mes').textContent = label;
   renderDashboard(val);
 }
 
@@ -3978,6 +3983,8 @@ function gerarPDF(mes) {
 }
 
 function renderRelatorio(mes) {
+  _populateMesSelect('relatorio-mes-sel', { selected: mes });
+  mes = document.getElementById('relatorio-mes-sel')?.value || new Date().toISOString().substring(0, 7);
   const pacs = DB.get('pacientes').filter(p => getMes(p.data) === mes);
   const desps = DB.get('despesas').filter(d => getMes(d.data) === mes);
   const crm = DB.get('crm').filter(c => getMes(c.data) === mes);
