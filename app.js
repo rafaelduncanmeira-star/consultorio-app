@@ -319,6 +319,26 @@ function openModal(id) {
     if (vEl && !editState.idx && editState.crmIdx === null) vEl.value = '';
     atualizarValorSugerido();
   }
+  if (id === 'modal-crm' && !editState.col) {
+    // Auto-preenche data e hora com o momento atual para novos contatos
+    const now  = new Date();
+    const form = document.querySelector('#modal-crm form');
+    if (form) {
+      const dateEl = form.querySelector('[name="data"]');
+      const timeEl = form.querySelector('[name="hora"]');
+      if (dateEl) {
+        const yyyy = now.getFullYear();
+        const mm   = String(now.getMonth() + 1).padStart(2, '0');
+        const dd   = String(now.getDate()).padStart(2, '0');
+        dateEl.value = `${yyyy}-${mm}-${dd}`;
+      }
+      if (timeEl) {
+        const hh  = String(now.getHours()).padStart(2, '0');
+        const min = String(now.getMinutes()).padStart(2, '0');
+        timeEl.value = `${hh}:${min}`;
+      }
+    }
+  }
   if (id === 'modal-config-horarios') openModalConfigHorarios();
   if (id === 'modal-bloqueio')        openModalBloqueio();
   if (id === 'modal-metas-proc' && window._openMetasProc) window._openMetasProc();
