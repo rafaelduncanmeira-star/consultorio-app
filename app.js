@@ -46,6 +46,11 @@ let _supa = null;
 let currentUser = null;
 let currentRole = null; // só é setado após login bem-sucedido
 let currentNome = '';
+// "Dono" dos dados que o usuário está visualizando.
+// Default = currentUser.id (sua própria clínica). Se o usuário é membro
+// da equipe de outra pessoa, vira o user_id do dono.
+let currentDataOwner = null;
+let currentTeamRole  = null; // 'owner' (você é o dono) ou 'member'
 
 function initSupabase() {
   try {
@@ -55,26 +60,28 @@ function initSupabase() {
   } catch(e) { console.warn('Supabase init error:', e); }
 }
 
-// Push uma chave ao Supabase (fire-and-forget) — isolado por user_id
+// Push uma chave ao Supabase (fire-and-forget) — usa o owner da equipe atual
 async function cloudPush(key) {
   if (!_supa || !currentUser) return;
+  const owner = currentDataOwner || currentUser.id;
   const raw = localStorage.getItem('consult_' + key);
   if (raw === null) return;
   try {
     await _supa.from('app_data').upsert(
-      { user_id: currentUser.id, key, value: JSON.parse(raw) },
+      { user_id: owner, key, value: JSON.parse(raw) },
       { onConflict: 'user_id,key' }
     );
   } catch(e) { console.warn('cloudPush error', key, e.message); }
 }
 
-// Pull todas as chaves do Supabase → localStorage — só do usuário atual
+// Pull todas as chaves do Supabase → localStorage — usa o owner da equipe atual
 async function cloudPull() {
   if (!_supa || !currentUser) return;
+  const owner = currentDataOwner || currentUser.id;
   try {
     const { data, error } = await _supa.from('app_data')
       .select('key, value')
-      .eq('user_id', currentUser.id);
+      .eq('user_id', owner);
     if (error) throw error;
     if (data && data.length) {
       data.forEach(row => {
@@ -83,6 +90,161 @@ async function cloudPull() {
       console.log(`cloudPull: ${data.length} chaves sincronizadas`);
     }
   } catch(e) { console.warn('cloudPull error:', e.message); }
+}
+
+// ====================== EQUIPE: CONVITES E MEMBROS ======================
+
+// Cria um convite e retorna o link de aceite
+async function criarConvite(email, role) {
+  if (!_supa || !currentUser) return { error: 'Não autenticado.' };
+  if (currentTeamRole !== 'owner') return { error: 'Apenas o dono da equipe pode convidar.' };
+  try {
+    const { data, error } = await _supa.from('team_invites')
+      .insert({ owner_id: currentUser.id, email: email.toLowerCase().trim(), role })
+      .select()
+      .single();
+    if (error) return { error: error.message };
+    const link = `${location.origin}${location.pathname}?invite=${data.token}`;
+    return { ok: true, invite: data, link };
+  } catch(e) { return { error: e.message }; }
+}
+
+// Lista convites pendentes (do dono)
+async function listarConvites() {
+  if (!_supa || !currentUser) return [];
+  try {
+    const { data } = await _supa.from('team_invites')
+      .select('*')
+      .eq('owner_id', currentUser.id)
+      .order('created_at', { ascending: false });
+    return data || [];
+  } catch(e) { return []; }
+}
+
+// Lista membros da equipe (do dono)
+async function listarMembros() {
+  if (!_supa || !currentUser) return [];
+  try {
+    const owner = currentDataOwner || currentUser.id;
+    const { data: members } = await _supa.from('team_members')
+      .select('member_id, role, created_at')
+      .eq('owner_id', owner);
+    if (!members || !members.length) return [];
+    // Busca os perfis dos membros
+    const ids = members.map(m => m.member_id);
+    const { data: profiles } = await _supa.from('profiles')
+      .select('id, nome, role')
+      .in('id', ids);
+    return members.map(m => {
+      const p = (profiles || []).find(x => x.id === m.member_id);
+      return { ...m, nome: p?.nome || '(sem nome)' };
+    });
+  } catch(e) { return []; }
+}
+
+// Remove um membro da equipe
+async function removerMembro(memberId) {
+  if (!_supa || !currentUser) return { error: 'Não autenticado.' };
+  if (!confirm('Tem certeza que deseja remover este membro da equipe?')) return { cancelled: true };
+  try {
+    const { error } = await _supa.from('team_members')
+      .delete()
+      .eq('owner_id', currentUser.id)
+      .eq('member_id', memberId);
+    if (error) return { error: error.message };
+    return { ok: true };
+  } catch(e) { return { error: e.message }; }
+}
+
+// Cancela um convite pendente
+async function cancelarConvite(inviteId) {
+  if (!_supa) return;
+  try {
+    await _supa.from('team_invites').delete().eq('id', inviteId);
+  } catch(e) { console.warn(e); }
+}
+
+// Copia link de convite pro clipboard
+function _copyLinkConvite(link) {
+  navigator.clipboard.writeText(link).then(() => {
+    if (typeof toast === 'function') toast('🔗 Link copiado! Envie pelo WhatsApp ou email.');
+  });
+}
+
+// Verifica URL: ?invite=TOKEN → guarda em localStorage pra aceitar após login
+function _checkInviteFromUrl() {
+  const params = new URLSearchParams(location.search);
+  const token = params.get('invite');
+  if (token) {
+    localStorage.setItem('consult_pending_invite', token);
+    // Limpa a URL pra não ficar exposto
+    history.replaceState({}, '', location.pathname);
+  }
+}
+
+// Aceita um convite pendente (chamado após signup/login)
+async function _acceptInviteIfPending() {
+  if (!_supa || !currentUser) return;
+  const token = localStorage.getItem('consult_pending_invite');
+  if (!token) return;
+  localStorage.removeItem('consult_pending_invite');
+  try {
+    // Busca o convite pelo token
+    const { data: invite, error: e1 } = await _supa.from('team_invites')
+      .select('*')
+      .eq('token', token)
+      .is('accepted_at', null)
+      .single();
+    if (e1 || !invite) {
+      console.warn('Convite inválido ou expirado.');
+      return;
+    }
+    // Adiciona em team_members
+    const { error: e2 } = await _supa.from('team_members').insert({
+      owner_id: invite.owner_id,
+      member_id: currentUser.id,
+      role: invite.role
+    });
+    if (e2 && !e2.message.includes('duplicate')) {
+      console.warn('Erro ao adicionar membro:', e2.message);
+      return;
+    }
+    // Marca convite como aceito
+    await _supa.from('team_invites')
+      .update({ accepted_at: new Date().toISOString(), accepted_by: currentUser.id })
+      .eq('id', invite.id);
+    // Atualiza role do perfil
+    await _supa.from('profiles').update({ role: invite.role }).eq('id', currentUser.id);
+    currentRole = invite.role;
+    if (typeof toast === 'function') {
+      setTimeout(() => toast(`✅ Você entrou em uma equipe! Agora vê os dados compartilhados.`), 1500);
+    }
+  } catch(e) { console.warn('_acceptInviteIfPending:', e.message); }
+}
+
+// Resolve quem é o "dono" dos dados que esse user está vendo:
+// - Se é membro de uma equipe → owner_id do dono
+// - Caso contrário → ele mesmo (currentUser.id)
+async function resolveDataOwner() {
+  if (!_supa || !currentUser) return;
+  try {
+    const { data } = await _supa.from('team_members')
+      .select('owner_id, role')
+      .eq('member_id', currentUser.id)
+      .limit(1);
+    if (data && data.length) {
+      currentDataOwner = data[0].owner_id;
+      currentTeamRole  = 'member';
+      currentRole      = data[0].role || currentRole; // role na equipe
+    } else {
+      currentDataOwner = currentUser.id;
+      currentTeamRole  = 'owner';
+    }
+  } catch(e) {
+    console.warn('resolveDataOwner error:', e.message);
+    currentDataOwner = currentUser.id;
+    currentTeamRole  = 'owner';
+  }
 }
 
 // Login com e-mail/senha
@@ -107,6 +269,10 @@ async function loginUser(email, password) {
       currentRole = profile.role || 'secretaria';
       currentNome  = profile.nome  || email.split('@')[0];
     }
+    // Aceita convite pendente (se houver token na URL/localStorage)
+    await _acceptInviteIfPending();
+    // Resolve dono dos dados (própria conta ou equipe que ele é membro)
+    await resolveDataOwner();
     // Sincroniza dados da nuvem
     await cloudPull();
     // Inicia Realtime para leads do WhatsApp
@@ -136,6 +302,9 @@ async function signUpUser(email, password, nome, role) {
       currentRole = role;
       currentNome = nome;
       localStorage.setItem('consult_onboarding_pending', '1');
+      // Aceita convite pendente se houver token na URL
+      await _acceptInviteIfPending();
+      await resolveDataOwner();
       initLeadsRealtime();
       return { ok: true, needsConfirmation: false };
     }
@@ -218,6 +387,8 @@ async function logoutUser() {
   currentUser = null;
   currentRole = null;
   currentNome  = '';
+  currentDataOwner = null;
+  currentTeamRole  = null;
   // Limpa todas as chaves consult_* do localStorage (evita cross-pollination entre usuários)
   Object.keys(localStorage).filter(k => k.startsWith('consult_')).forEach(k => localStorage.removeItem(k));
   document.getElementById('login-page').style.display = 'flex';
@@ -248,6 +419,7 @@ async function checkSession() {
       currentRole = profile.role || 'secretaria';
       currentNome  = profile.nome  || session.user.email.split('@')[0];
     }
+    await resolveDataOwner();
     return true;
   } catch(e) { return false; }
 }
@@ -350,13 +522,14 @@ function _iniciarApp() {
 function _atualizarSidebar() {
   const eMedico = currentRole === 'medico';
   const nomeFormatado = eMedico ? `Dr. ${currentNome}` : currentNome;
+  const ehMembro = currentTeamRole === 'member';
 
   // Footer da sidebar (avatar + nome + role)
   const nomeEl   = document.getElementById('sidebar-nome');
   const roleEl   = document.getElementById('sidebar-role');
   const avatarEl = document.getElementById('sidebar-avatar');
   if (nomeEl)   nomeEl.textContent = nomeFormatado;
-  if (roleEl)   roleEl.textContent = eMedico ? 'Médico · Geriatria' : 'Secretária';
+  if (roleEl)   roleEl.textContent = (eMedico ? 'Médico' : 'Secretária') + (ehMembro ? ' · 👥 Em equipe' : '');
   if (avatarEl) avatarEl.textContent = currentNome.charAt(0).toUpperCase();
 
   // Header da sidebar (logo)
@@ -7894,6 +8067,132 @@ function renderConfiguracoes() {
 
   // Galeria de conquistas
   renderConquistas();
+
+  // Card de equipe (multi-usuário)
+  renderEquipeCard();
+}
+
+// ====================== UI: EQUIPE ======================
+function openModalConvite() {
+  document.getElementById('convite-email').value = '';
+  document.getElementById('convite-role').value = 'secretaria';
+  document.getElementById('convite-form-wrap').style.display = '';
+  document.getElementById('convite-link-wrap').style.display = 'none';
+  openModal('modal-convite');
+}
+
+async function gerarConvite() {
+  const email = (document.getElementById('convite-email').value || '').trim();
+  const role  = document.getElementById('convite-role').value;
+  if (!email) { alert('Informe o e-mail.'); return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { alert('E-mail inválido.'); return; }
+  const result = await criarConvite(email, role);
+  if (result.error) { alert('Erro: ' + result.error); return; }
+  // Mostra o link gerado
+  document.getElementById('convite-form-wrap').style.display = 'none';
+  document.getElementById('convite-link-wrap').style.display = '';
+  document.getElementById('convite-link-text').textContent = result.link;
+  // Botão WhatsApp
+  const wa = document.getElementById('btn-convite-wa');
+  if (wa) {
+    const msg = `Olá! Você foi convidado(a) para acessar o sistema do consultório como ${role === 'medico' ? 'médico(a)' : 'secretária'}. Acesse o link para entrar: ${result.link}`;
+    wa.onclick = () => window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+  }
+}
+
+async function renderEquipeCard() {
+  const subtitleEl = document.getElementById('equipe-subtitle');
+  const btnEl      = document.getElementById('btn-novo-convite');
+  const membrosEl  = document.getElementById('equipe-membros');
+  const convitesEl = document.getElementById('equipe-convites');
+  if (!subtitleEl || !membrosEl || !convitesEl) return;
+
+  // Caso 1: usuário é membro (não dono)
+  if (currentTeamRole === 'member') {
+    if (btnEl) btnEl.style.display = 'none';
+    // Busca o nome do dono
+    try {
+      const { data: ownerProfile } = await _supa.from('profiles').select('nome').eq('id', currentDataOwner).single();
+      const nomeDono = ownerProfile?.nome || 'o titular';
+      subtitleEl.innerHTML = `Você é <strong>${currentRole === 'medico' ? 'médico(a)' : 'secretária'}</strong> na equipe de <strong>${_esc(nomeDono)}</strong>`;
+    } catch(e) {
+      subtitleEl.textContent = 'Você é membro de uma equipe compartilhada';
+    }
+    membrosEl.innerHTML = '';
+    convitesEl.innerHTML = `
+      <div style="padding:14px 16px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;font-size:12.5px;color:#1d4ed8;">
+        ℹ️ Você está acessando dados compartilhados. Para sair da equipe, peça ao titular para te remover.
+      </div>`;
+    return;
+  }
+
+  // Caso 2: usuário é dono — mostra membros + convites
+  if (btnEl) btnEl.style.display = '';
+  const membros  = await listarMembros();
+  const convites = await listarConvites();
+  const pendentes = convites.filter(c => !c.accepted_at);
+
+  if (!membros.length && !pendentes.length) {
+    subtitleEl.textContent = 'Compartilhe o consultório com sua secretária ou outro médico';
+    membrosEl.innerHTML = `
+      <div style="text-align:center;padding:28px 16px;color:#94a3b8;font-size:13px;">
+        Você ainda não compartilhou seu consultório. Convide a primeira pessoa! 👆
+      </div>`;
+    convitesEl.innerHTML = '';
+    return;
+  }
+
+  subtitleEl.textContent = `${membros.length} ${membros.length === 1 ? 'membro' : 'membros'} ativos${pendentes.length ? ' · '+pendentes.length+' convite(s) pendente(s)' : ''}`;
+
+  // Membros ativos
+  membrosEl.innerHTML = membros.length ? `
+    <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Membros ativos</div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;">
+      ${membros.map(m => `
+        <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
+          <div style="width:32px;height:32px;background:#dbeafe;color:#1d4ed8;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;">${(m.nome[0] || '?').toUpperCase()}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:600;color:#0f172a;">${_esc(m.nome)}</div>
+            <div style="font-size:11.5px;color:#64748b;">${m.role === 'medico' ? '🩺 Médico(a)' : '📋 Secretária'} · desde ${new Date(m.created_at).toLocaleDateString('pt-BR')}</div>
+          </div>
+          <button onclick="_handleRemoverMembro('${m.member_id}')" class="btn-ghost" style="font-size:11.5px;color:#dc2626;padding:5px 10px;">Remover</button>
+        </div>`).join('')}
+    </div>` : '';
+
+  // Convites pendentes
+  convitesEl.innerHTML = pendentes.length ? `
+    <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Convites pendentes</div>
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      ${pendentes.map(c => {
+        const link = `${location.origin}${location.pathname}?invite=${c.token}`;
+        const expira = new Date(c.expires_at).toLocaleDateString('pt-BR');
+        return `
+          <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;">
+            <div style="font-size:18px;">⏳</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:13px;font-weight:600;color:#0f172a;">${_esc(c.email)}</div>
+              <div style="font-size:11.5px;color:#92400e;">${c.role === 'medico' ? 'Médico(a)' : 'Secretária'} · expira em ${expira}</div>
+            </div>
+            <button onclick="_copyLinkConvite('${link}')" class="btn-ghost" style="font-size:11.5px;padding:5px 10px;">📋 Copiar link</button>
+            <button onclick="_handleCancelarConvite('${c.id}')" class="btn-ghost" style="font-size:11.5px;color:#dc2626;padding:5px 10px;">×</button>
+          </div>`;
+      }).join('')}
+    </div>` : '';
+}
+
+async function _handleRemoverMembro(memberId) {
+  const result = await removerMembro(memberId);
+  if (result.error) { alert('Erro: ' + result.error); return; }
+  if (result.cancelled) return;
+  toast('Membro removido');
+  renderEquipeCard();
+}
+
+async function _handleCancelarConvite(inviteId) {
+  if (!confirm('Cancelar este convite? O link enviado não funcionará mais.')) return;
+  await cancelarConvite(inviteId);
+  toast('Convite cancelado');
+  renderEquipeCard();
 }
 
 function renderConquistas() {
@@ -8195,11 +8494,12 @@ function initLeadsRealtime() {
     _supa.removeChannel(_leadsChannel).catch(() => {});
     _leadsChannel = null;
   }
+  const owner = currentDataOwner || currentUser.id;
   _leadsChannel = _supa
-    .channel('new-wa-leads-' + currentUser.id)
+    .channel('new-wa-leads-' + owner)
     .on('postgres_changes', {
       event: 'INSERT', schema: 'public', table: 'crm_leads',
-      filter: `user_id=eq.${currentUser.id}`
+      filter: `user_id=eq.${owner}`
     }, () => {
       syncLeadsFromSupabase();
     });
@@ -8209,10 +8509,11 @@ function initLeadsRealtime() {
 async function syncLeadsFromSupabase() {
   if (!_supa || !currentUser) return;
   try {
+    const owner = currentDataOwner || currentUser.id;
     const { data, error } = await _supa
       .from('crm_leads')
       .select('*')
-      .eq('user_id', currentUser.id)
+      .eq('user_id', owner)
       .eq('processado', false)
       .order('created_at', { ascending: true });
     if (error || !data || data.length === 0) return;
@@ -8970,6 +9271,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Inicializa Supabase
   initSupabase();
 
+  // Captura token de convite da URL (?invite=TOKEN) antes de qualquer coisa
+  _checkInviteFromUrl();
+
   // Fecha modais ao clicar fora
   document.querySelectorAll('.modal-overlay').forEach(el => {
     el.addEventListener('click', (e) => { if (e.target === el) el.style.display = 'none'; });
@@ -8979,7 +9283,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const temSessao = await checkSession();
 
   if (temSessao) {
-    // Já logado: sincroniza e abre o app
+    // Já logado: aceita convite pendente, resolve owner, sincroniza
+    await _acceptInviteIfPending();
+    await resolveDataOwner();
     await cloudPull();
     initLeadsRealtime();
     syncLeadsFromSupabase();

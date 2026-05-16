@@ -1753,6 +1753,20 @@
         </div>
       </div>
 
+      <!-- Equipe (Multi-usuário) -->
+      <div class="chart-card" id="equipe-card" style="margin-bottom:20px;">
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;">
+          <div style="font-size:30px;line-height:1;">👥</div>
+          <div style="flex:1;">
+            <div style="font-size:15px;font-weight:700;color:#0f172a;">Equipe</div>
+            <div style="font-size:12.5px;color:#64748b;margin-top:3px;" id="equipe-subtitle">Compartilhe o consultório com sua secretária</div>
+          </div>
+          <button onclick="openModalConvite()" id="btn-novo-convite" class="btn-primary">+ Convidar membro</button>
+        </div>
+        <div id="equipe-membros"></div>
+        <div id="equipe-convites"></div>
+      </div>
+
       <!-- Instalar como App (PWA) -->
       <div class="chart-card" style="margin-bottom:20px;">
         <div style="display:flex;align-items:center;gap:14px;">
@@ -2809,6 +2823,57 @@
         Ao criar uma conta você concorda em usar seus próprios dados.<br>
         Cada conta tem dados totalmente isolados das demais.
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL CONVIDAR MEMBRO ===== -->
+<div id="modal-convite" class="modal-overlay" style="display:none;">
+  <div class="modal" style="width:480px;max-width:96vw;">
+    <div style="padding:22px 24px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <div style="font-size:16px;font-weight:700;color:#0f172a;">👥 Convidar membro</div>
+        <div style="font-size:12px;color:#64748b;margin-top:2px;">Compartilhe os dados do consultório com outra pessoa</div>
+      </div>
+      <button onclick="closeModal('modal-convite');document.getElementById('convite-link-wrap').style.display='none';document.getElementById('convite-form-wrap').style.display='';"
+        style="background:none;border:none;cursor:pointer;font-size:22px;color:#94a3b8;line-height:1;">×</button>
+    </div>
+
+    <!-- Formulário -->
+    <div id="convite-form-wrap" style="padding:20px 24px 24px;">
+      <div style="margin-bottom:14px;">
+        <label>E-mail do convidado</label>
+        <input type="email" id="convite-email" class="input" placeholder="secretaria@consultorio.com" />
+      </div>
+      <div style="margin-bottom:18px;">
+        <label>Função na equipe</label>
+        <select id="convite-role" class="select">
+          <option value="secretaria">Secretária — sem financeiro</option>
+          <option value="medico">Médico(a) — acesso completo</option>
+        </select>
+      </div>
+      <div style="padding:12px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:12px;color:#1d4ed8;margin-bottom:16px;line-height:1.6;">
+        💡 Vamos gerar um link de convite. Você copia e envia pra pessoa por WhatsApp, email ou onde preferir. O link vale por 7 dias.
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button onclick="gerarConvite()" class="btn-primary" style="flex:1;justify-content:center;">Gerar link</button>
+        <button onclick="closeModal('modal-convite')" class="btn-ghost">Cancelar</button>
+      </div>
+    </div>
+
+    <!-- Link gerado -->
+    <div id="convite-link-wrap" style="display:none;padding:20px 24px 24px;">
+      <div style="padding:16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;text-align:center;margin-bottom:14px;">
+        <div style="font-size:24px;margin-bottom:6px;">🔗</div>
+        <div style="font-size:13px;font-weight:700;color:#0f172a;">Link gerado!</div>
+        <div style="font-size:11.5px;color:#64748b;margin-top:3px;">Envie para a pessoa convidada</div>
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-family:monospace;font-size:11px;color:#334155;word-break:break-all;margin-bottom:14px;" id="convite-link-text"></div>
+      <div style="display:flex;gap:10px;">
+        <button onclick="_copyLinkConvite(document.getElementById('convite-link-text').textContent)" class="btn-primary" style="flex:1;justify-content:center;">📋 Copiar link</button>
+        <button id="btn-convite-wa" class="btn-ghost">💬 WhatsApp</button>
+      </div>
+      <button onclick="closeModal('modal-convite');document.getElementById('convite-link-wrap').style.display='none';document.getElementById('convite-form-wrap').style.display='';renderEquipeCard();" class="btn-ghost" style="margin-top:10px;width:100%;justify-content:center;">Concluir</button>
     </div>
   </div>
 </div>
