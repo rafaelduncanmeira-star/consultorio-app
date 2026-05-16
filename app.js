@@ -297,6 +297,7 @@ function _iniciarApp() {
   applyClinicaConfig();
   renderDashboard();
   saudacaoDiaria();
+  setTimeout(() => checkAchievements(), 1000); // verifica conquistas após render
   // Sincroniza UI mobile com página inicial
   _mobSync('dashboard');
   // Mostra modal de boas-vindas se for primeiro acesso
@@ -322,6 +323,9 @@ function _atualizarSidebar() {
   const headerEsp  = document.getElementById('sidebar-header-esp');
   if (headerNome) headerNome.textContent = nomeFormatado;
   if (headerEsp)  headerEsp.textContent  = eMedico ? 'Geriatria' : 'Secretária';
+
+  // Nível de maestria
+  _atualizarSidebarMaestria();
 }
 
 // Páginas restritas à secretária
@@ -937,6 +941,7 @@ function inscreverEmPrograma(programaId, pacienteRef, dataInicio, horaPadrao = '
   const inscricoes = DB.get('inscricoes');
   inscricoes.push(inscricao);
   DB.set('inscricoes', inscricoes);
+  setTimeout(() => checkAchievements(), 300);
   return inscricao;
 }
 
@@ -2790,6 +2795,7 @@ function savePaciente(e) {
   }
   closeModal('modal-paciente');
   renderPacientes();
+  setTimeout(() => checkAchievements(), 300);
 }
 
 // Toast simples (notificação flutuante)
@@ -6130,6 +6136,7 @@ function saveMetas(e) {
   renderMetas();
   renderMetasProc();
   toast('✅ Metas salvas!');
+  checkAchievements();
 }
 
 function renderMetas() {
@@ -7318,6 +7325,166 @@ function getZapiConfig() {
   return DB.getObj('zapi_config', { enabled: false, instanceId: '', token: '' });
 }
 
+// ====================== 🎼 SISTEMA DE MAESTRIA (GAMIFICAÇÃO) ======================
+
+const ACHIEVEMENTS = [
+  { id: 'primeiro_compasso',   icon: '🎵', nome: 'Primeiro Compasso',    desc: 'Cadastrou o primeiro paciente' },
+  { id: 'ritmo_financeiro',    icon: '📊', nome: 'Ritmo Financeiro',     desc: 'Definiu uma meta de faturamento' },
+  { id: 'harmonia_digital',    icon: '💬', nome: 'Harmonia Digital',     desc: 'Conectou o WhatsApp via Z-API' },
+  { id: 'melodia_recorrente',  icon: '🔁', nome: 'Melodia Recorrente',   desc: 'Inscreveu o primeiro paciente em um programa' },
+  { id: 'batuta_de_ouro',      icon: '🎯', nome: 'Batuta de Ouro',       desc: 'Atingiu 100% da meta de faturamento em um mês' },
+  { id: 'turne_domiciliar',    icon: '🏠', nome: 'Tournée Domiciliar',   desc: 'Registrou 5 visitas domiciliares' },
+  { id: 'orquestra_completa',  icon: '⭐', nome: 'Orquestra Completa',   desc: 'Usou todas as 8 seções do sistema' },
+  { id: 'fidelidade_de_palco', icon: '💎', nome: 'Fidelidade de Palco',  desc: '6 meses diferentes com faturamento' },
+  { id: 'compositor',          icon: '🎼', nome: 'Compositor',            desc: 'Criou um template de programa próprio' },
+  { id: 'estreia_estelar',     icon: '🚀', nome: 'Estreia Estelar',      desc: 'Primeiro mês com MRR acima de R$ 1.000' },
+];
+
+const NIVEIS = [
+  { nivel: 1, titulo: 'Aprendiz',    icone: '🎵', min: 0  },
+  { nivel: 2, titulo: 'Músico',      icone: '🎸', min: 1  },
+  { nivel: 3, titulo: 'Solista',     icone: '🎻', min: 3  },
+  { nivel: 4, titulo: 'Concertista', icone: '🎹', min: 5  },
+  { nivel: 5, titulo: 'Sinfônico',   icone: '🎺', min: 7  },
+  { nivel: 6, titulo: 'Regente',     icone: '🎼', min: 9  },
+  { nivel: 7, titulo: 'Maestro',     icone: '🏆', min: 10 },
+];
+
+function getMaestriaData() {
+  return DB.getObj('maestria', { desbloqueados: [] });
+}
+
+function getNivelAtual(qtdDesbloqueados) {
+  let nivel = NIVEIS[0];
+  for (const n of NIVEIS) { if (qtdDesbloqueados >= n.min) nivel = n; else break; }
+  return nivel;
+}
+
+function getProximoNivel(nivelAtual) {
+  return NIVEIS.find(n => n.nivel === nivelAtual.nivel + 1) || null;
+}
+
+// Verifica e desbloqueia conquistas automaticamente
+function checkAchievements() {
+  const data    = getMaestriaData();
+  const already = new Set(data.desbloqueados.map(d => d.id));
+  const novos   = [];
+
+  function unlock(id) {
+    if (already.has(id)) return;
+    const ach = ACHIEVEMENTS.find(a => a.id === id);
+    if (!ach) return;
+    already.add(id);
+    data.desbloqueados.push({ id, ts: new Date().toISOString() });
+    novos.push(ach);
+  }
+
+  // 🎵 Primeiro Compasso
+  if (DB.get('pacientes').length >= 1) unlock('primeiro_compasso');
+
+  // 📊 Ritmo Financeiro
+  const metas = DB.getObj('metas', {});
+  if ((metas.fat || 0) > 0) unlock('ritmo_financeiro');
+
+  // 💬 Harmonia Digital
+  const zapiCfg = getZapiConfig();
+  if (zapiCfg.enabled && zapiCfg.instanceId && zapiCfg.token) unlock('harmonia_digital');
+
+  // 🔁 Melodia Recorrente
+  if (getInscricoes().length >= 1) unlock('melodia_recorrente');
+
+  // 🎯 Batuta de Ouro — algum mês com faturamento >= meta
+  if ((metas.fat || 0) > 0) {
+    const allPacs = DB.get('pacientes');
+    const mesesComMeta = {};
+    allPacs.forEach(p => {
+      const m = getMes(p.data);
+      mesesComMeta[m] = (mesesComMeta[m] || 0) + (p.valor || 0);
+    });
+    if (Object.values(mesesComMeta).some(fat => fat >= metas.fat)) unlock('batuta_de_ouro');
+  }
+
+  // 🏠 Tournée Domiciliar — 5+ domiciliares
+  const domiciliares = DB.get('pacientes').filter(p => (p.tipo || '') === 'Domiciliar').length;
+  if (domiciliares >= 5) unlock('turne_domiciliar');
+
+  // ⭐ Orquestra Completa — dados em todas as seções
+  const temAgenda   = DB.get('agendamentos').length > 0;
+  const temCrm      = DB.get('crm').length > 0;
+  const temDespesas = DB.get('despesas').length > 0;
+  const temFollowup = DB.get('followup').length > 0;
+  const temProg     = getInscricoes().length > 0;
+  const temPacs     = DB.get('pacientes').length > 0;
+  if (temAgenda && temCrm && temDespesas && temFollowup && temProg && temPacs) unlock('orquestra_completa');
+
+  // 💎 Fidelidade de Palco — 6 meses com faturamento
+  const mesesFat = new Set(DB.get('pacientes').filter(p => p.valor > 0).map(p => getMes(p.data)));
+  if (mesesFat.size >= 6) unlock('fidelidade_de_palco');
+
+  // 🎼 Compositor — criou template próprio (não é dos seeds originais)
+  const seedIds = ['pg_compagni','pg_attento_semestral','pg_attento_anual','pg_confidenza',
+    'pg_confidenza_mensal','pg_mentore','pg_posop','pg_hipertensao','pg_diabetes','pg_avc'];
+  const progProprios = getProgramas().filter(p => !seedIds.includes(p.id));
+  if (progProprios.length >= 1) unlock('compositor');
+
+  // 🚀 Estreia Estelar — MRR > R$ 1.000
+  const inscAtivas = getInscricoes().filter(i => i.status === 'Ativo');
+  let mrrTotal = 0;
+  inscAtivas.forEach(i => {
+    const prog = getProgramas().find(p => p.id === i.programaId);
+    mrrTotal += _mrrDeInscricao(i, prog);
+  });
+  if (mrrTotal >= 1000) unlock('estreia_estelar');
+
+  // Persiste e notifica
+  if (novos.length) {
+    DB.setObj('maestria', data);
+    _atualizarSidebarMaestria();
+    // Exibe toast das novas conquistas (uma por vez, com delay)
+    novos.forEach((ach, i) => {
+      setTimeout(() => _toastConquista(ach), i * 2200);
+    });
+  }
+}
+
+function _toastConquista(ach) {
+  const el = document.createElement('div');
+  el.style.cssText = `position:fixed;bottom:80px;right:24px;z-index:9999;background:#0f172a;color:#fff;
+    border-radius:12px;padding:14px 18px;display:flex;align-items:center;gap:12px;
+    box-shadow:0 8px 30px rgba(0,0,0,0.25);max-width:320px;animation:slideInRight 0.4s ease;`;
+  el.innerHTML = `
+    <span style="font-size:28px;line-height:1;">${ach.icon}</span>
+    <div>
+      <div style="font-size:10px;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:2px;">🎼 Conquista desbloqueada!</div>
+      <div style="font-size:13.5px;font-weight:700;">${_esc(ach.nome)}</div>
+      <div style="font-size:11.5px;color:#94a3b8;margin-top:1px;">${_esc(ach.desc)}</div>
+    </div>`;
+  document.body.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.5s'; setTimeout(() => el.remove(), 600); }, 3500);
+}
+
+function _atualizarSidebarMaestria() {
+  const data = getMaestriaData();
+  const qtd  = data.desbloqueados.length;
+  const nivel = getNivelAtual(qtd);
+  const prox  = getProximoNivel(nivel);
+
+  const el = document.getElementById('sidebar-maestria');
+  if (!el) return;
+
+  const pctBar = prox ? Math.round(((qtd - nivel.min) / (prox.min - nivel.min)) * 100) : 100;
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+      <span style="font-size:10px;font-weight:700;color:#475569;letter-spacing:0.04em;">
+        ${nivel.icone} ${nivel.titulo.toUpperCase()}
+      </span>
+      <span style="font-size:9.5px;color:#3d4454;">${qtd}/${ACHIEVEMENTS.length}</span>
+    </div>
+    <div style="height:3px;background:#1e293b;border-radius:999px;overflow:hidden;">
+      <div style="height:100%;width:${pctBar}%;background:linear-gradient(90deg,#10b981,#34d399);border-radius:999px;transition:width 0.6s ease;"></div>
+    </div>`;
+}
+
 // ====================== CONFIGURAÇÕES DO CONSULTÓRIO ======================
 function getClinicaConfig() {
   return DB.getObj('clinica_config', {
@@ -7396,6 +7563,65 @@ function renderConfiguracoes() {
   // Popula user_id do usuário logado no tutorial
   const uEl = document.getElementById('config-user-id');
   if (uEl && currentUser) uEl.textContent = currentUser.id;
+
+  // Galeria de conquistas
+  renderConquistas();
+}
+
+function renderConquistas() {
+  const data  = getMaestriaData();
+  const desbSet = new Set(data.desbloqueados.map(d => d.id));
+  const qtd   = desbSet.size;
+  const total = ACHIEVEMENTS.length;
+  const nivel = getNivelAtual(qtd);
+  const prox  = getProximoNivel(nivel);
+
+  // Badge nível
+  const badge = document.getElementById('maestria-nivel-badge');
+  if (badge) badge.textContent = `${nivel.icone} ${nivel.titulo}`;
+
+  // Barra geral
+  const pct = Math.round((qtd / total) * 100);
+  const bar = document.getElementById('maestria-bar');
+  const lbl = document.getElementById('maestria-progresso-label');
+  const pctEl= document.getElementById('maestria-pct');
+  if (bar)   bar.style.width = pct + '%';
+  if (lbl)   lbl.textContent = `${qtd} de ${total} conquistas desbloqueadas`;
+  if (pctEl) pctEl.textContent = pct + '%';
+
+  // Grade de badges
+  const grid = document.getElementById('conquistas-grid');
+  if (!grid) return;
+  grid.innerHTML = ACHIEVEMENTS.map(ach => {
+    const desbloqueado = desbSet.has(ach.id);
+    const ts = data.desbloqueados.find(d => d.id === ach.id)?.ts;
+    const dataLabel = ts ? new Date(ts).toLocaleDateString('pt-BR') : '';
+    return `
+    <div title="${_esc(ach.desc)}${dataLabel ? ' · ' + dataLabel : ''}"
+      style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;
+        background:${desbloqueado ? '#f0fdf4' : '#f8fafc'};
+        border:1.5px solid ${desbloqueado ? '#bbf7d0' : '#e2e8f0'};
+        border-radius:10px;text-align:center;transition:all 0.2s;cursor:default;
+        ${desbloqueado ? '' : 'opacity:0.45;filter:grayscale(1);'}">
+      <span style="font-size:28px;line-height:1;">${ach.icon}</span>
+      <div style="font-size:10.5px;font-weight:700;color:${desbloqueado ? '#065f46' : '#94a3b8'};line-height:1.2;">${_esc(ach.nome)}</div>
+      ${desbloqueado && dataLabel ? `<div style="font-size:9.5px;color:#94a3b8;">${dataLabel}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  // Próximo nível
+  if (prox) {
+    const faltam = prox.min - qtd;
+    grid.insertAdjacentHTML('afterend', `
+      <div style="margin-top:14px;padding:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:12px;color:#1d4ed8;text-align:center;">
+        ${prox.icone} Faltam <strong>${faltam} conquista${faltam !== 1 ? 's' : ''}</strong> para chegar ao nível <strong>${prox.titulo}</strong>
+      </div>`);
+  } else {
+    grid.insertAdjacentHTML('afterend', `
+      <div style="margin-top:14px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;font-size:12px;color:#166534;text-align:center;">
+        🏆 Parabéns! Você atingiu o nível máximo — <strong>Maestro</strong>!
+      </div>`);
+  }
 }
 
 // Copia o user_id pro clipboard (útil pro Make)
@@ -7443,6 +7669,7 @@ function saveZapiConfig() {
   if (statusEl) { statusEl.textContent = '✅ Salvo!'; statusEl.style.color = '#10b981'; }
   _applyZapiUI(cfg.enabled, true);
   setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000);
+  checkAchievements();
 }
 
 async function testZapiConnection() {
