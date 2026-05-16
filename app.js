@@ -4963,6 +4963,69 @@ function renderDashboardMRR(mes) {
   if (vencCard) {
     vencCard.style.borderLeftColor = subsVencendo === 0 ? '#10b981' : subsVencendo <= 2 ? '#f59e0b' : '#ef4444';
   }
+
+  // Banner detalhado de renovações próximas
+  renderRenovacoesBanner(ativasAssinatura, today);
+}
+
+// Banner do Dashboard com lista das próximas renovações + botões de ação
+function renderRenovacoesBanner(ativasAssinatura, today) {
+  const banner = document.getElementById('dash-renovacoes-banner');
+  if (!banner) return;
+
+  // Filtra vencendo até 30 dias + ordena por proximidade
+  const em30 = _addDaysIso(today, 30);
+  const lista = ativasAssinatura
+    .filter(x => x.venc && x.venc <= em30)
+    .map(x => ({ ...x, diasRestantes: Math.ceil((new Date(x.venc) - new Date(today)) / 86400000) }))
+    .sort((a, b) => a.diasRestantes - b.diasRestantes);
+
+  if (!lista.length) {
+    banner.style.display = 'none';
+    banner.innerHTML = '';
+    return;
+  }
+
+  // Cor do banner baseada na mais crítica
+  const minDias = lista[0].diasRestantes;
+  const corBorda = minDias <= 7 ? '#ef4444' : minDias <= 15 ? '#f59e0b' : '#3b82f6';
+  const corBg    = minDias <= 7 ? '#fef2f2' : minDias <= 15 ? '#fffbeb' : '#eff6ff';
+  const icone    = minDias <= 7 ? '🚨' : minDias <= 15 ? '⚠️' : '🔔';
+  const titulo   = minDias <= 7 ? 'Renovações urgentes' : minDias <= 15 ? 'Renovações próximas' : 'Atenção: renovações em até 30 dias';
+
+  banner.style.display = '';
+  banner.innerHTML = `
+    <div style="background:${corBg};border:1px solid ${corBorda}40;border-left:4px solid ${corBorda};border-radius:10px;padding:16px 18px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <span style="font-size:18px;">${icone}</span>
+        <div style="flex:1;">
+          <div style="font-size:14px;font-weight:700;color:#0f172a;">${titulo} <span style="background:#fff;color:${corBorda};font-size:11px;padding:1px 8px;border-radius:999px;font-weight:700;margin-left:4px;">${lista.length}</span></div>
+          <div style="font-size:11.5px;color:#64748b;margin-top:1px;">Assinaturas vencendo nos próximos 30 dias — entre em contato e renove a tempo</div>
+        </div>
+        <button onclick="this.parentNode.parentNode.style.display='none';document.getElementById('dash-renovacoes-banner').style.display='none';" title="Fechar"
+          style="background:none;border:none;color:#94a3b8;font-size:18px;cursor:pointer;padding:0 6px;">×</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto;">
+        ${lista.map(({ ins, prog, diasRestantes, venc }) => {
+          const ehUrgente   = diasRestantes <= 7;
+          const corDias     = diasRestantes <= 0 ? '#dc2626' : diasRestantes <= 7 ? '#ef4444' : diasRestantes <= 15 ? '#f59e0b' : '#3b82f6';
+          const labelDias   = diasRestantes <= 0 ? `Vencido há ${Math.abs(diasRestantes)}d` : diasRestantes === 1 ? 'Vence amanhã' : `${diasRestantes} dias`;
+          const waLink      = ins.pacienteWhatsapp ? `https://wa.me/55${(ins.pacienteWhatsapp || '').replace(/\D/g, '')}?text=${encodeURIComponent('Olá ' + ins.pacienteNome.split(' ')[0] + '! Seu programa ' + prog.nome + ' vence em ' + formatDate(venc) + '. Gostaria de renovar?')}` : '';
+          return `
+            <div style="display:flex;align-items:center;gap:12px;padding:9px 12px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;">
+              <div style="flex:1;min-width:0;">
+                <div style="font-size:13px;font-weight:600;color:#0f172a;">${_esc(ins.pacienteNome)}</div>
+                <div style="font-size:11.5px;color:#64748b;margin-top:1px;">${_esc(prog.nome)} · Vence em ${formatDate(venc)}</div>
+              </div>
+              <span style="background:${corDias}15;color:${corDias};font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;">${labelDias}</span>
+              ${waLink ? `<a href="${waLink}" target="_blank" rel="noopener" title="Avisar pelo WhatsApp"
+                style="background:#25d36615;color:#075e54;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:4px;">💬 Avisar</a>` : ''}
+              <button onclick="renovarInscricao('${ins.id}')"
+                style="background:${ehUrgente ? '#dc2626' : '#7c3aed'};color:#fff;border:none;border-radius:6px;padding:5px 11px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;">🔄 Renovar</button>
+            </div>`;
+        }).join('')}
+      </div>
+    </div>`;
 }
 
 function renderDashboard(mes) {
