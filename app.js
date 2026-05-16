@@ -452,55 +452,141 @@ function getProcedimentos() {
 //                          obs }]
 // Helper: converte vigência de Assinatura em dias
 function _vigenciaDias(vigencia) {
-  if (vigencia === 'Mensal')    return 30;
-  if (vigencia === 'Semestral') return 180;
-  if (vigencia === 'Anual')     return 365;
+  if (vigencia === 'Mensal')     return 30;
+  if (vigencia === 'Trimestral') return 90;
+  if (vigencia === 'Semestral')  return 180;
+  if (vigencia === 'Anual')      return 365;
   return 365;
 }
 
 function getProgramas() {
   let arr = DB.get('programas');
-  if (!arr.length && !localStorage.getItem('consult_progs_seeded')) {
+  if (!arr.length && !localStorage.getItem('consult_progs_seeded_v2')) {
     arr = [
       {
         id: 'pg_compagni',
         nome: 'Programa Compagni',
         tipo: 'Assinatura',
-        descricao: 'Concierge medicine — cuidado longitudinal ilimitado',
+        descricao: 'Concierge medicine anual — cuidado longitudinal com consultas ilimitadas e prioridade total',
         vigencia: 'Anual',
         beneficios: [
           'Consultas presenciais ilimitadas',
           'Telemedicina ilimitada',
-          'Prioridade na agenda',
-          'Emissão de receitas e laudos',
+          'Prioridade na agenda (acesso em até 24h)',
+          'Emissão de receitas, laudos e pedidos de exames',
+          'Renovação e revisão de prescrições crônicas',
+          'Pequenos procedimentos inclusos',
+          'Encaminhamentos e segunda opinião',
         ],
         precoAVista: 6480,
-        descontoAVista: 10,
+        descontoAVista: 0,
         parcelas: [{ n: 6, valor: 1200 }],
         consultaAvulsa: 1500,
-        politicas: 'Cancelamento com mínimo 24h de antecedência. Após 5 atendimentos, sem devolução.',
+        politicas: 'Cancelamento com mínimo 24h de antecedência. Após 5 atendimentos realizados, não há devolução do valor. O plano não pode ser pausado.',
         ativo: true,
       },
       {
-        id: 'pg_attento',
-        nome: 'Programa Attento',
+        id: 'pg_attento_semestral',
+        nome: 'Programa Attento Semestral',
         tipo: 'Assinatura',
-        descricao: 'Cuidado domiciliar para pacientes frágeis — visitas + telemedicina ilimitada',
+        descricao: 'Cuidado domiciliar para pacientes frágeis — 6 meses com visitas + telemedicina ilimitada',
+        vigencia: 'Semestral',
+        beneficios: [
+          'Monitoramento online multiprofissional',
+          'Telemedicina ilimitada',
+          '2 visitas domiciliares inclusas',
+          'Emissão de receitas, laudos e pedidos de exames',
+          'Consultas e visitas extras com 50% de desconto',
+          'Suporte e orientação a cuidadores',
+        ],
+        precoAVista: 5292,
+        descontoAVista: 0,
+        parcelas: [{ n: 6, valor: 980 }],
+        consultaAvulsa: 750,
+        politicas: 'Consulta extra domiciliar: R$1.500 / consultório: R$750. Cancelamento com aviso prévio por escrito.',
+        ativo: true,
+      },
+      {
+        id: 'pg_attento_anual',
+        nome: 'Programa Attento Anual',
+        tipo: 'Assinatura',
+        descricao: 'Cuidado domiciliar para pacientes frágeis — 12 meses com visitas + telemedicina ilimitada',
         vigencia: 'Anual',
         beneficios: [
-          'Visitas domiciliares ilimitadas',
+          'Monitoramento online multiprofissional',
           'Telemedicina ilimitada',
-          'Gestão integrada de saúde',
-          'Suporte a cuidadores',
+          '4 visitas domiciliares inclusas',
+          'Emissão de receitas, laudos e pedidos de exames',
+          'Consultas e visitas extras com 50% de desconto',
+          'Suporte e orientação a cuidadores',
         ],
         precoAVista: 8820,
-        descontoAVista: 10,
-        parcelas: [
-          { n: 10, valor: 980 },
-          { n: 6,  valor: 980 },
+        descontoAVista: 0,
+        parcelas: [{ n: 10, valor: 980 }],
+        consultaAvulsa: 750,
+        politicas: 'Consulta extra domiciliar: R$1.500 / consultório: R$750. Cancelamento com aviso prévio por escrito.',
+        ativo: true,
+      },
+      {
+        id: 'pg_confidenza',
+        nome: 'Programa Confidenza Semestral',
+        tipo: 'Assinatura',
+        descricao: 'Acompanhamento semestral híbrido com consultas presenciais e online',
+        vigencia: 'Semestral',
+        beneficios: [
+          '2 consultas online inclusas',
+          '2 consultas presenciais inclusas',
+          'Monitoramento via WhatsApp entre consultas',
+          'Plano de cuidados individualizado',
+          'Encaminhamentos inclusos',
         ],
+        precoAVista: 2600,
+        descontoAVista: 0,
+        parcelas: [{ n: 6, valor: 477.18 }],
+        consultaAvulsa: 1000,
+        politicas: 'Cancelamento com 24h de antecedência. As consultas devem ser utilizadas em até 1 ano após a contratação. Consultas adicionais: R$1.000.',
+        ativo: true,
+      },
+      {
+        id: 'pg_confidenza_mensal',
+        nome: 'Programa Confidenza Mensal',
+        tipo: 'Assinatura',
+        descricao: 'Assinatura mensal com acesso direto ao médico e consultas online ilimitadas',
+        vigencia: 'Mensal',
+        beneficios: [
+          'Contato direto com o médico (sem intermediários)',
+          'Consultas online ilimitadas',
+          'Consultas presenciais e domiciliares com 50% de desconto',
+          'Prioridade no agendamento',
+          'Acompanhamento contínuo personalizado',
+        ],
+        precoAVista: 600,
+        descontoAVista: 0,
+        parcelas: [],
+        consultaAvulsa: null,
+        politicas: 'Renovação automática. Para cancelamento, solicitar com até 1 dia útil de antecedência ao término da vigência.',
+        ativo: true,
+      },
+      {
+        id: 'pg_mentore',
+        nome: 'Programa Mentore',
+        tipo: 'Assinatura',
+        descricao: 'Programa intensivo trimestral de 12 semanas com avaliação clínica completa e acompanhamento semanal',
+        vigencia: 'Trimestral',
+        beneficios: [
+          '12 semanas de acompanhamento intensivo',
+          '7 consultas presenciais ou online',
+          'Dossiê de saúde personalizado',
+          'Monitoramento semanal via WhatsApp',
+          'Suporte pelo número particular do médico',
+          'Avaliação clínica completa (estilo de vida, neuropsicológica, laboratorial e medicamentosa)',
+          'Plano de cuidados detalhado',
+        ],
+        precoAVista: 6480,
+        descontoAVista: 0,
+        parcelas: [{ n: 6, valor: 1200 }],
         consultaAvulsa: 1500,
-        politicas: 'Semestral: 6x R$980 ou R$5.292 à vista. Anual: 10x R$980 ou R$8.820 à vista. Consulta extra domicílio: R$1.500 / consultório: R$750.',
+        politicas: 'Após 5 semanas de programa, não há devolução do valor. Cancelamento por escrito. Possibilidade de pausar por até 3 meses (por motivo de saúde ou viagem).',
         ativo: true,
       },
       {
@@ -570,7 +656,7 @@ function getProgramas() {
       },
     ];
     DB.set('programas', arr);
-    localStorage.setItem('consult_progs_seeded', '1');
+    localStorage.setItem('consult_progs_seeded_v2', '1');
   }
   return arr;
 }
