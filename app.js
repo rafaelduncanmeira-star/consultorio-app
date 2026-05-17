@@ -29,20 +29,35 @@ window.loadDemoData = async function loadDemoData() {
   }
 };
 
-// ====================== DARK MODE ======================
+// ====================== DARK MODE / TEMA ======================
 function applyDarkMode(dark) {
   document.body.classList.toggle('dark', !!dark);
-  const icon = document.getElementById('dark-toggle-icon');
-  if (icon) icon.textContent = dark ? '☀️' : '🌙';
   // Atualiza theme-color meta pra status bar mobile
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = dark ? '#0d1117' : '#10b981';
+  // Atualiza estado dos botões no card de Configurações (se aberto)
+  _atualizarBotoesTema(dark);
 }
 
-function toggleDarkMode() {
-  const isDark = !document.body.classList.contains('dark');
-  applyDarkMode(isDark);
-  localStorage.setItem('consult_dark_mode', isDark ? '1' : '0');
+function setTema(tema) {
+  const dark = tema === 'escuro';
+  applyDarkMode(dark);
+  localStorage.setItem('consult_dark_mode', dark ? '1' : '0');
+}
+
+function _atualizarBotoesTema(dark) {
+  const claro = document.getElementById('tema-claro-btn');
+  const escuro = document.getElementById('tema-escuro-btn');
+  if (!claro || !escuro) return;
+  if (dark) {
+    escuro.style.background = '#0f172a'; escuro.style.color = '#fff';
+    claro.style.background = 'transparent'; claro.style.color = '';
+  } else {
+    claro.style.background = '#fff'; claro.style.color = '#0f172a';
+    claro.style.boxShadow = '0 1px 2px rgba(0,0,0,0.06)';
+    escuro.style.background = 'transparent'; escuro.style.color = '';
+    escuro.style.boxShadow = 'none';
+  }
 }
 
 // Aplica preferência salva no carregamento — antes do app inicializar
@@ -8757,6 +8772,9 @@ function renderConfiguracoes() {
 
   // Lembretes WhatsApp
   renderLembretesCard();
+
+  // Sincroniza estado dos botões de tema com a preferência atual
+  _atualizarBotoesTema(document.body.classList.contains('dark'));
 }
 
 // ====================== UI: 2FA ======================

@@ -625,8 +625,8 @@
     <!-- Logo -->
     <div style="padding:18px 14px 10px;">
       <div style="display:flex;align-items:center;gap:10px;">
-        <div class="sidebar-logo-bg" style="width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-          <span style="font-size:13px;font-weight:700;color:#10b981;letter-spacing:-0.5px;">RD</span>
+        <div class="sidebar-logo-bg" style="width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#10b981;">
+          <i data-lucide="music" style="width:18px;height:18px;stroke-width:2.2;"></i>
         </div>
         <div>
           <div id="sidebar-header-nome" style="font-size:12.5px;font-weight:600;color:#e2e8f0;letter-spacing:-0.01em;line-height:1.25;">Dr. Rafael Duncan</div>
@@ -701,12 +701,6 @@
         <span class="icon"><i data-lucide="settings"></i></span> Configurações
       </div>
     </nav>
-
-    <!-- Toggle Dark Mode (flutuante) -->
-    <button id="dark-toggle" onclick="toggleDarkMode()" title="Alternar modo escuro/claro"
-      style="position:fixed;bottom:24px;left:24px;background:rgba(15,23,42,0.85);color:#fff;border:none;border-radius:50%;width:42px;height:42px;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);box-shadow:0 4px 12px rgba(0,0,0,0.25);z-index:998;transition:transform 0.15s;" onmouseover="this.style.transform='scale(1.08)'" onmouseout="this.style.transform='scale(1)'">
-      <span id="dark-toggle-icon" style="font-size:18px;">🌙</span>
-    </button>
 
     <!-- Botão flutuante: Instalar PWA -->
     <button id="pwa-install-btn" onclick="pwaInstall()" title="Instalar como app"
@@ -1779,6 +1773,27 @@
         <div>
           <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">Configurações</div>
           <div style="font-size:13.5px;color:#94a3b8;margin-top:4px;">Integrações e preferências do sistema</div>
+        </div>
+      </div>
+
+      <!-- Aparência (tema claro/escuro) -->
+      <div class="chart-card" style="margin-bottom:20px;">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div style="width:42px;height:42px;background:#f1f5f9;color:#475569;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;" id="tema-icon-wrap">
+            <i data-lucide="palette" style="width:22px;height:22px;"></i>
+          </div>
+          <div style="flex:1;">
+            <div style="font-size:15px;font-weight:700;color:#0f172a;">Aparência</div>
+            <div style="font-size:12.5px;color:#64748b;margin-top:2px;">Tema claro ou escuro para reduzir fadiga visual</div>
+          </div>
+          <div style="display:flex;gap:6px;background:#f1f5f9;padding:3px;border-radius:8px;">
+            <button id="tema-claro-btn" onclick="setTema('claro')" style="background:transparent;border:none;padding:6px 14px;border-radius:6px;font-size:12.5px;font-weight:600;color:#475569;cursor:pointer;transition:background 0.15s;display:flex;align-items:center;gap:6px;">
+              ☀️ Claro
+            </button>
+            <button id="tema-escuro-btn" onclick="setTema('escuro')" style="background:transparent;border:none;padding:6px 14px;border-radius:6px;font-size:12.5px;font-weight:600;color:#475569;cursor:pointer;transition:background 0.15s;display:flex;align-items:center;gap:6px;">
+              🌙 Escuro
+            </button>
+          </div>
         </div>
       </div>
 
@@ -2891,8 +2906,8 @@
   <div style="background:#fff;border:1px solid #e8eaed;border-radius:16px;padding:40px 40px 32px;width:400px;box-shadow:0 8px 40px rgba(0,0,0,0.10);">
     <!-- Logo -->
     <div style="text-align:center;margin-bottom:24px;">
-      <div style="width:48px;height:48px;background:#0f172a;border-radius:12px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;box-shadow:0 4px 12px rgba(15,23,42,0.25);">
-        <span style="color:#10b981;font-size:17px;font-weight:700;letter-spacing:-0.5px;">RD</span>
+      <div style="width:48px;height:48px;background:#0f172a;border-radius:12px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;box-shadow:0 4px 12px rgba(15,23,42,0.25);color:#10b981;">
+        <i data-lucide="music" style="width:24px;height:24px;stroke-width:2.2;"></i>
       </div>
       <div style="font-size:18px;font-weight:700;color:#0f172a;letter-spacing:-0.4px;line-height:1.2;">Sistema de Consultório</div>
       <div style="font-size:12.5px;color:#9ca3af;margin-top:4px;font-weight:400;">Gestão completa · CRM · Programas</div>
@@ -3269,8 +3284,8 @@
     <i data-lucide="menu" style="width:20px;height:20px;stroke:#9ca3af;stroke-width:2;"></i>
   </button>
   <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
-    <div class="sidebar-logo-bg" style="width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-      <span style="font-size:10px;font-weight:700;color:#10b981;letter-spacing:-0.5px;">RD</span>
+    <div class="sidebar-logo-bg" style="width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#10b981;">
+      <i data-lucide="music" style="width:14px;height:14px;stroke-width:2.2;"></i>
     </div>
     <div id="mob-page-title" style="font-size:14.5px;font-weight:600;color:#f1f5f9;letter-spacing:-0.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Dashboard</div>
   </div>
