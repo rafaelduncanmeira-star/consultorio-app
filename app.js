@@ -304,6 +304,7 @@ async function loginUser(email, password) {
     await _acceptInviteIfPending();
     // Resolve dono dos dados (própria conta ou equipe que ele é membro)
     await resolveDataOwner();
+    _auditLog('login', 'sistema', `Entrou no sistema`);
     // Sincroniza dados da nuvem
     await cloudPull();
     // Inicia Realtime para leads do WhatsApp
@@ -414,6 +415,7 @@ async function doSignup() {
 
 // Logout
 async function logoutUser() {
+  _auditLog('logout', 'sistema', `Saiu do sistema`);
   if (_supa) await _supa.auth.signOut();
   currentUser = null;
   currentRole = null;
@@ -2279,6 +2281,7 @@ function deleteRow(col, idx) {
   const renders = { crm: renderCrm, pacientes: renderPacientes, followup: renderFollowup, agenda: renderAgenda, despesas: renderDespesas };
   if (renders[col]) renders[col]();
   toast('Registro excluído.');
+  _auditLog('excluiu', col, `Excluiu ${col}: ${item.nome || item.descricao || '(sem nome)'}`);
 }
 
 function editRow(col, idx) {
@@ -3141,6 +3144,8 @@ function savePaciente(e) {
   closeModal('modal-paciente');
   renderPacientes();
   setTimeout(() => checkAchievements(), 300);
+  _auditLog(editState.idx != null ? 'editou' : 'criou', 'paciente',
+    `${editState.idx != null ? 'Editou' : 'Cadastrou'} consulta de ${item.nome} (${item.tipo}, ${BRL(item.valor)})`);
 }
 
 // Toast simples (notificação flutuante)
@@ -7955,6 +7960,75 @@ function switchPerfilTab(tab, btn) {
 // ====================== INIT ======================
 // ====================== BACKUP ======================
 
+// ====================== AUDIT LOG (HISTÓRICO DE ALTERAÇÕES) ======================
+// Registra quem fez o quê e quando no sistema. Mantém últimas 500 entradas.
+const MAX_AUDIT_ENTRIES = 500;
+
+function _auditLog(acao, entidade, descricao, detalhes) {
+  try {
+    const log = JSON.parse(localStorage.getItem('consult_audit_log') || '[]');
+    const entry = {
+      ts: new Date().toISOString(),
+      autor: (typeof currentNome !== 'undefined' && currentNome) ? currentNome : '—',
+      autorRole: (typeof currentRole !== 'undefined' && currentRole) ? currentRole : '—',
+      acao,            // 'criou' | 'editou' | 'excluiu' | 'configurou' | 'login' | 'logout'
+      entidade,        // 'paciente' | 'crm' | 'agendamento' | 'inscricao' | ...
+      descricao,       // texto humano: "Cadastrou João Silva — Consulta"
+      detalhes: detalhes || null,
+    };
+    log.unshift(entry);
+    // Mantém últimas N entradas
+    if (log.length > MAX_AUDIT_ENTRIES) log.length = MAX_AUDIT_ENTRIES;
+    localStorage.setItem('consult_audit_log', JSON.stringify(log));
+  } catch(e) { console.warn('audit log fail:', e.message); }
+}
+
+function getAuditLog() {
+  try { return JSON.parse(localStorage.getItem('consult_audit_log') || '[]'); }
+  catch { return []; }
+}
+
+function limparAuditLog() {
+  if (!confirm('Limpar todo o histórico de alterações? Esta ação não pode ser desfeita.')) return;
+  localStorage.removeItem('consult_audit_log');
+  renderAuditLog();
+  toast('Histórico de alterações limpo.');
+}
+
+function renderAuditLog() {
+  const el = document.getElementById('audit-log-list');
+  if (!el) return;
+  const log = getAuditLog();
+  if (!log.length) {
+    el.innerHTML = '<div style="text-align:center;padding:32px;color:#94a3b8;font-size:13px;">Nenhuma alteração registrada ainda.</div>';
+    return;
+  }
+  const corPorAcao = {
+    'criou':      { bg:'#d1fae5', cor:'#065f46', icon:'+' },
+    'editou':     { bg:'#dbeafe', cor:'#1d4ed8', icon:'✎' },
+    'excluiu':    { bg:'#fee2e2', cor:'#991b1b', icon:'×' },
+    'configurou': { bg:'#fef3c7', cor:'#92400e', icon:'⚙' },
+    'login':      { bg:'#f1f5f9', cor:'#475569', icon:'→' },
+    'logout':     { bg:'#f1f5f9', cor:'#475569', icon:'←' },
+  };
+  el.innerHTML = log.slice(0, 100).map(e => {
+    const c = corPorAcao[e.acao] || corPorAcao.editou;
+    const d = new Date(e.ts);
+    const hora = d.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+    const data = d.toLocaleDateString('pt-BR', { day:'2-digit', month:'short' });
+    return `
+      <div style="display:flex;gap:12px;padding:10px 14px;border-bottom:1px solid #f1f5f9;align-items:flex-start;">
+        <div style="width:28px;height:28px;background:${c.bg};color:${c.cor};border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;margin-top:1px;">${c.icon}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:12.5px;color:#0f172a;line-height:1.4;">${_esc(e.descricao)}</div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:2px;">
+            ${_esc(e.autor)} · ${e.autorRole === 'medico' ? '🩺' : '📋'} · ${data} às ${hora}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
 // ====================== 2FA (MFA TOTP) ======================
 // Usa o sistema MFA nativo do Supabase Auth (TOTP — Google Authenticator, Authy, etc.)
 
@@ -8130,6 +8204,8 @@ const BACKUP_KEYS = [
   'zapi_config',
   // Gamificação
   'maestria',
+  // Auditoria
+  'audit_log',
   // Histórico do chat (não-crítico, mas útil)
   'chat_history'
 ];
@@ -8319,6 +8395,7 @@ function saveClinicaConfig() {
   DB.setObj('clinica_config', cfg);
   applyClinicaConfig(cfg);
   toast('✅ Configurações salvas!');
+  _auditLog('configurou', 'clinica', `Atualizou configurações do consultório`);
 }
 
 function applyClinicaConfig(cfg) {
@@ -8387,6 +8464,9 @@ function renderConfiguracoes() {
 
   // Card 2FA
   render2FACard();
+
+  // Histórico de alterações
+  renderAuditLog();
 }
 
 // ====================== UI: 2FA ======================
