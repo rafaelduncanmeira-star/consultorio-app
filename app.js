@@ -3120,6 +3120,27 @@ function toggleFollowupFeito(i) {
 
 let _followupTab = 'regular'; // 'regular' | 'programa'
 
+// Tabs da seção Análise (Alertas / MaestrIA)
+function setAnaliseTab(tab) {
+  const tA = document.getElementById('analise-tab-alertas');
+  const tI = document.getElementById('analise-tab-insights');
+  const cA = document.getElementById('analise-conteudo-alertas');
+  const cI = document.getElementById('analise-conteudo-insights');
+  const btnRefresh = document.getElementById('btn-refresh-insights');
+  if (!tA || !tI) return;
+  if (tab === 'insights') {
+    tI.style.color = '#0f172a'; tI.style.borderBottomColor = '#3b82f6';
+    tA.style.color = '#94a3b8'; tA.style.borderBottomColor = 'transparent';
+    cA.style.display = 'none'; cI.style.display = '';
+    if (btnRefresh) btnRefresh.style.display = '';
+  } else {
+    tA.style.color = '#0f172a'; tA.style.borderBottomColor = '#f59e0b';
+    tI.style.color = '#94a3b8'; tI.style.borderBottomColor = 'transparent';
+    cA.style.display = ''; cI.style.display = 'none';
+    if (btnRefresh) btnRefresh.style.display = 'none';
+  }
+}
+
 function setFollowupTab(tab) {
   _followupTab = tab;
   const tR = document.getElementById('fu-tab-regular');
@@ -4447,15 +4468,19 @@ function renderInsightCards(insights, ts) {
       </div>`;
   }).join('');
 
-  // Atualiza timestamp
-  const tsEl = document.getElementById('insights-timestamp');
-  if (tsEl && ts) {
+  // Atualiza status na tab e no header
+  const statusEl = document.getElementById('analise-insights-status');
+  const tsEl = document.getElementById('analise-timestamp');
+  if (ts) {
     const d = new Date(ts);
     const agora = new Date();
     const diffH = (agora - d) / (1000 * 60 * 60);
-    if (diffH < 1) tsEl.textContent = 'Gerado há menos de 1h';
-    else if (diffH < 24) tsEl.textContent = `Gerado há ${Math.floor(diffH)}h`;
-    else tsEl.textContent = `Gerado em ${d.toLocaleDateString('pt-BR')}`;
+    let label;
+    if (diffH < 1) label = 'há <1h';
+    else if (diffH < 24) label = `há ${Math.floor(diffH)}h`;
+    else label = d.toLocaleDateString('pt-BR');
+    if (statusEl) statusEl.textContent = label;
+    if (tsEl) { tsEl.textContent = 'IA atualizada ' + label; tsEl.style.display = ''; }
   }
 }
 
@@ -5596,6 +5621,14 @@ function renderAlertasProativos({ fat, totalDesp, lucro, ocup, noshowPct, inadPc
       titulo: `Conversão CRM baixa: ${PCT(conv)}`,
       descricao: `Apenas ${atend} de ${crm.length} contatos converteram em consulta. Revise o processo de follow-up no funil.`
     });
+  }
+
+  // Atualiza contador da tab
+  const cnt = document.getElementById('analise-count-alertas');
+  if (cnt) {
+    cnt.textContent = alertas.length;
+    cnt.style.background = alertas.length === 0 ? '#d1fae5' : '#fef3c7';
+    cnt.style.color      = alertas.length === 0 ? '#065f46' : '#92400e';
   }
 
   // ── Renderiza ──
