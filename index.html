@@ -1287,19 +1287,24 @@
       </div>
 
       <!-- Funil — visualização interativa com barras + taxas de conversão entre etapas -->
-      <div class="chart-card" style="margin-bottom:24px;padding:20px 24px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-          <div>
-            <div style="font-size:14px;font-weight:700;color:var(--text-primary);">🪜 Funil de conversão</div>
-            <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">Da prospecção ao atendimento — taxas entre cada etapa</div>
+      <div class="chart-card" id="funil-card" style="margin-bottom:24px;padding:14px 24px;transition:padding 0.2s;">
+        <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;" onclick="toggleFunilCrm()">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span id="funil-chevron" style="font-size:11px;color:var(--text-muted);transition:transform 0.2s;display:inline-block;">▼</span>
+            <div>
+              <div style="font-size:14px;font-weight:700;color:var(--text-primary);">🪜 Funil de conversão</div>
+              <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;" id="funil-subtitle">Da prospecção ao atendimento — taxas entre cada etapa</div>
+            </div>
           </div>
           <div style="display:flex;gap:10px;align-items:center;">
             <span style="font-size:11px;color:var(--text-muted);">Conversão total:</span>
             <span style="background:#d1fae5;color:#065f46;padding:3px 12px;border-radius:999px;font-size:14px;font-weight:800;" id="funil-conv">0%</span>
           </div>
         </div>
-        <div id="funil-bars" style="display:flex;flex-direction:column;gap:7px;">
-          <!-- preenchido por _atualizarFunilCrm -->
+        <div id="funil-body" style="margin-top:16px;">
+          <div id="funil-bars" style="display:flex;flex-direction:column;gap:7px;">
+            <!-- preenchido por _atualizarFunilCrm -->
+          </div>
         </div>
       </div>
 

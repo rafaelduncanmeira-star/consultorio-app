@@ -2525,6 +2525,12 @@ function renderCrm() {
   // Restaura view preferida (kanban ou lista)
   const savedView = DB.getObj('crm_view', 'lista');
   setCrmView(savedView);
+
+  // Restaura preferência do funil colapsado, se o usuário escolheu manualmente
+  const userForced = localStorage.getItem('consult_funil_collapsed_userset');
+  if (userForced) {
+    aplicarFunilCollapse(localStorage.getItem('consult_funil_collapsed') === '1');
+  }
 }
 
 // ====================== CRM KANBAN ======================
@@ -2551,6 +2557,40 @@ function setCrmView(view) {
   if (tabK) tabK.classList.toggle('active', view === 'kanban');
   if (view === 'kanban') renderKanban(_crmKanbanFiltro);
   DB.setObj('crm_view', view);
+  // Sincroniza estado do funil — auto-colapsa em kanban, expande em lista
+  // (a menos que o usuário tenha forçado um estado)
+  const userForced = localStorage.getItem('consult_funil_collapsed_userset');
+  if (!userForced) {
+    aplicarFunilCollapse(view === 'kanban');
+  }
+}
+
+function toggleFunilCrm() {
+  const body = document.getElementById('funil-body');
+  if (!body) return;
+  const isCollapsed = body.style.display === 'none';
+  aplicarFunilCollapse(!isCollapsed);
+  localStorage.setItem('consult_funil_collapsed', !isCollapsed ? '1' : '0');
+  localStorage.setItem('consult_funil_collapsed_userset', '1');
+}
+
+function aplicarFunilCollapse(collapse) {
+  const body = document.getElementById('funil-body');
+  const chev = document.getElementById('funil-chevron');
+  const card = document.getElementById('funil-card');
+  const sub  = document.getElementById('funil-subtitle');
+  if (!body) return;
+  if (collapse) {
+    body.style.display = 'none';
+    if (chev) chev.style.transform = 'rotate(-90deg)';
+    if (card) card.style.padding = '14px 24px';
+    if (sub)  sub.textContent = 'Clique para expandir';
+  } else {
+    body.style.display = '';
+    if (chev) chev.style.transform = 'rotate(0deg)';
+    if (card) card.style.padding = '14px 24px';
+    if (sub)  sub.textContent = 'Da prospecção ao atendimento — taxas entre cada etapa';
+  }
 }
 
 function filterCrmAll(val) {
