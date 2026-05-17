@@ -1900,17 +1900,29 @@ function reativarInscricao(id) {
   renderProgramas();
 }
 function excluirInscricao(id) {
-  if (!confirm('Excluir esta inscrição? Os agendamentos futuros vinculados também serão removidos.')) return;
   const inscricoes = getInscricoes();
   const ins = inscricoes.find(i => i.id === id);
   if (!ins) return;
+  // Analisa o que será removido
+  const ags = DB.get('agendamentos').filter(a => a.programaInscricaoId === id && a.status !== 'Compareceu').length;
+  const fus = DB.get('followup').filter(f => f.programaInscricaoId === id && !f.feito).length;
+  const prog = getProgramas().find(p => p.id === ins.programaId);
+  const nomeProg = prog?.nome || 'programa';
+
+  // Confirmação dupla com info detalhada
+  const msg = `⚠️ Excluir inscrição de ${ins.pacienteNome} no ${nomeProg}?\n\nSerão removidos:\n  • A inscrição (status: ${ins.status})\n  • ${ags} agendamento(s) futuro(s) vinculado(s)\n  • ${fus} follow-up(s) pendente(s) vinculado(s)\n\nA receita financeira já lançada permanece.\n\nPara confirmar, digite EXCLUIR:`;
+  const resp = prompt(msg);
+  if (resp !== 'EXCLUIR') {
+    if (resp !== null) toast('Exclusão cancelada — texto não confere.', 2500);
+    return;
+  }
+
   // Remove agendamentos não realizados (status != Compareceu)
-  const ags = DB.get('agendamentos');
-  const agsLimpos = ags.filter(a => a.programaInscricaoId !== id || a.status === 'Compareceu');
+  const agsLimpos = DB.get('agendamentos').filter(a => a.programaInscricaoId !== id || a.status === 'Compareceu');
   DB.set('agendamentos', agsLimpos);
   // Remove follow-ups pendentes
-  const fus = DB.get('followup').filter(f => f.programaInscricaoId !== id || f.feito);
-  DB.set('followup', fus);
+  const fusLimpos = DB.get('followup').filter(f => f.programaInscricaoId !== id || f.feito);
+  DB.set('followup', fusLimpos);
   // Remove inscrição
   const filtradas = inscricoes.filter(i => i.id !== id);
   DB.set('inscricoes', filtradas);
@@ -2204,13 +2216,69 @@ function confirmarPagtoReal(forma) {
   if (document.getElementById('page-receita')?.classList.contains('active')) renderReceita();
 }
 
+// Detecta vínculos do registro a ser excluído
+function _detectarVinculos(col, item) {
+  const vinculos = [];
+  if (col === 'pacientes') {
+    const nome = (item.nome || '').toLowerCase().trim();
+    const wa = (item.whatsapp || '').replace(/\D/g, '');
+    // Inscrições em programa
+    const inscr = DB.get('inscricoes').filter(i =>
+      (i.pacienteNome || '').toLowerCase().trim() === nome ||
+      (wa && (i.pacienteWhatsapp || '').replace(/\D/g, '') === wa)
+    );
+    if (inscr.length) vinculos.push(`${inscr.length} inscrição(ões) em programa de assinatura`);
+    // Follow-ups
+    const fus = DB.get('followup').filter(f => (f.nome || '').toLowerCase().trim() === nome);
+    if (fus.length) vinculos.push(`${fus.length} follow-up(s) ativo(s)`);
+    // Agendamentos futuros
+    const today = new Date().toISOString().substring(0,10);
+    const ags = DB.get('agendamentos').filter(a =>
+      (a.pacienteNome || '').toLowerCase().trim() === nome &&
+      (a.data || '') >= today && a.status !== 'Compareceu' && a.status !== 'Faltou'
+    );
+    if (ags.length) vinculos.push(`${ags.length} agendamento(s) futuro(s)`);
+    // Outras consultas do mesmo paciente
+    const outras = DB.get('pacientes').filter((p, i) => i !== _vinculosIdx
+      && (p.nome || '').toLowerCase().trim() === nome).length;
+    if (outras > 0) vinculos.push(`${outras} outra(s) consulta(s) deste mesmo paciente`);
+  } else if (col === 'crm') {
+    const nome = (item.nome || '').toLowerCase().trim();
+    if (item.converted) vinculos.push('marcado como "Atendeu" — já virou paciente');
+    const pacs = DB.get('pacientes').filter(p => (p.nome || '').toLowerCase().trim() === nome);
+    if (pacs.length) vinculos.push(`${pacs.length} consulta(s) registrada(s) para este contato`);
+  }
+  return vinculos;
+}
+let _vinculosIdx = null;
+
 function deleteRow(col, idx) {
-  if (!confirm('Excluir este registro?')) return;
   const data = DB.get(col);
+  const item = data[idx];
+  if (!item) return;
+  _vinculosIdx = idx;
+  const vinculos = _detectarVinculos(col, item);
+  _vinculosIdx = null;
+
+  // Se não tem vínculos: confirmação simples
+  if (!vinculos.length) {
+    if (!confirm(`Excluir "${item.nome || item.descricao || 'este registro'}"?`)) return;
+  } else {
+    // Confirmação dupla: lista vínculos e exige escrever a palavra "EXCLUIR"
+    const lista = vinculos.map(v => '  • ' + v).join('\n');
+    const msg = `⚠️ ATENÇÃO: Este registro tem vínculos importantes!\n\n"${item.nome}" possui:\n${lista}\n\nExcluir apaga só este registro — os vínculos continuam na base mas ficarão órfãos.\n\nPara confirmar, digite EXCLUIR:`;
+    const resp = prompt(msg);
+    if (resp !== 'EXCLUIR') {
+      if (resp !== null) toast('Exclusão cancelada — texto não confere.', 2500);
+      return;
+    }
+  }
+
   data.splice(idx, 1);
   DB.set(col, data);
   const renders = { crm: renderCrm, pacientes: renderPacientes, followup: renderFollowup, agenda: renderAgenda, despesas: renderDespesas };
   if (renders[col]) renders[col]();
+  toast('Registro excluído.');
 }
 
 function editRow(col, idx) {
