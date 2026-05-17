@@ -5422,8 +5422,11 @@ function _mrrDeInscricao(ins, prog) {
 }
 
 function _vencimentoInscricao(ins, prog) {
-  if (!prog || prog.tipo !== 'Assinatura' || !ins.dataInicio) return null;
-  return _addDaysIso(ins.dataInicio, _vigenciaDias(prog.vigencia));
+  if (!prog || prog.tipo !== 'Assinatura') return null;
+  // Prioridade: dataFim explícito (atualizado na renovação) → fallback dataInicio + vigência
+  if (ins.dataFim) return ins.dataFim;
+  if (ins.dataInicio) return _addDaysIso(ins.dataInicio, _vigenciaDias(prog.vigencia));
+  return null;
 }
 
 function renderDashboardMRR(mes) {
