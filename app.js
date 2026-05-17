@@ -543,6 +543,7 @@ function _iniciarApp() {
   renderDashboard();
   saudacaoDiaria();
   setTimeout(() => checkAchievements(), 1000); // verifica conquistas após render
+  setTimeout(() => criarSnapshotDiario().then(r => r.created && console.log('🗂️ Backup automático criado:', r.data)), 3000);
   // Sincroniza UI mobile com página inicial
   _mobSync('dashboard');
   // Mostra modal de boas-vindas se for primeiro acesso
@@ -7875,6 +7876,106 @@ function switchPerfilTab(tab, btn) {
 // ====================== INIT ======================
 // ====================== BACKUP ======================
 
+// ====================== BACKUP AUTOMÁTICO DIÁRIO ======================
+// Tira um snapshot por dia no localStorage + sincroniza pro Supabase via cloudPush.
+// Mantém os últimos 7 dias. Permite restaurar qualquer dia sem perder dados.
+
+const MAX_SNAPSHOTS = 7;          // mantém 1 semana de backups
+const SNAPSHOT_PREFIX = '_snapshot_';  // chave: consult__snapshot_YYYY-MM-DD
+
+async function criarSnapshotDiario() {
+  const hoje = new Date().toISOString().substring(0, 10);
+  const chave = SNAPSHOT_PREFIX + hoje;
+
+  // Já existe snapshot de hoje? Pula.
+  if (localStorage.getItem('consult_' + chave)) return { skipped: true, reason: 'já existe snapshot de hoje' };
+
+  // Monta o snapshot
+  const snapshot = { _meta: { criadoEm: new Date().toISOString(), data: hoje, automatico: true } };
+  BACKUP_KEYS.forEach(k => {
+    const raw = localStorage.getItem('consult_' + k);
+    if (raw) snapshot[k] = JSON.parse(raw);
+  });
+
+  // Salva local + sincroniza com Supabase
+  localStorage.setItem('consult_' + chave, JSON.stringify(snapshot));
+  if (typeof cloudPush === 'function') await cloudPush(chave);
+
+  // Limpa snapshots antigos (mantém últimos N)
+  await _limparSnapshotsAntigos();
+
+  return { created: true, data: hoje, chave };
+}
+
+async function _limparSnapshotsAntigos() {
+  const datas = Object.keys(localStorage)
+    .filter(k => k.startsWith('consult_' + SNAPSHOT_PREFIX))
+    .map(k => k.substring(('consult_' + SNAPSHOT_PREFIX).length))
+    .sort()
+    .reverse();
+  const aRemover = datas.slice(MAX_SNAPSHOTS);
+  for (const data of aRemover) {
+    const k = SNAPSHOT_PREFIX + data;
+    localStorage.removeItem('consult_' + k);
+    // Remove do Supabase também
+    if (_supa && currentUser) {
+      const owner = currentDataOwner || currentUser.id;
+      try { await _supa.from('app_data').delete().eq('user_id', owner).eq('key', k); }
+      catch(e) { console.warn('erro removendo snapshot ' + data, e.message); }
+    }
+  }
+}
+
+function listarSnapshots() {
+  return Object.keys(localStorage)
+    .filter(k => k.startsWith('consult_' + SNAPSHOT_PREFIX))
+    .map(k => {
+      const data = k.substring(('consult_' + SNAPSHOT_PREFIX).length);
+      try {
+        const snap = JSON.parse(localStorage.getItem(k));
+        return {
+          data,
+          chave: k.substring('consult_'.length),
+          criadoEm: snap._meta?.criadoEm,
+          automatico: snap._meta?.automatico,
+          tamanhoKB: Math.round(localStorage.getItem(k).length / 1024),
+          pacientes: snap.pacientes?.length || 0,
+          inscricoes: snap.inscricoes?.length || 0,
+        };
+      } catch { return { data, chave: k.substring('consult_'.length), erro: true }; }
+    })
+    .sort((a, b) => b.data.localeCompare(a.data));
+}
+
+async function restaurarSnapshot(data) {
+  const chave = SNAPSHOT_PREFIX + data;
+  const raw = localStorage.getItem('consult_' + chave);
+  if (!raw) { alert('Snapshot não encontrado.'); return; }
+  const snap = JSON.parse(raw);
+  if (!confirm(`Restaurar backup de ${data}?\n\nSeus dados atuais serão substituídos. Esta ação não pode ser desfeita.`)) return;
+
+  for (const k of BACKUP_KEYS) {
+    if (snap[k] !== undefined) {
+      localStorage.setItem('consult_' + k, JSON.stringify(snap[k]));
+      if (typeof cloudPush === 'function') await cloudPush(k);
+    }
+  }
+  toast('✅ Backup de ' + data + ' restaurado! Recarregando…', 2000);
+  setTimeout(() => location.reload(), 2000);
+}
+
+async function excluirSnapshot(data) {
+  if (!confirm(`Excluir backup de ${data}? Esta ação não pode ser desfeita.`)) return;
+  const chave = SNAPSHOT_PREFIX + data;
+  localStorage.removeItem('consult_' + chave);
+  if (_supa && currentUser) {
+    const owner = currentDataOwner || currentUser.id;
+    try { await _supa.from('app_data').delete().eq('user_id', owner).eq('key', chave); } catch(e) {}
+  }
+  toast('Backup excluído.');
+  renderBackup();
+}
+
 const BACKUP_KEYS = [
   // Dados operacionais
   'pacientes','crm','despesas','followup','agendamentos','bloqueios',
@@ -8642,6 +8743,39 @@ function renderBackup() {
       <div style="font-size:26px;font-weight:800;color:#0f172a;">${it.count}</div>
       <div style="font-size:11px;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-top:2px;">${it.label}</div>
     </div>`).join('');
+
+  // Lista de snapshots automáticos
+  const snapList = document.getElementById('backup-snapshots-list');
+  if (snapList) {
+    const snapshots = listarSnapshots();
+    if (!snapshots.length) {
+      snapList.innerHTML = `<div style="text-align:center;padding:32px 16px;color:#94a3b8;font-size:13px;">
+        Ainda não há backups automáticos. Será criado automaticamente após o próximo login.
+      </div>`;
+    } else {
+      const hoje = new Date().toISOString().substring(0,10);
+      snapList.innerHTML = snapshots.map(s => {
+        const ehHoje = s.data === hoje;
+        const dataLabel = new Date(s.data + 'T12:00:00').toLocaleDateString('pt-BR', { weekday:'short', day:'2-digit', month:'short' });
+        return `
+        <div style="display:flex;align-items:center;gap:14px;padding:12px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-left:3px solid ${ehHoje ? '#10b981' : '#cbd5e1'};border-radius:8px;">
+          <div style="width:38px;height:38px;background:${ehHoje ? '#d1fae5' : '#f1f5f9'};color:${ehHoje ? '#065f46' : '#64748b'};border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <i data-lucide="archive" style="width:18px;height:18px;"></i>
+          </div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13.5px;font-weight:700;color:#0f172a;text-transform:capitalize;">${dataLabel}${ehHoje ? ' · hoje' : ''}</div>
+            <div style="font-size:11.5px;color:#64748b;margin-top:2px;">
+              ${s.pacientes} pacientes · ${s.inscricoes} inscrições · ${s.tamanhoKB} KB
+              ${s.automatico ? ' · 🤖 automático' : ''}
+            </div>
+          </div>
+          <button onclick="restaurarSnapshot('${s.data}')" class="btn-ghost" style="font-size:11.5px;padding:6px 12px;">↺ Restaurar</button>
+          <button onclick="excluirSnapshot('${s.data}')" title="Excluir backup" style="background:none;border:none;color:#cbd5e1;cursor:pointer;font-size:18px;padding:2px 8px;" onmouseover="this.style.color='#dc2626'" onmouseout="this.style.color='#cbd5e1'">×</button>
+        </div>`;
+      }).join('');
+      if (window.lucide) lucide.createIcons();
+    }
+  }
 }
 
 function exportarJSON() {

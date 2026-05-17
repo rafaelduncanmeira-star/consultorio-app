@@ -1627,6 +1627,21 @@
       <!-- Resumo de dados -->
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:28px;" id="backup-resumo"></div>
 
+      <!-- Backups automáticos -->
+      <div class="chart-card" style="margin-bottom:20px;border-left:3px solid #10b981;">
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;">
+          <div style="width:42px;height:42px;background:#d1fae5;color:#059669;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <i data-lucide="archive" style="width:22px;height:22px;"></i>
+          </div>
+          <div style="flex:1;">
+            <div style="font-size:15px;font-weight:700;color:#0f172a;">Backups automáticos</div>
+            <div style="font-size:12.5px;color:#64748b;margin-top:2px;">Snapshot diário dos seus dados — últimos 7 dias mantidos na nuvem</div>
+          </div>
+          <button onclick="criarSnapshotDiario().then(r => { toast(r.created ? '✅ Backup criado!' : '⚠️ Já existe backup de hoje'); renderBackup(); })" class="btn-ghost" style="font-size:12px;">↻ Criar agora</button>
+        </div>
+        <div id="backup-snapshots-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+      </div>
+
       <!-- Exportar -->
       <div class="chart-card" style="margin-bottom:20px;">
         <div style="font-size:15px;font-weight:700;color:#0f172a;margin-bottom:6px;">📤 Exportar</div>
