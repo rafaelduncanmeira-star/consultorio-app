@@ -4352,11 +4352,16 @@ function renderReceita() {
     }).join('');
   }
 
-  // ===== Quebra por procedimento =====
+  // ===== Quebra por procedimento (distingue programas) =====
   const procMap = {};
   pacs.forEach(p => {
-    const k = p.tipo || '(sem procedimento)';
-    if (!procMap[k]) procMap[k] = { qtd: 0, total: 0 };
+    let k;
+    if ((p.obs || '').includes('[Programa')) {
+      k = p.procedimento || 'Programa de assinatura';
+    } else {
+      k = p.tipo || p.procedimento || '(sem procedimento)';
+    }
+    if (!procMap[k]) procMap[k] = { qtd: 0, total: 0, isProg: (p.obs||'').includes('[Programa') };
     procMap[k].qtd++;
     procMap[k].total += (p.valor || 0);
   });
@@ -5950,11 +5955,17 @@ function gerarPDF(mes) {
   const atend      = crm.filter(c => c.status === 'Atendeu').length;
   const conv       = crm.length ? (atend / crm.length) * 100 : 0;
 
-  // Procedimentos
+  // Procedimentos — agora distingue atendimentos avulsos de programas de assinatura
   const procMap = {};
   pacs.forEach(p => {
-    const k = p.tipo || '(sem procedimento)';
-    if (!procMap[k]) procMap[k] = { qtd: 0, total: 0 };
+    let k;
+    if ((p.obs || '').includes('[Programa')) {
+      // Lançamento de programa: usa o nome do programa (ex: "Programa Compagni")
+      k = p.procedimento || 'Programa de assinatura';
+    } else {
+      k = p.tipo || p.procedimento || '(sem procedimento)';
+    }
+    if (!procMap[k]) procMap[k] = { qtd: 0, total: 0, isProg: (p.obs||'').includes('[Programa') };
     procMap[k].qtd++; procMap[k].total += (p.valor || 0);
   });
   const procStats = Object.entries(procMap)
@@ -6122,7 +6133,7 @@ function gerarPDF(mes) {
     <table>
       <thead><tr><th>Procedimento</th><th class="r">Qtd</th><th class="r">Receita</th><th class="r">% do mês</th><th class="r">Ticket</th></tr></thead>
       <tbody>
-        ${procStats.map(s => `<tr><td>${s.nome}</td><td class="r">${s.qtd}</td><td class="r">${brl(s.total)}</td><td class="r gray">${pct(s.pct)}</td><td class="r gray">${brl(s.ticket)}</td></tr>`).join('')}
+        ${procStats.map(s => `<tr><td>${s.isProg ? '🔁 ' : ''}${_esc(s.nome)}${s.isProg ? ' <span style="background:#eff6ff;color:#1d4ed8;font-size:9px;padding:1px 5px;border-radius:999px;font-weight:600;">assinatura</span>' : ''}</td><td class="r">${s.qtd}</td><td class="r">${brl(s.total)}</td><td class="r gray">${pct(s.pct)}</td><td class="r gray">${brl(s.ticket)}</td></tr>`).join('')}
         <tr class="total"><td>Total</td><td class="r">${pacs.length}</td><td class="r">${brl(fat)}</td><td class="r">100%</td><td class="r">${brl(ticket)}</td></tr>
       </tbody>
     </table>
@@ -6566,11 +6577,16 @@ function renderRelatorio(mes) {
     return ok ? '<span class="text-green-600">✅ Meta</span>' : '<span class="text-red-500">❌ Abaixo</span>';
   };
 
-  // ===== Quebra por procedimento =====
+  // ===== Quebra por procedimento (distingue programas) =====
   const procMap = {};
   pacs.forEach(p => {
-    const k = p.tipo || '(sem procedimento)';
-    if (!procMap[k]) procMap[k] = { qtd: 0, total: 0 };
+    let k;
+    if ((p.obs || '').includes('[Programa')) {
+      k = p.procedimento || 'Programa de assinatura';
+    } else {
+      k = p.tipo || p.procedimento || '(sem procedimento)';
+    }
+    if (!procMap[k]) procMap[k] = { qtd: 0, total: 0, isProg: (p.obs||'').includes('[Programa') };
     procMap[k].qtd++;
     procMap[k].total += (p.valor || 0);
   });
@@ -6657,16 +6673,40 @@ function renderRelatorio(mes) {
   const marcosPrevistosMes = inscricoesAll.flatMap(i => i.registros.filter(r => getMes(r.dataPrevista) === mes));
   const marcosFeitosMes    = marcosPrevistosMes.filter(r => r.dataReal && getMes(r.dataReal) === mes);
   const cumprimentoPct     = marcosPrevistosMes.length ? (marcosFeitosMes.length / marcosPrevistosMes.length) * 100 : 0;
-  // Aderência por programa
+  // Aderência por programa + receita de programas
   const progsAll = getProgramas();
+  // MRR total das assinaturas ativas
+  let mrrTotal = 0;
+  inscricoesAtivas.forEach(i => {
+    const prog = progsAll.find(p => p.id === i.programaId);
+    if (prog && prog.tipo === 'Assinatura' && typeof _mrrDeInscricao === 'function') {
+      mrrTotal += _mrrDeInscricao(i, prog);
+    }
+  });
+  // Faturamento de programas LANÇADO neste mês (receitas reais)
+  const lancamentosProgramaMes = pacs.filter(p => (p.obs || '').includes('[Programa'));
+  const faturamentoProgsBruto    = lancamentosProgramaMes.reduce((s, p) => s + (p.valor || 0), 0);
+  const faturamentoProgsRecebido = lancamentosProgramaMes.filter(p => p.statusPgto === 'Pago').reduce((s, p) => s + (p.valor || 0), 0);
+  // Novas inscrições no mês
+  const novasInscricoesMes = inscricoesAll.filter(i => getMes(i.dataInicio) === mes);
+
   const aderPorPrograma = progsAll.map(p => {
     const ins = inscricoesAll.filter(i => i.programaId === p.id);
+    const insAtivas = ins.filter(i => i.status === 'Ativo');
     const previstos = ins.flatMap(i => i.registros.filter(r => getMes(r.dataPrevista) === mes));
     const feitos    = previstos.filter(r => r.dataReal);
-    return { nome: p.nome, tipo: p.tipo, ativos: ins.filter(i=>i.status==='Ativo').length,
+    // Receita do programa lançada neste mês
+    const recMes = lancamentosProgramaMes.filter(pac => pac.procedimento === p.nome).reduce((s, pac) => s + (pac.valor || 0), 0);
+    // MRR contribuído por este programa
+    let mrrProg = 0;
+    if (p.tipo === 'Assinatura' && typeof _mrrDeInscricao === 'function') {
+      insAtivas.forEach(i => { mrrProg += _mrrDeInscricao(i, p); });
+    }
+    return { nome: p.nome, tipo: p.tipo, ativos: insAtivas.length,
              previstos: previstos.length, feitos: feitos.length,
-             pct: previstos.length ? (feitos.length/previstos.length)*100 : 0 };
-  }).filter(p => p.ativos > 0 || p.previstos > 0);
+             pct: previstos.length ? (feitos.length/previstos.length)*100 : 0,
+             recMes, mrrProg };
+  }).filter(p => p.ativos > 0 || p.previstos > 0 || p.recMes > 0);
 
   document.getElementById('relatorio-content').innerHTML = `
     <div class="chart-card">
@@ -6704,7 +6744,7 @@ function renderRelatorio(mes) {
         <tbody>
           ${procStats.map(s => `
             <tr class="border-b border-gray-50">
-              <td class="py-2 text-gray-700">${s.nome}</td>
+              <td class="py-2 text-gray-700">${s.isProg ? '🔁 ' : ''}${_esc(s.nome)}${s.isProg ? ' <span style="background:#eff6ff;color:#1d4ed8;font-size:10px;padding:1px 6px;border-radius:999px;margin-left:4px;font-weight:600;">assinatura</span>' : ''}</td>
               <td class="py-2 text-right">${s.qtd}</td>
               <td class="py-2 text-right font-semibold">${BRL(s.total)}</td>
               <td class="py-2 text-right text-gray-600">${PCT(s.pct)}</td>
@@ -6865,39 +6905,53 @@ function renderRelatorio(mes) {
       </div>
     </div>` : ''}
 
-    ${aderPorPrograma.length ? `
+    ${(aderPorPrograma.length || inscricoesAtivas.length || faturamentoProgsBruto > 0) ? `
     <div class="chart-card">
       <h3 class="font-bold text-gray-800 mb-4 text-base">9. Programas de Acompanhamento</h3>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px;">
         <div style="background:#eff6ff;border-radius:8px;padding:10px 14px;">
           <div style="font-size:10.5px;font-weight:700;color:#1d4ed8;text-transform:uppercase;">Inscritos ativos</div>
           <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${inscricoesAtivas.length}</div>
         </div>
         <div style="background:#f0fdf4;border-radius:8px;padding:10px 14px;">
-          <div style="font-size:10.5px;font-weight:700;color:#15803d;text-transform:uppercase;">Marcos previstos</div>
-          <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${marcosPrevistosMes.length}</div>
+          <div style="font-size:10.5px;font-weight:700;color:#15803d;text-transform:uppercase;">MRR</div>
+          <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${BRL(Math.round(mrrTotal))}</div>
         </div>
-        <div style="background:#f0fdf4;border-radius:8px;padding:10px 14px;">
-          <div style="font-size:10.5px;font-weight:700;color:#15803d;text-transform:uppercase;">Marcos cumpridos</div>
-          <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${marcosFeitosMes.length}</div>
+        <div style="background:#fefce8;border-radius:8px;padding:10px 14px;">
+          <div style="font-size:10.5px;font-weight:700;color:#a16207;text-transform:uppercase;">Receita no mês</div>
+          <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${BRL(faturamentoProgsBruto)}</div>
+          <div style="font-size:10px;color:#a16207;margin-top:1px;">${BRL(faturamentoProgsRecebido)} pagos · ${lancamentosProgramaMes.length} lançamentos</div>
         </div>
+        <div style="background:#ede9fe;border-radius:8px;padding:10px 14px;">
+          <div style="font-size:10.5px;font-weight:700;color:#5b21b6;text-transform:uppercase;">Novas no mês</div>
+          <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${novasInscricoesMes.length}</div>
+        </div>
+        ${marcosPrevistosMes.length > 0 ? `
         <div style="background:${cumprimentoPct>=80?'#f0fdf4':cumprimentoPct>=50?'#fefce8':'#fef2f2'};border-radius:8px;padding:10px 14px;">
-          <div style="font-size:10.5px;font-weight:700;color:${cumprimentoPct>=80?'#15803d':cumprimentoPct>=50?'#a16207':'#b91c1c'};text-transform:uppercase;">% Cumprimento</div>
+          <div style="font-size:10.5px;font-weight:700;color:${cumprimentoPct>=80?'#15803d':cumprimentoPct>=50?'#a16207':'#b91c1c'};text-transform:uppercase;">% Cumprimento marcos</div>
           <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${PCT(cumprimentoPct)}</div>
-        </div>
+          <div style="font-size:10px;color:#64748b;margin-top:1px;">${marcosFeitosMes.length}/${marcosPrevistosMes.length}</div>
+        </div>` : ''}
       </div>
       <table class="w-full text-sm">
-        <thead><tr class="border-b"><th class="text-left py-2 text-gray-600">Programa</th><th class="text-right py-2 text-gray-600">Tipo</th><th class="text-right py-2 text-gray-600">Ativos</th><th class="text-right py-2 text-gray-600">Previstos</th><th class="text-right py-2 text-gray-600">Cumpridos</th><th class="text-right py-2 text-gray-600">% Aderência</th></tr></thead>
+        <thead><tr class="border-b"><th class="text-left py-2 text-gray-600">Programa</th><th class="text-right py-2 text-gray-600">Tipo</th><th class="text-right py-2 text-gray-600">Ativos</th><th class="text-right py-2 text-gray-600">MRR</th><th class="text-right py-2 text-gray-600">Receita no mês</th><th class="text-right py-2 text-gray-600">Aderência</th></tr></thead>
         <tbody>
           ${aderPorPrograma.map(p => `
             <tr class="border-b border-gray-50">
               <td class="py-2 text-gray-700">${_esc(p.nome)}</td>
               <td class="py-2 text-right text-gray-500">${p.tipo}</td>
               <td class="py-2 text-right">${p.ativos}</td>
-              <td class="py-2 text-right">${p.previstos}</td>
-              <td class="py-2 text-right text-green-700 font-semibold">${p.feitos}</td>
-              <td class="py-2 text-right font-semibold" style="color:${p.pct>=80?'#15803d':p.pct>=50?'#a16207':'#b91c1c'};">${p.previstos ? PCT(p.pct) : '—'}</td>
+              <td class="py-2 text-right font-semibold text-blue-700">${p.mrrProg > 0 ? BRL(Math.round(p.mrrProg)) : '—'}</td>
+              <td class="py-2 text-right font-semibold text-green-700">${p.recMes > 0 ? BRL(p.recMes) : '—'}</td>
+              <td class="py-2 text-right font-semibold" style="color:${p.previstos ? (p.pct>=80?'#15803d':p.pct>=50?'#a16207':'#b91c1c') : '#94a3b8'};">${p.previstos ? PCT(p.pct) + ' (' + p.feitos + '/' + p.previstos + ')' : '—'}</td>
             </tr>`).join('')}
+          <tr style="background:#f8fafc;border-top:2px solid #e2e8f0;">
+            <td class="py-2 font-bold text-gray-800" colspan="2">Total</td>
+            <td class="py-2 text-right font-bold">${inscricoesAtivas.length}</td>
+            <td class="py-2 text-right font-bold text-blue-700">${BRL(Math.round(mrrTotal))}</td>
+            <td class="py-2 text-right font-bold text-green-700">${BRL(faturamentoProgsBruto)}</td>
+            <td class="py-2 text-right text-gray-500">—</td>
+          </tr>
         </tbody>
       </table>
     </div>` : ''}
