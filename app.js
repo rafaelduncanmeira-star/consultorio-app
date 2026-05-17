@@ -494,7 +494,18 @@ async function doLogin() {
     return;
   }
 
-  // Sucesso
+  // Sucesso — verifica se precisa de 2FA
+  const mfaCheck = await mfaVerificarSeNecessario();
+  if (mfaCheck.needsCode) {
+    const ok = await pedir2FACodigo();
+    if (!ok) {
+      // Cancelou 2FA — força novo login
+      errEl.textContent = 'Verificação 2FA cancelada. Faça login novamente.';
+      errEl.style.display = 'block';
+      btn.textContent = 'Entrar'; btn.disabled = false;
+      return;
+    }
+  }
   _iniciarApp();
 }
 
@@ -7876,6 +7887,68 @@ function switchPerfilTab(tab, btn) {
 // ====================== INIT ======================
 // ====================== BACKUP ======================
 
+// ====================== 2FA (MFA TOTP) ======================
+// Usa o sistema MFA nativo do Supabase Auth (TOTP — Google Authenticator, Authy, etc.)
+
+async function mfaListarFatores() {
+  if (!_supa) return null;
+  try {
+    const { data, error } = await _supa.auth.mfa.listFactors();
+    if (error) return { error: error.message };
+    return data;
+  } catch(e) { return { error: e.message }; }
+}
+
+async function mfaCadastrar() {
+  if (!_supa || !currentUser) return { error: 'Sem sessão.' };
+  try {
+    const { data, error } = await _supa.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'Consultório App' });
+    if (error) return { error: error.message };
+    return { factorId: data.id, qrCode: data.totp.qr_code, secret: data.totp.secret, uri: data.totp.uri };
+  } catch(e) { return { error: e.message }; }
+}
+
+async function mfaVerificarPrimeiroCodigo(factorId, code) {
+  if (!_supa) return { error: 'Sem conexão.' };
+  try {
+    const challenge = await _supa.auth.mfa.challenge({ factorId });
+    if (challenge.error) return { error: challenge.error.message };
+    const verify = await _supa.auth.mfa.verify({ factorId, challengeId: challenge.data.id, code });
+    if (verify.error) return { error: verify.error.message };
+    return { ok: true };
+  } catch(e) { return { error: e.message }; }
+}
+
+async function mfaDesativar(factorId) {
+  if (!_supa) return { error: 'Sem conexão.' };
+  try {
+    const { error } = await _supa.auth.mfa.unenroll({ factorId });
+    if (error) return { error: error.message };
+    return { ok: true };
+  } catch(e) { return { error: e.message }; }
+}
+
+// Verifica AAL — se requer 2FA, faz challenge
+async function mfaVerificarSeNecessario(code) {
+  if (!_supa) return { error: 'Sem conexão.' };
+  try {
+    const { data: aalData } = await _supa.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (aalData.nextLevel === aalData.currentLevel) return { ok: true, noMfa: true };
+    if (aalData.nextLevel === 'aal2') {
+      const factors = await _supa.auth.mfa.listFactors();
+      const totp = factors.data?.totp?.[0];
+      if (!totp) return { ok: true, noMfa: true };
+      if (!code) return { needsCode: true, factorId: totp.id };
+      const challenge = await _supa.auth.mfa.challenge({ factorId: totp.id });
+      if (challenge.error) return { error: challenge.error.message };
+      const verify = await _supa.auth.mfa.verify({ factorId: totp.id, challengeId: challenge.data.id, code });
+      if (verify.error) return { error: 'Código incorreto.' };
+      return { ok: true };
+    }
+    return { ok: true };
+  } catch(e) { return { error: e.message }; }
+}
+
 // ====================== BACKUP AUTOMÁTICO DIÁRIO ======================
 // Tira um snapshot por dia no localStorage + sincroniza pro Supabase via cloudPush.
 // Mantém os últimos 7 dias. Permite restaurar qualquer dia sem perder dados.
@@ -8243,6 +8316,114 @@ function renderConfiguracoes() {
 
   // Card de equipe (multi-usuário)
   renderEquipeCard();
+
+  // Card 2FA
+  render2FACard();
+}
+
+// ====================== UI: 2FA ======================
+let _mfa_pending_factor_id = null;
+let _mfa_pending_resolve   = null;
+
+async function render2FACard() {
+  const status = document.getElementById('2fa-status');
+  const action = document.getElementById('2fa-action');
+  if (!status || !action) return;
+  const fatores = await mfaListarFatores();
+  if (!fatores || fatores.error) {
+    status.textContent = 'Não disponível no momento';
+    action.innerHTML = '';
+    return;
+  }
+  const ativos = (fatores.totp || []).filter(f => f.status === 'verified');
+  if (ativos.length > 0) {
+    status.innerHTML = `<span style="color:#10b981;font-weight:600;">✓ Ativo</span> · ${ativos.length} dispositivo${ativos.length > 1 ? 's' : ''} autenticado${ativos.length > 1 ? 's' : ''}`;
+    action.innerHTML = `<button onclick="desativar2FA('${ativos[0].id}')" class="btn-ghost" style="font-size:12px;color:#dc2626;">Desativar</button>`;
+  } else {
+    status.innerHTML = `<span style="color:#94a3b8;">Inativo</span> · proteja sua conta com um app autenticador`;
+    action.innerHTML = `<button onclick="iniciar2FA()" class="btn-primary" style="background:#d97706;">🔐 Ativar 2FA</button>`;
+  }
+}
+
+async function iniciar2FA() {
+  const result = await mfaCadastrar();
+  if (result.error) {
+    alert('Erro: ' + result.error);
+    return;
+  }
+  _mfa_pending_factor_id = result.factorId;
+  document.getElementById('2fa-qrcode').src = result.qrCode;
+  document.getElementById('2fa-secret').textContent = result.secret;
+  document.getElementById('2fa-code-input').value = '';
+  document.getElementById('2fa-error').style.display = 'none';
+  openModal('modal-2fa-setup');
+}
+
+async function confirmar2FA() {
+  const code = (document.getElementById('2fa-code-input').value || '').replace(/\D/g, '');
+  const errEl = document.getElementById('2fa-error');
+  const btn = document.getElementById('btn-confirmar-2fa');
+  if (code.length !== 6) {
+    errEl.textContent = 'Digite os 6 dígitos.';
+    errEl.style.display = '';
+    return;
+  }
+  btn.textContent = 'Verificando…'; btn.disabled = true;
+  const result = await mfaVerificarPrimeiroCodigo(_mfa_pending_factor_id, code);
+  btn.textContent = 'Ativar 2FA'; btn.disabled = false;
+  if (result.error) {
+    errEl.textContent = 'Código incorreto: ' + result.error;
+    errEl.style.display = '';
+    return;
+  }
+  closeModal('modal-2fa-setup');
+  toast('🔐 2FA ativado com sucesso!');
+  render2FACard();
+}
+
+async function desativar2FA(factorId) {
+  if (!confirm('Desativar autenticação em 2 fatores?\n\nSua conta ficará protegida apenas pela senha.')) return;
+  const result = await mfaDesativar(factorId);
+  if (result.error) { alert('Erro: ' + result.error); return; }
+  toast('2FA desativado.');
+  render2FACard();
+}
+
+async function confirmar2FAChallenge() {
+  const code = (document.getElementById('2fa-challenge-input').value || '').replace(/\D/g, '');
+  const errEl = document.getElementById('2fa-challenge-error');
+  if (code.length !== 6) {
+    errEl.textContent = 'Digite os 6 dígitos.';
+    errEl.style.display = '';
+    return;
+  }
+  const result = await mfaVerificarSeNecessario(code);
+  if (result.error || result.needsCode) {
+    errEl.textContent = result.error || 'Código incorreto.';
+    errEl.style.display = '';
+    document.getElementById('2fa-challenge-input').value = '';
+    return;
+  }
+  closeModal('modal-2fa-challenge');
+  if (_mfa_pending_resolve) { _mfa_pending_resolve(true); _mfa_pending_resolve = null; }
+}
+
+function cancelar2FAChallenge() {
+  closeModal('modal-2fa-challenge');
+  if (_mfa_pending_resolve) { _mfa_pending_resolve(false); _mfa_pending_resolve = null; }
+  // logout pra não deixar sessão pendurada com aal1
+  if (_supa) _supa.auth.signOut().catch(()=>{});
+}
+
+// Promete que o usuário completou 2FA — chamado no login se necessário
+function pedir2FACodigo() {
+  return new Promise(resolve => {
+    _mfa_pending_resolve = resolve;
+    document.getElementById('2fa-challenge-input').value = '';
+    document.getElementById('2fa-challenge-error').style.display = 'none';
+    openModal('modal-2fa-challenge');
+    setTimeout(() => document.getElementById('2fa-challenge-input')?.focus(), 200);
+  });
 }
 
 // ====================== UI: EQUIPE ======================
@@ -9491,7 +9672,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   const temSessao = await checkSession();
 
   if (temSessao) {
-    // Já logado: aceita convite pendente, resolve owner, sincroniza
+    // Já logado: verifica se precisa 2FA antes de qualquer outra coisa
+    const mfaCheck = await mfaVerificarSeNecessario();
+    if (mfaCheck.needsCode) {
+      const ok = await pedir2FACodigo();
+      if (!ok) {
+        // Logout forçado e mostra tela de login
+        await _supa.auth.signOut().catch(()=>{});
+        document.getElementById('login-page').style.display = 'flex';
+        const emailEl = document.getElementById('login-email');
+        if (emailEl) setTimeout(() => emailEl.focus(), 100);
+        return;
+      }
+    }
+    // 2FA ok — aceita convite pendente, resolve owner, sincroniza
     await _acceptInviteIfPending();
     await resolveDataOwner();
     await cloudPull();

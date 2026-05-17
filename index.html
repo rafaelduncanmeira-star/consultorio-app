@@ -1775,6 +1775,20 @@
         </div>
       </div>
 
+      <!-- Segurança (2FA) -->
+      <div class="chart-card" id="card-2fa" style="margin-bottom:20px;">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div style="width:42px;height:42px;background:#fef3c7;color:#d97706;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <i data-lucide="shield-check" style="width:22px;height:22px;"></i>
+          </div>
+          <div style="flex:1;">
+            <div style="font-size:15px;font-weight:700;color:#0f172a;">Autenticação em 2 fatores (2FA)</div>
+            <div style="font-size:12.5px;color:#64748b;margin-top:2px;" id="2fa-status">Carregando...</div>
+          </div>
+          <div id="2fa-action"><!-- botão dinâmico --></div>
+        </div>
+      </div>
+
       <!-- Equipe (Multi-usuário) -->
       <div class="chart-card" id="equipe-card" style="margin-bottom:20px;">
         <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;">
@@ -2847,6 +2861,64 @@
       <div style="text-align:center;margin-top:14px;font-size:11px;color:#94a3b8;line-height:1.5;">
         Ao criar uma conta você concorda em usar seus próprios dados.<br>
         Cada conta tem dados totalmente isolados das demais.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL CONFIGURAR 2FA ===== -->
+<div id="modal-2fa-setup" class="modal-overlay" style="display:none;">
+  <div class="modal" style="width:480px;max-width:96vw;">
+    <div style="padding:22px 24px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <div style="font-size:16px;font-weight:700;color:#0f172a;">🔐 Ativar autenticação em 2 fatores</div>
+        <div style="font-size:12px;color:#64748b;margin-top:2px;">Adicione uma camada extra de segurança</div>
+      </div>
+      <button onclick="closeModal('modal-2fa-setup')" style="background:none;border:none;cursor:pointer;font-size:22px;color:#94a3b8;">×</button>
+    </div>
+    <div style="padding:20px 24px 24px;">
+      <ol style="margin:0 0 16px 18px;font-size:13px;color:#475569;line-height:1.8;">
+        <li>Instale um app autenticador: <strong>Google Authenticator</strong>, <strong>Authy</strong> ou <strong>Microsoft Authenticator</strong></li>
+        <li>Escaneie o QR Code abaixo com o app</li>
+        <li>Digite o código de 6 dígitos que aparecer</li>
+      </ol>
+      <div style="text-align:center;padding:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:14px;">
+        <img id="2fa-qrcode" alt="QR Code 2FA" style="width:180px;height:180px;border-radius:6px;" />
+        <div style="font-size:11px;color:#64748b;margin-top:10px;">
+          Não consegue escanear? Use o código manual:<br>
+          <code id="2fa-secret" style="background:#f1f5f9;padding:3px 8px;border-radius:4px;font-size:11.5px;color:#0f172a;letter-spacing:1px;font-weight:600;">—</code>
+        </div>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Código do app autenticador (6 dígitos)</label>
+        <input type="text" id="2fa-code-input" class="input" placeholder="000000" maxlength="6" inputmode="numeric" pattern="[0-9]*"
+          style="font-size:18px;text-align:center;letter-spacing:6px;font-weight:700;" />
+      </div>
+      <div id="2fa-error" style="display:none;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:9px 12px;border-radius:7px;font-size:12.5px;margin-bottom:14px;"></div>
+      <div style="display:flex;gap:10px;">
+        <button onclick="confirmar2FA()" id="btn-confirmar-2fa" class="btn-primary" style="flex:1;justify-content:center;">Ativar 2FA</button>
+        <button onclick="closeModal('modal-2fa-setup')" class="btn-ghost">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL DESAFIO 2FA NO LOGIN ===== -->
+<div id="modal-2fa-challenge" class="modal-overlay" style="display:none;align-items:center;justify-content:center;z-index:10000;">
+  <div class="modal" style="width:380px;max-width:96vw;text-align:center;">
+    <div style="padding:28px 24px 20px;">
+      <div style="font-size:36px;margin-bottom:8px;">🔐</div>
+      <div style="font-size:16px;font-weight:700;color:#0f172a;">Verificação em 2 etapas</div>
+      <div style="font-size:12.5px;color:#64748b;margin-top:4px;line-height:1.5;">Digite o código de 6 dígitos do seu app autenticador</div>
+    </div>
+    <div style="padding:0 24px 24px;">
+      <input type="text" id="2fa-challenge-input" maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="000000"
+        class="input" style="font-size:22px;text-align:center;letter-spacing:8px;font-weight:700;margin-bottom:14px;"
+        onkeydown="if(event.key==='Enter') confirmar2FAChallenge()" />
+      <div id="2fa-challenge-error" style="display:none;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:9px 12px;border-radius:7px;font-size:12.5px;margin-bottom:12px;"></div>
+      <div style="display:flex;gap:10px;">
+        <button onclick="confirmar2FAChallenge()" class="btn-primary" style="flex:1;justify-content:center;">Verificar</button>
+        <button onclick="cancelar2FAChallenge()" class="btn-ghost">Cancelar</button>
       </div>
     </div>
   </div>
