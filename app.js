@@ -5405,7 +5405,9 @@ function renderDashboard(mes) {
   const ocupEl   = document.getElementById('kpi-ocup');
   const ocupIcon = document.getElementById('kpi-ocup-icon');
   if (ocupEl)   ocupEl.style.color       = ocup >= 75 ? '#10b981' : ocup >= 50 ? '#f59e0b' : '#ef4444';
-  if (ocupIcon) ocupIcon.style.background = ocup >= 75 ? '#d1fae5' : ocup >= 50 ? '#fef3c7' : '#fee2e2';
+  if (ocupIcon) {
+    ocupIcon.className = 'kpi-icon ' + (ocup >= 75 ? 'green' : ocup >= 50 ? 'amber' : 'red');
+  }
   setText('kpi-noshow', `No-show: ${PCT(noshowPct)}`);
 
   // Lucro Líquido: trend vs mês anterior
