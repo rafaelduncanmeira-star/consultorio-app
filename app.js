@@ -1388,7 +1388,12 @@ function saveRenovacao(e) {
   DB.set('pacientes', pacs);
 
   closeModal('modal-renovar');
-  renderProgramas();
+  // Atualiza qualquer página visível que dependa dos dados
+  if (document.getElementById('page-programas')?.classList.contains('active')) renderProgramas();
+  if (document.getElementById('page-dashboard')?.classList.contains('active')) renderDashboard();
+  if (document.getElementById('page-followup')?.classList.contains('active')) renderFollowup();
+  if (document.getElementById('page-pacientes')?.classList.contains('active')) renderPacientes();
+  _auditLog('editou', 'inscricao', `Renovou ${prog.nome} de ${ins.pacienteNome} até ${formatDate(novaDataFim)}`);
   toast(`✅ Programa renovado para ${ins.pacienteNome} até ${formatDate(novaDataFim)}`);
 }
 
