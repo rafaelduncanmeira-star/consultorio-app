@@ -706,44 +706,17 @@
         </div>
       </div>
 
-      <!-- ===== ANÁLISE (Alertas + MaestrIA com tabs) ===== -->
+      <!-- ===== ANÁLISE DA MAESTRIA (alertas automáticos) ===== -->
       <div data-section="analise" style="margin-bottom:24px;">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-          <div class="section-head blue"><i data-lucide="line-chart"></i> Análise do consultório</div>
+          <div class="section-head purple"><i data-lucide="sparkles"></i> Análise da MaestrIA</div>
           <div style="flex:1;height:1px;background:#e2e8f0;"></div>
-          <span id="analise-timestamp" style="font-size:11px;color:#94a3b8;display:none;">—</span>
+          <span id="analise-count-alertas" style="font-size:11px;color:#94a3b8;">—</span>
           <button onclick="toggleSection('analise')" class="btn-section-toggle" title="Ocultar seção">−</button>
         </div>
         <div data-section-body="analise">
-          <!-- Tabs -->
-          <div style="display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid #e2e8f0;">
-            <button id="analise-tab-alertas" type="button" onclick="setAnaliseTab('alertas')"
-              style="background:none;border:none;padding:9px 16px;font-size:12.5px;font-weight:600;color:#0f172a;border-bottom:2px solid #f59e0b;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              ⚡ Alertas <span id="analise-count-alertas" style="background:#fef3c7;color:#92400e;padding:1px 8px;border-radius:999px;font-size:10.5px;font-weight:700;">0</span>
-            </button>
-            <button id="analise-tab-insights" type="button" onclick="setAnaliseTab('insights')"
-              style="background:none;border:none;padding:9px 16px;font-size:12.5px;font-weight:600;color:#94a3b8;border-bottom:2px solid transparent;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              🤖 MaestrIA <span id="analise-insights-status" style="font-size:10.5px;color:#94a3b8;font-weight:500;">— gerar</span>
-            </button>
-            <div style="flex:1;"></div>
-            <button id="btn-refresh-insights" onclick="gerarInsightsSofia(true)" style="background:#f1f5f9;border:none;border-radius:6px;padding:5px 12px;font-size:11.5px;color:#475569;cursor:pointer;font-weight:600;align-self:center;margin-bottom:4px;display:none;">🔄 Atualizar</button>
-          </div>
-
-          <!-- Conteúdo: Alertas (default) -->
-          <div id="analise-conteudo-alertas">
-            <div id="alertas-proativos-cards" style="display:flex;flex-direction:column;gap:8px;">
-              <!-- populated by renderAlertasProativos() -->
-            </div>
-          </div>
-
-          <!-- Conteúdo: Insights -->
-          <div id="analise-conteudo-insights" style="display:none;">
-            <div id="insights-cards" style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;">
-              <div class="kpi-card" style="padding:16px 18px;border-left:3px solid #cbd5e1;text-align:center;">
-                <div style="font-size:24px;margin-bottom:6px;">🤖</div>
-                <div style="font-size:12px;color:#64748b;line-height:1.5;">Clique em <strong>🔄 Atualizar</strong> aqui em cima pra MaestrIA analisar seus dados e gerar 5 insights personalizados.</div>
-              </div>
-            </div>
+          <div id="alertas-proativos-cards" style="display:flex;flex-direction:column;gap:8px;">
+            <!-- populated by renderAlertasProativos() -->
           </div>
         </div>
       </div>
