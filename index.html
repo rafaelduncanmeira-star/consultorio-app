@@ -34,10 +34,40 @@
     }
   </script>
   <style>
+    /* ── Tokens de tema (light = default) ── */
+    :root {
+      --bg-page: #f5f6f8;
+      --bg-card: #ffffff;
+      --bg-soft: #f8fafc;
+      --bg-input: #ffffff;
+      --text-primary: #0f172a;
+      --text-secondary: #475569;
+      --text-muted: #94a3b8;
+      --border: #e8eaed;
+      --border-light: #f1f5f9;
+      --shadow-card: 0 1px 2px rgba(0,0,0,0.04);
+      --shadow-card-hover: 0 3px 10px rgba(0,0,0,0.07);
+      --accent: #10b981;
+    }
+    /* ── Modo escuro ── */
+    body.dark {
+      --bg-page: #0d1117;
+      --bg-card: #161b22;
+      --bg-soft: #1c2128;
+      --bg-input: #1c2128;
+      --text-primary: #e6edf3;
+      --text-secondary: #b1bac4;
+      --text-muted: #7d8590;
+      --border: #30363d;
+      --border-light: #21262d;
+      --shadow-card: 0 1px 2px rgba(0,0,0,0.4);
+      --shadow-card-hover: 0 3px 10px rgba(0,0,0,0.5);
+    }
+
     /* ── Base ── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     * { font-family: 'Inter', system-ui, -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
-    body { background: #f5f6f8; color: #0f172a; font-size: 14px; line-height: 1.5; }
+    body { background: var(--bg-page); color: var(--text-primary); font-size: 14px; line-height: 1.5; transition: background 0.2s, color 0.2s; }
 
     /* ── Sidebar ── */
     .sidebar { background: #111318; border-right: 1px solid rgba(255,255,255,0.05); }
@@ -54,9 +84,27 @@
     .nav-item i { width: 16px; height: 16px; stroke-width: 2; }
 
     /* ── Cards ── */
-    .kpi-card { background: #fff; border-radius: 10px; padding: 20px 22px; border: 1px solid #e8eaed; box-shadow: 0 1px 2px rgba(0,0,0,0.04); transition: box-shadow 0.18s; }
-    .kpi-card:hover { box-shadow: 0 3px 10px rgba(0,0,0,0.07); }
-    .chart-card { background: #fff; border-radius: 10px; border: 1px solid #e8eaed; box-shadow: 0 1px 2px rgba(0,0,0,0.04); padding: 22px 24px; }
+    .kpi-card { background: var(--bg-card); border-radius: 10px; padding: 20px 22px; border: 1px solid var(--border); box-shadow: var(--shadow-card); transition: box-shadow 0.18s, background 0.2s, border-color 0.2s; }
+    .kpi-card:hover { box-shadow: var(--shadow-card-hover); }
+    .chart-card { background: var(--bg-card); border-radius: 10px; border: 1px solid var(--border); box-shadow: var(--shadow-card); padding: 22px 24px; transition: background 0.2s, border-color 0.2s; }
+
+    /* Texto + bordas comuns em dark mode */
+    body.dark .text-gray-900, body.dark [style*="color:#0f172a"] { color: var(--text-primary) !important; }
+    body.dark .text-gray-700, body.dark [style*="color:#374151"], body.dark [style*="color:#475569"] { color: var(--text-secondary) !important; }
+    body.dark .text-gray-600, body.dark [style*="color:#64748b"] { color: #9ca3af !important; }
+    body.dark .text-gray-500, body.dark [style*="color:#94a3b8"], body.dark [style*="color:#cbd5e1"] { color: var(--text-muted) !important; }
+    body.dark .text-gray-400 { color: var(--text-muted) !important; }
+    body.dark [style*="background:#f8fafc"], body.dark [style*="background:#fafbfc"] { background: var(--bg-soft) !important; }
+    body.dark [style*="background:#f1f5f9"] { background: #2a313c !important; }
+    body.dark [style*="border:1px solid #e2e8f0"], body.dark [style*="border:1px solid #e5e7eb"], body.dark [style*="border:1px solid #f1f5f9"] { border-color: var(--border) !important; }
+    body.dark [style*="border-bottom:1px solid #f1f5f9"], body.dark [style*="border-bottom:1px solid #f8fafc"] { border-bottom-color: var(--border-light) !important; }
+    body.dark .data-table thead th { background: var(--bg-soft); color: var(--text-secondary); border-bottom-color: var(--border); }
+    body.dark .data-table tbody tr:hover td { background: var(--bg-soft); }
+    body.dark .data-table tbody td { border-bottom-color: var(--border-light); }
+    body.dark input, body.dark select, body.dark textarea, body.dark .input, body.dark .select { background: var(--bg-input); color: var(--text-primary); border-color: var(--border); }
+    body.dark input::placeholder, body.dark textarea::placeholder { color: var(--text-muted); }
+    body.dark .pg-btn { background: var(--bg-input); border-color: var(--border); color: var(--text-secondary); }
+    body.dark .pg-btn:hover:not(:disabled) { background: var(--bg-soft); }
 
     /* ── Badges ── */
     .badge { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 4px; font-size: 11.5px; font-weight: 500; letter-spacing: 0.01em; }
@@ -183,6 +231,9 @@
     .page.active { display:block; animation: fadeIn 0.18s ease; }
     @keyframes fadeIn { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:translateY(0); } }
     @keyframes slideInRight { from { opacity:0; transform:translateX(40px); } to { opacity:1; transform:translateX(0); } }
+    .pg-btn { background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:5px 10px; font-size:13px; color:#475569; cursor:pointer; font-weight:600; transition: background 0.15s, border-color 0.15s; }
+    .pg-btn:hover:not(:disabled) { background:#f1f5f9; border-color:#cbd5e1; }
+    .pg-btn:disabled { opacity:0.4; cursor:not-allowed; }
 
     /* ── Scrollbar ── */
     ::-webkit-scrollbar { width:5px; } ::-webkit-scrollbar-track { background:transparent; } ::-webkit-scrollbar-thumb { background:#d1d5db; border-radius:999px; }
@@ -650,6 +701,12 @@
         <span class="icon"><i data-lucide="settings"></i></span> Configurações
       </div>
     </nav>
+
+    <!-- Toggle Dark Mode (flutuante) -->
+    <button id="dark-toggle" onclick="toggleDarkMode()" title="Alternar modo escuro/claro"
+      style="position:fixed;bottom:24px;left:24px;background:rgba(15,23,42,0.85);color:#fff;border:none;border-radius:50%;width:42px;height:42px;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);box-shadow:0 4px 12px rgba(0,0,0,0.25);z-index:998;transition:transform 0.15s;" onmouseover="this.style.transform='scale(1.08)'" onmouseout="this.style.transform='scale(1)'">
+      <span id="dark-toggle-icon" style="font-size:18px;">🌙</span>
+    </button>
 
     <!-- Botão flutuante: Instalar PWA -->
     <button id="pwa-install-btn" onclick="pwaInstall()" title="Instalar como app"
@@ -1237,27 +1294,20 @@
         </div>
       </div>
 
-      <!-- Funil -->
-      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px;">
-        <div class="funil-step">
-          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Contatos</div>
-          <div style="font-size:26px;font-weight:800;color:#3b82f6;" id="funil-contatos">0</div>
+      <!-- Funil — visualização interativa com barras + taxas de conversão entre etapas -->
+      <div class="chart-card" style="margin-bottom:24px;padding:20px 24px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <div>
+            <div style="font-size:14px;font-weight:700;color:var(--text-primary);">🪜 Funil de conversão</div>
+            <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">Da prospecção ao atendimento — taxas entre cada etapa</div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <span style="font-size:11px;color:var(--text-muted);">Conversão total:</span>
+            <span style="background:#d1fae5;color:#065f46;padding:3px 12px;border-radius:999px;font-size:14px;font-weight:800;" id="funil-conv">0%</span>
+          </div>
         </div>
-        <div class="funil-step">
-          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Em negoc.</div>
-          <div style="font-size:26px;font-weight:800;color:#8b5cf6;" id="funil-negoc">0</div>
-        </div>
-        <div class="funil-step">
-          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Marcaram</div>
-          <div style="font-size:26px;font-weight:800;color:#f59e0b;" id="funil-marc">0</div>
-        </div>
-        <div class="funil-step">
-          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Atenderam</div>
-          <div style="font-size:26px;font-weight:800;color:#10b981;" id="funil-atend">0</div>
-        </div>
-        <div class="funil-step" style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);border-color:#bbf7d0;">
-          <div style="font-size:11px;font-weight:700;color:#065f46;text-transform:uppercase;letter-spacing:0.06em;">Conversão</div>
-          <div style="font-size:26px;font-weight:800;color:#10b981;" id="funil-conv">0%</div>
+        <div id="funil-bars" style="display:flex;flex-direction:column;gap:7px;">
+          <!-- preenchido por _atualizarFunilCrm -->
         </div>
       </div>
 
@@ -1282,6 +1332,7 @@
             <thead><tr><th>Data</th><th>Paciente</th><th>WhatsApp</th><th>Canal</th><th>Tipo</th><th>Status</th><th></th></tr></thead>
             <tbody id="crm-tbody"><tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:48px;">Nenhum contato registrado. <button class="btn-primary" style="margin-left:12px;" onclick="openModal('modal-crm')">+ Novo</button></td></tr></tbody>
           </table>
+          <div id="crm-paginator"></div>
         </div>
       </div>
 
@@ -1314,6 +1365,7 @@
           <thead><tr><th>Data</th><th>Paciente</th><th>Tipo de Visita</th><th>Valor</th><th>Pagamento</th><th>Status</th><th>Perfil</th><th></th></tr></thead>
           <tbody id="pac-tbody"><tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:48px;">Nenhuma consulta registrada.</td></tr></tbody>
         </table>
+        <div id="pac-paginator"></div>
       </div>
     </div>
 
@@ -1772,6 +1824,45 @@
         </div>
         <div style="padding:10px 13px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:7px;font-size:12px;color:#166534;">
           💡 As informações aparecem no cabeçalho do sistema, na tela de login e nos relatórios impressos.
+        </div>
+      </div>
+
+      <!-- Lembretes WhatsApp -->
+      <div class="chart-card" id="card-lembretes" style="margin-bottom:20px;">
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
+          <div style="width:42px;height:42px;background:#dcfce7;color:#16a34a;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <i data-lucide="bell-ring" style="width:22px;height:22px;"></i>
+          </div>
+          <div style="flex:1;">
+            <div style="font-size:15px;font-weight:700;color:#0f172a;">Lembretes WhatsApp automáticos</div>
+            <div style="font-size:12.5px;color:#64748b;margin-top:2px;" id="lemb-status">—</div>
+          </div>
+          <label class="zapi-toggle-wrap" style="cursor:pointer;">
+            <input type="checkbox" id="lemb-ativo" onchange="saveLembretesConfig()">
+            <div class="zapi-track"></div><div class="zapi-thumb"></div>
+          </label>
+        </div>
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:start;">
+          <div>
+            <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Enviar com antecedência de</label>
+            <select id="lemb-horas" class="select" style="width:140px;">
+              <option value="12">12 horas</option>
+              <option value="24" selected>24 horas</option>
+              <option value="48">48 horas (2 dias)</option>
+              <option value="72">72 horas (3 dias)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Mensagem (use {nome}, {data}, {hora}, {procedimento})</label>
+            <textarea id="lemb-msg" class="input" rows="3" style="font-family:inherit;font-size:13px;resize:vertical;"></textarea>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px;">
+          <button onclick="saveLembretesConfig()" class="btn-primary" style="background:#16a34a;">Salvar</button>
+          <button onclick="rodarCicloLembretes(true).then(r => { if(r.error) alert('Erro: '+r.error); else toast('✅ '+r.enviados+' lembrete(s) enviado(s).', 3000); renderLembretesCard(); })" class="btn-ghost">📲 Enviar agora (forçar)</button>
+        </div>
+        <div style="margin-top:12px;padding:10px 13px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:7px;font-size:11.5px;color:#166534;line-height:1.5;">
+          💡 O lembrete é enviado automaticamente quando você abre o app pela 1ª vez no dia. Cada agendamento recebe apenas 1 lembrete. Exige Z-API conectado.
         </div>
       </div>
 

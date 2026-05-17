@@ -29,6 +29,32 @@ window.loadDemoData = async function loadDemoData() {
   }
 };
 
+// ====================== DARK MODE ======================
+function applyDarkMode(dark) {
+  document.body.classList.toggle('dark', !!dark);
+  const icon = document.getElementById('dark-toggle-icon');
+  if (icon) icon.textContent = dark ? '☀️' : '🌙';
+  // Atualiza theme-color meta pra status bar mobile
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = dark ? '#0d1117' : '#10b981';
+}
+
+function toggleDarkMode() {
+  const isDark = !document.body.classList.contains('dark');
+  applyDarkMode(isDark);
+  localStorage.setItem('consult_dark_mode', isDark ? '1' : '0');
+}
+
+// Aplica preferência salva no carregamento — antes do app inicializar
+(function _applyDarkOnLoad() {
+  const pref = localStorage.getItem('consult_dark_mode');
+  if (pref === '1') {
+    // Aguarda DOMContentLoaded pra body existir
+    if (document.body) applyDarkMode(true);
+    else document.addEventListener('DOMContentLoaded', () => applyDarkMode(true), { once: true });
+  }
+})();
+
 // ====================== PWA (Service Worker + Install Prompt) ======================
 let _deferredInstallPrompt = null;
 
@@ -557,6 +583,9 @@ function _iniciarApp() {
   saudacaoDiaria();
   setTimeout(() => checkAchievements(), 1000); // verifica conquistas após render
   setTimeout(() => criarSnapshotDiario().then(r => r.created && console.log('🗂️ Backup automático criado:', r.data)), 3000);
+  setTimeout(() => rodarCicloLembretes().then(r => {
+    if (r.enviados > 0) toast(`📲 ${r.enviados} lembrete(s) WhatsApp enviado(s).`, 4000);
+  }), 5000);
   // Sincroniza UI mobile com página inicial
   _mobSync('dashboard');
   // Mostra modal de boas-vindas se for primeiro acesso
@@ -2410,7 +2439,13 @@ function renderCrm() {
   }
 
   if (tbody) {
-    tbody.innerHTML = data.map((r, i) => `
+    // Ordena desc por data + hora antes de paginar
+    const sorted = data.map((r, originalIdx) => ({ ...r, _origIdx: originalIdx }))
+                       .sort((a,b) => ((b.data||'') + (b.hora||'')).localeCompare((a.data||'') + (a.hora||'')));
+    const info = _paginate('crm', sorted);
+    tbody.innerHTML = info.slice.map(r => {
+      const i = r._origIdx;
+      return `
       <tr data-search="${_esc(r.nome)} ${_esc(r.canal||'')} ${_esc(r.status||'')} ${_esc(r.tipo||'')}" data-status="${_esc(r.status)}">
         <td>${formatDate(r.data)}</td>
         <td style="font-weight:600;color:#0f172a;">${_esc(r.nome)}</td>
@@ -2424,7 +2459,11 @@ function renderCrm() {
           <button onclick="editRow('crm',${i})" title="Editar" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;">✏️</button>
           <button onclick="deleteRow('crm',${i})" title="Excluir" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;">🗑️</button>
         </td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
+    // Paginador
+    const pgEl = document.getElementById('crm-paginator');
+    if (pgEl) pgEl.innerHTML = _paginatorHtml('crm', info);
   }
 
   _atualizarFunilCrm(data);
@@ -2724,15 +2763,54 @@ function moverKanbanCard(idx, novoStatus, evt) {
 
 function _atualizarFunilCrm(data) {
   if (!data) data = DB.get('crm');
-  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  const negoc   = data.filter(r => ['Em negociação','Marcou','Atendeu'].includes(r.status)).length;
-  const marc    = data.filter(r => ['Marcou','Atendeu'].includes(r.status)).length;
-  const atend   = data.filter(r => r.status === 'Atendeu').length;
-  setText('funil-contatos', data.length);
-  setText('funil-negoc',    negoc);
-  setText('funil-marc',     marc);
-  setText('funil-atend',    atend);
-  setText('funil-conv',     data.length ? PCT((atend / data.length) * 100) : '0%');
+  // Etapas inclusivas (downstream): cada nível inclui os de baixo
+  const total = data.length;
+  const negoc = data.filter(r => ['Em negociação','Marcou','Atendeu'].includes(r.status)).length;
+  const marc  = data.filter(r => ['Marcou','Atendeu'].includes(r.status)).length;
+  const atend = data.filter(r => r.status === 'Atendeu').length;
+
+  // Card resumo
+  const convEl = document.getElementById('funil-conv');
+  if (convEl) convEl.textContent = total ? PCT((atend / total) * 100) : '0%';
+
+  // Funil visual
+  const bars = document.getElementById('funil-bars');
+  if (!bars) return;
+  if (!total) {
+    bars.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Cadastre contatos pra ver o funil em ação.</div>';
+    return;
+  }
+  const etapas = [
+    { label: 'Contato feito',   valor: total, cor: '#3b82f6', bg:'#dbeafe' },
+    { label: 'Em negociação',   valor: negoc, cor: '#8b5cf6', bg:'#ede9fe' },
+    { label: 'Marcou consulta', valor: marc,  cor: '#f59e0b', bg:'#fef3c7' },
+    { label: 'Atendeu',         valor: atend, cor: '#10b981', bg:'#d1fae5' },
+  ];
+  bars.innerHTML = etapas.map((e, i) => {
+    const pct = total ? (e.valor / total) * 100 : 0;
+    const widthBar = total ? (e.valor / total) * 100 : 0;
+    let conversao = '';
+    if (i > 0 && etapas[i-1].valor > 0) {
+      const taxa = (e.valor / etapas[i-1].valor) * 100;
+      conversao = `<span style="font-size:10.5px;color:${taxa >= 50 ? '#10b981' : taxa >= 25 ? '#f59e0b' : '#dc2626'};font-weight:700;margin-left:8px;">↓ ${taxa.toFixed(0)}% passou</span>`;
+    }
+    return `
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:12.5px;font-weight:600;color:var(--text-primary);">${e.label}</span>
+            ${conversao}
+          </div>
+          <div style="display:flex;align-items:baseline;gap:6px;">
+            <span style="font-size:17px;font-weight:800;color:${e.cor};">${e.valor}</span>
+            <span style="font-size:11px;color:var(--text-muted);font-weight:600;">${pct.toFixed(0)}%</span>
+          </div>
+        </div>
+        <div style="height:10px;background:var(--border-light);border-radius:999px;overflow:hidden;">
+          <div style="height:100%;width:${widthBar}%;background:${e.cor};border-radius:999px;transition:width 0.5s ease;box-shadow:0 0 0 1px ${e.bg} inset;"></div>
+        </div>
+      </div>`;
+  }).join('');
 }
 
 function convertCrmToAtendidoKanban(idx, evt) {
@@ -3177,9 +3255,17 @@ function renderPacientes() {
   const tbody = document.getElementById('pac-tbody');
   if (!data.length) {
     tbody.innerHTML = '<tr><td colspan="8" class="text-center py-12 text-gray-400">Nenhuma consulta registrada.</td></tr>';
+    const pgEl = document.getElementById('pac-paginator');
+    if (pgEl) pgEl.innerHTML = '';
     return;
   }
-  tbody.innerHTML = data.map((r, i) => `
+  // Ordena desc por data antes de paginar
+  const sorted = data.map((r, originalIdx) => ({ ...r, _origIdx: originalIdx }))
+                     .sort((a, b) => (b.data || '').localeCompare(a.data || ''));
+  const info = _paginate('pacientes', sorted);
+  tbody.innerHTML = info.slice.map(r => {
+    const i = r._origIdx;
+    return `
     <tr data-search="${_esc(r.nome)} ${_esc(r.tipo)}" data-status="${r.statusPgto === 'Pago' ? 'Ativo' : 'Inativo'}" class="border-b border-gray-50 hover:bg-gray-50">
       <td class="px-4 py-3 text-gray-600">${formatDate(r.data)}</td>
       <td class="px-4 py-3 font-medium text-gray-900">${_esc(r.nome)}</td>
@@ -3194,7 +3280,11 @@ function renderPacientes() {
         <button onclick="editRow('pacientes',${i})" class="text-blue-400 hover:text-blue-600 text-xs mr-2" title="Editar">✏️</button>
         <button onclick="deleteRow('pacientes',${i})" class="text-red-400 hover:text-red-600 text-xs" title="Excluir">🗑️</button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
+  // Paginador (só aparece se >50)
+  const pgEl = document.getElementById('pac-paginator');
+  if (pgEl) pgEl.innerHTML = _paginatorHtml('pacientes', info);
 }
 
 // ====================== FOLLOW-UP ======================
@@ -7960,6 +8050,203 @@ function switchPerfilTab(tab, btn) {
 // ====================== INIT ======================
 // ====================== BACKUP ======================
 
+// ====================== PAGINAÇÃO ======================
+// Helper genérico — paginação só aparece se data.length > pageSize
+const _pageState = {}; // { 'pacientes': 0, 'crm': 0 }
+const _pageSize  = { default: 50 };
+
+function _paginate(key, data) {
+  const size = parseInt(localStorage.getItem('consult_page_size_'+key)) || _pageSize.default;
+  let page = _pageState[key] || 0;
+  const total = data.length;
+  const totalPages = Math.max(1, Math.ceil(total / size));
+  if (page >= totalPages) page = totalPages - 1;
+  if (page < 0) page = 0;
+  _pageState[key] = page;
+  const inicio = page * size;
+  const fim = Math.min(inicio + size, total);
+  return {
+    page, totalPages, total, size, inicio, fim,
+    slice: data.slice(inicio, fim),
+    needsControls: total > size,
+  };
+}
+
+function _paginatorHtml(key, info) {
+  if (!info.needsControls) return '';
+  const opts = [25, 50, 100, 200].map(n =>
+    `<option value="${n}" ${n === info.size ? 'selected' : ''}>${n}/pág</option>`
+  ).join('');
+  const prevDis = info.page === 0 ? 'disabled' : '';
+  const nextDis = info.page >= info.totalPages - 1 ? 'disabled' : '';
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-top:1px solid #f1f5f9;background:#fafbfc;font-size:12px;color:#64748b;">
+      <div>Mostrando <strong>${info.inicio + 1}-${info.fim}</strong> de <strong>${info.total}</strong></div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <select onchange="_changePageSize('${key}', this.value)" class="select" style="width:90px;font-size:12px;padding:4px 8px;">${opts}</select>
+        <button onclick="_goToPage('${key}', 0)" ${prevDis} class="pg-btn" title="Primeira">«</button>
+        <button onclick="_goToPage('${key}', ${info.page - 1})" ${prevDis} class="pg-btn" title="Anterior">‹</button>
+        <span style="padding:0 8px;color:#0f172a;font-weight:600;">${info.page + 1}/${info.totalPages}</span>
+        <button onclick="_goToPage('${key}', ${info.page + 1})" ${nextDis} class="pg-btn" title="Próxima">›</button>
+        <button onclick="_goToPage('${key}', ${info.totalPages - 1})" ${nextDis} class="pg-btn" title="Última">»</button>
+      </div>
+    </div>`;
+}
+
+function _goToPage(key, page) {
+  _pageState[key] = page;
+  // Refresh da tabela correspondente
+  if (key === 'pacientes' && typeof renderPacientes === 'function') renderPacientes();
+  if (key === 'crm' && typeof renderCrm === 'function') renderCrm();
+}
+
+function _changePageSize(key, size) {
+  localStorage.setItem('consult_page_size_'+key, size);
+  _pageState[key] = 0;
+  _goToPage(key, 0);
+}
+
+// ====================== LEMBRETES WHATSAPP AUTOMÁTICOS ======================
+// Envia mensagem 24h antes da consulta. Usa Z-API quando configurado.
+// Roda no carregamento do app (1x/dia). Marca cada agendamento como notificado
+// para evitar duplicados. Configurável e desativável.
+
+function getLembretesConfig() {
+  return DB.getObj('lembretes_config', {
+    ativo: true,
+    horasAntes: 24,
+    mensagem: 'Olá {nome}! Lembrete do seu agendamento amanhã ({data}) às {hora} — {procedimento}. Confirma a presença? 😊',
+    ultimoEnvio: null,
+  });
+}
+
+function saveLembretesConfig() {
+  const cfg = {
+    ativo:      document.getElementById('lemb-ativo')?.checked ?? true,
+    horasAntes: parseInt(document.getElementById('lemb-horas')?.value) || 24,
+    mensagem:   document.getElementById('lemb-msg')?.value || getLembretesConfig().mensagem,
+    ultimoEnvio: getLembretesConfig().ultimoEnvio,
+  };
+  DB.setObj('lembretes_config', cfg);
+  toast('✅ Lembretes salvos.');
+  _auditLog('configurou', 'lembretes', cfg.ativo ? 'Ativou lembretes automáticos' : 'Desativou lembretes automáticos');
+}
+
+function _formatarMensagemLembrete(ag, template) {
+  const d = new Date(ag.data + 'T12:00:00');
+  const dataFmt = d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' });
+  return (template || '')
+    .replace(/\{nome\}/g, (ag.pacienteNome || '').split(' ')[0])
+    .replace(/\{nomeCompleto\}/g, ag.pacienteNome || '')
+    .replace(/\{data\}/g, dataFmt)
+    .replace(/\{hora\}/g, ag.hora || '')
+    .replace(/\{procedimento\}/g, ag.procedimento || 'consulta')
+    .replace(/\{duracao\}/g, (ag.duracao || 50) + ' min');
+}
+
+// Envia 1 lembrete via Z-API
+async function _enviarLembreteZapi(ag, mensagem) {
+  const cfg = getZapiConfig();
+  if (!cfg.enabled || !cfg.instanceId || !cfg.token) return { error: 'Z-API não configurado' };
+  const fone = (ag.whatsapp || '').replace(/\D/g, '');
+  if (!fone || fone.length < 10) return { error: 'WhatsApp inválido' };
+  const phone55 = fone.startsWith('55') ? fone : '55' + fone;
+  try {
+    const res = await fetch(
+      `https://api.z-api.io/instances/${cfg.instanceId}/token/${cfg.token}/send-text`,
+      { method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Client-Token': cfg.token },
+        body: JSON.stringify({ phone: phone55, message: mensagem }) }
+    );
+    if (!res.ok) return { error: 'Z-API status ' + res.status };
+    return { ok: true };
+  } catch(e) { return { error: e.message }; }
+}
+
+// Encontra agendamentos elegíveis (na janela de N horas, não realizados, não notificados)
+function _agendamentosParaLembrar(horasAntes) {
+  const agora = new Date();
+  const alvo = new Date(agora.getTime() + horasAntes * 3600000);
+  const alvoData = alvo.toISOString().substring(0, 10);
+  // Janela: tudo no dia "alvoData" que ainda não foi notificado
+  return DB.get('agendamentos').filter(ag =>
+    ag.data === alvoData &&
+    ag.status !== 'Compareceu' &&
+    ag.status !== 'Faltou' &&
+    ag.status !== 'Cancelado' &&
+    !ag._lembreteEnviado &&
+    ag.whatsapp
+  );
+}
+
+// Roda o ciclo (chamado 1x por dia automaticamente)
+async function rodarCicloLembretes(forcado = false) {
+  const cfg = getLembretesConfig();
+  if (!cfg.ativo && !forcado) return { skipped: 'desativado' };
+
+  // Já rodou hoje? Pula (a menos que forçado)
+  const hoje = new Date().toISOString().substring(0, 10);
+  if (!forcado && cfg.ultimoEnvio === hoje) return { skipped: 'já rodou hoje' };
+
+  const ags = _agendamentosParaLembrar(cfg.horasAntes);
+  if (!ags.length) {
+    cfg.ultimoEnvio = hoje;
+    DB.setObj('lembretes_config', cfg);
+    return { enviados: 0, msg: 'nenhum agendamento elegível' };
+  }
+
+  const zapiCfg = getZapiConfig();
+  if (!zapiCfg.enabled || !zapiCfg.instanceId || !zapiCfg.token) {
+    return { error: 'Z-API não está conectado. Configure em Configurações para enviar lembretes automáticos.' };
+  }
+
+  let sucesso = 0, erro = 0;
+  const todosAgs = DB.get('agendamentos');
+  for (const ag of ags) {
+    const msg = _formatarMensagemLembrete(ag, cfg.mensagem);
+    const r = await _enviarLembreteZapi(ag, msg);
+    const idx = todosAgs.findIndex(a => a.id === ag.id);
+    if (idx >= 0) {
+      if (r.ok) {
+        todosAgs[idx]._lembreteEnviado = new Date().toISOString();
+        sucesso++;
+      } else {
+        todosAgs[idx]._lembreteErro = r.error;
+        erro++;
+      }
+    }
+    // Throttle pra evitar rate limit
+    await new Promise(r => setTimeout(r, 800));
+  }
+  DB.set('agendamentos', todosAgs);
+  cfg.ultimoEnvio = hoje;
+  DB.setObj('lembretes_config', cfg);
+
+  if (sucesso > 0) _auditLog('configurou', 'lembretes', `Enviou ${sucesso} lembretes WhatsApp${erro > 0 ? ' (' + erro + ' falharam)' : ''}`);
+  return { enviados: sucesso, erros: erro };
+}
+
+function renderLembretesCard() {
+  const card = document.getElementById('card-lembretes');
+  if (!card) return;
+  const cfg = getLembretesConfig();
+  const zapi = getZapiConfig();
+  const zapiOk = zapi.enabled && zapi.instanceId && zapi.token;
+
+  // Preenche campos
+  const a = document.getElementById('lemb-ativo'); if (a) a.checked = cfg.ativo;
+  const h = document.getElementById('lemb-horas'); if (h) h.value = cfg.horasAntes;
+  const m = document.getElementById('lemb-msg');   if (m) m.value = cfg.mensagem;
+
+  // Status indicator
+  const status = document.getElementById('lemb-status');
+  if (status) {
+    if (!zapiOk) status.innerHTML = '<span style="color:#dc2626;">⚠️ Z-API não conectado — lembretes não serão enviados</span>';
+    else if (!cfg.ativo) status.innerHTML = '<span style="color:#94a3b8;">Inativo</span>';
+    else status.innerHTML = `<span style="color:#10b981;font-weight:600;">✓ Ativo</span> · último envio: ${cfg.ultimoEnvio || 'nunca'}`;
+  }
+}
+
 // ====================== AUDIT LOG (HISTÓRICO DE ALTERAÇÕES) ======================
 // Registra quem fez o quê e quando no sistema. Mantém últimas 500 entradas.
 const MAX_AUDIT_ENTRIES = 500;
@@ -8201,7 +8488,7 @@ const BACKUP_KEYS = [
   // Personalização do consultório
   'clinica_config',
   // Integrações
-  'zapi_config',
+  'zapi_config','lembretes_config',
   // Gamificação
   'maestria',
   // Auditoria
@@ -8467,6 +8754,9 @@ function renderConfiguracoes() {
 
   // Histórico de alterações
   renderAuditLog();
+
+  // Lembretes WhatsApp
+  renderLembretesCard();
 }
 
 // ====================== UI: 2FA ======================
