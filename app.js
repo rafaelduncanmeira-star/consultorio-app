@@ -539,6 +539,7 @@ function _iniciarApp() {
   // Inicializa ícones e dashboard
   if (window.lucide) lucide.createIcons();
   applyClinicaConfig();
+  _reorderDashboardSections();
   renderDashboard();
   saudacaoDiaria();
   setTimeout(() => checkAchievements(), 1000); // verifica conquistas após render
@@ -548,6 +549,23 @@ function _iniciarApp() {
   if (localStorage.getItem('consult_onboarding_pending')) {
     setTimeout(() => mostrarOnboarding(), 500);
   }
+}
+
+// Reordena as seções do Dashboard segundo a prioridade do médico:
+// 1º Inteligência Financeira  2º Gráficos Operacionais  3º Receita Recorrente …
+function _reorderDashboardSections() {
+  const dashboard = document.getElementById('page-dashboard');
+  if (!dashboard) return;
+  const ordem = ['financeiro', 'graficos-operacionais', 'mrr', 'procedimentos',
+                 'retencao', 'marketing', 'graficos', 'funil-ultimas'];
+  const sections = ordem
+    .map(name => dashboard.querySelector(`[data-section="${name}"]`))
+    .filter(Boolean);
+  if (!sections.length) return;
+  // Pega o pai da primeira seção (mesmo pai pra todas)
+  const parent = sections[0].parentNode;
+  // Reanexa na ordem desejada — appendChild remove do lugar atual e insere no fim
+  sections.forEach(el => parent.appendChild(el));
 }
 
 function _atualizarSidebar() {
