@@ -1283,6 +1283,18 @@ function renovarInscricao(id) {
       Vencimento atual: <strong>${formatDate(ins.dataFim || '—')}</strong><br>
       Novo vencimento após renovação: <strong>${formatDate(_addDaysIso(ins.dataFim || ins.dataInicio, _vigenciaDias(prog.vigencia)))}</strong>`;
   }
+  // Habilita/desabilita opção "Parcelado" conforme disponibilidade
+  const formaSel = document.getElementById('renovar-forma');
+  const optParcelado = formaSel?.querySelector('option[value="Parcelado"]');
+  const temParcelas = Array.isArray(prog.parcelas) && prog.parcelas.length > 0;
+  if (optParcelado) {
+    optParcelado.disabled = !temParcelas;
+    optParcelado.textContent = temParcelas ? 'Parcelado' : 'Parcelado (não disponível)';
+  }
+  // Se a opção atual é Parcelado mas não tem parcelas, força À vista
+  if (formaSel && formaSel.value === 'Parcelado' && !temParcelas) {
+    formaSel.value = 'À vista';
+  }
   // Popula selects de parcelamento
   _atualizarRenovacao();
   openModal('modal-renovar');
@@ -1299,17 +1311,25 @@ function _atualizarRenovacao() {
   const selParcelas  = document.getElementById('renovar-parcelas-sel');
   const valEl        = document.getElementById('renovar-valor-total');
 
-  if (forma === 'Parcelado') {
+  const parcelasDisponiveis = Array.isArray(prog.parcelas) && prog.parcelas.length > 0;
+
+  if (forma === 'Parcelado' && parcelasDisponiveis) {
     wrapParcelas.style.display = '';
-    selParcelas.innerHTML = (prog.parcelas || []).map(p =>
+    selParcelas.innerHTML = prog.parcelas.map(p =>
       `<option value="${p.n}">${p.n}x ${BRL(p.valor)} (total ${BRL(p.n * p.valor)})</option>`
     ).join('');
-    const nSel = parseInt(selParcelas.value) || (prog.parcelas?.[0]?.n);
-    const opt  = (prog.parcelas || []).find(p => p.n === nSel);
+    const nSel = parseInt(selParcelas.value) || prog.parcelas[0].n;
+    const opt  = prog.parcelas.find(p => p.n === nSel) || prog.parcelas[0];
     if (opt && valEl) valEl.textContent = `Valor total: ${BRL(opt.n * opt.valor)}`;
   } else {
+    // À vista (ou Parcelado quando não há parcelas — fallback seguro)
     wrapParcelas.style.display = 'none';
     if (valEl) valEl.textContent = `Valor total: ${BRL(prog.precoAVista || 0)} (à vista)`;
+    // Se o usuário tinha selecionado Parcelado sem opção, reseta pra À vista
+    const formaSel = document.getElementById('renovar-forma');
+    if (formaSel && formaSel.value === 'Parcelado' && !parcelasDisponiveis) {
+      formaSel.value = 'À vista';
+    }
   }
 }
 
@@ -1695,20 +1715,34 @@ function _atualizarPagamentoInscrever(progOverride) {
   const id = document.getElementById('ins-programa').value;
   const prog = progOverride || getProgramas().find(p => p.id === id);
   if (!prog || prog.tipo !== 'Assinatura') return;
-  const forma = document.getElementById('ins-forma-pgto').value;
+  const formaEl = document.getElementById('ins-forma-pgto');
+  const forma = formaEl?.value;
   const parcelasWrap = document.getElementById('ins-parcelas-wrap');
   const parcelasSel  = document.getElementById('ins-parcelas-sel');
   const valEl        = document.getElementById('ins-valor-total');
+  const parcelasDisp = Array.isArray(prog.parcelas) && prog.parcelas.length > 0;
 
-  if (forma === 'Parcelado') {
+  // Desabilita "Parcelado" se programa não permite
+  const optParc = formaEl?.querySelector('option[value="Parcelado"]');
+  if (optParc) {
+    optParc.disabled = !parcelasDisp;
+    optParc.textContent = parcelasDisp ? 'Parcelado' : 'Parcelado (não disponível)';
+  }
+  // Auto-fallback se selecionou Parcelado mas não tem parcelas
+  if (formaEl && forma === 'Parcelado' && !parcelasDisp) {
+    formaEl.value = 'À vista';
+  }
+  const formaAtual = formaEl?.value;
+
+  if (formaAtual === 'Parcelado' && parcelasDisp) {
     if (parcelasWrap) parcelasWrap.style.display = '';
     if (parcelasSel) {
-      parcelasSel.innerHTML = (prog.parcelas || []).map(p =>
+      parcelasSel.innerHTML = prog.parcelas.map(p =>
         `<option value="${p.n}">${p.n}x ${BRL(p.valor)} (total ${BRL(p.n * p.valor)})</option>`
       ).join('');
     }
-    const nSel = parseInt(parcelasSel?.value) || (prog.parcelas?.[0]?.n);
-    const opt  = (prog.parcelas || []).find(p => p.n === nSel);
+    const nSel = parseInt(parcelasSel?.value) || prog.parcelas[0].n;
+    const opt  = prog.parcelas.find(p => p.n === nSel) || prog.parcelas[0];
     if (valEl) valEl.textContent = opt ? `Valor total: ${BRL(opt.n * opt.valor)}` : '';
   } else {
     if (parcelasWrap) parcelasWrap.style.display = 'none';
