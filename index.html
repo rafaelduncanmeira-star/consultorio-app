@@ -147,6 +147,23 @@
     .kpi-icon.red    { background:#fee2e2; color:#dc2626; }
     .kpi-icon.purple { background:#ede9fe; color:#7c3aed; }
     .kpi-icon.indigo { background:#e0e7ff; color:#4f46e5; }
+    /* Header de seção (com ícone Lucide inline) */
+    .section-head { display:flex; align-items:center; gap:8px; font-size:11.5px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.07em; }
+    .section-head i { width:14px; height:14px; stroke-width:2.2; flex-shrink:0; }
+    .section-head.green i  { color:#10b981; }
+    .section-head.blue i   { color:#3b82f6; }
+    .section-head.amber i  { color:#f59e0b; }
+    .section-head.red i    { color:#ef4444; }
+    .section-head.purple i { color:#8b5cf6; }
+    .section-head.indigo i { color:#6366f1; }
+    /* Ícone grande em card (Configurações) */
+    .card-icon-lg { width:44px; height:44px; border-radius:11px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .card-icon-lg i { width:22px; height:22px; stroke-width:2; }
+    .card-icon-lg.green  { background:#d1fae5; color:#059669; }
+    .card-icon-lg.blue   { background:#dbeafe; color:#2563eb; }
+    .card-icon-lg.amber  { background:#fef3c7; color:#d97706; }
+    .card-icon-lg.purple { background:#ede9fe; color:#7c3aed; }
+    .card-icon-lg.indigo { background:#e0e7ff; color:#4f46e5; }
 
     /* ── Modal ── */
     .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.45); backdrop-filter:blur(6px); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px; }
@@ -692,7 +709,7 @@
       <!-- ===== ANÁLISE (Alertas + MaestrIA com tabs) ===== -->
       <div data-section="analise" style="margin-bottom:24px;">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-          <div style="font-size:11.5px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.07em;">📊 Análise do consultório</div>
+          <div class="section-head blue"><i data-lucide="line-chart"></i> Análise do consultório</div>
           <div style="flex:1;height:1px;background:#e2e8f0;"></div>
           <span id="analise-timestamp" style="font-size:11px;color:#94a3b8;display:none;">—</span>
           <button onclick="toggleSection('analise')" class="btn-section-toggle" title="Ocultar seção">−</button>
@@ -831,7 +848,7 @@
       <!-- ===== RECEITA RECORRENTE (PROGRAMAS DE ASSINATURA) ===== -->
       <div id="dash-mrr-section" style="margin-bottom:24px;display:none;" data-section="mrr">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-          <div style="font-size:11.5px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.07em;">🔁 Receita Recorrente</div>
+          <div class="section-head green"><i data-lucide="repeat-2"></i> Receita Recorrente</div>
           <div style="flex:1;height:1px;background:#e2e8f0;"></div>
           <div style="font-size:11px;color:#64748b;">Programas de assinatura ativos</div>
           <button onclick="showPage('programas')" style="background:#eff6ff;color:#1d4ed8;border:none;border-radius:6px;padding:5px 10px;font-size:11.5px;font-weight:600;cursor:pointer;">Ver programas →</button>
@@ -866,7 +883,7 @@
       <!-- ===== RECEITA POR PROCEDIMENTO ===== -->
       <div style="margin-bottom:24px;" data-section="procedimentos">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-          <div style="font-size:11.5px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.07em;">📊 Receita por Procedimento</div>
+          <div class="section-head blue"><i data-lucide="bar-chart-3"></i> Receita por Procedimento</div>
           <div style="flex:1;height:1px;background:#e2e8f0;"></div>
           <div style="font-size:11px;color:#64748b;">O que mais fatura no consultório</div>
           <button onclick="toggleSection('procedimentos')" class="btn-section-toggle" title="Ocultar seção">−</button>
@@ -881,7 +898,7 @@
       <!-- ===== PACOTE 3: RETENÇÃO E LTV ===== -->
       <div style="margin-bottom:24px;" data-section="retencao">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-          <div style="font-size:11.5px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.07em;">💎 Retenção e Lifetime Value</div>
+          <div class="section-head purple"><i data-lucide="gem"></i> Retenção e Lifetime Value</div>
           <div style="flex:1;height:1px;background:#e2e8f0;"></div>
           <div style="font-size:11px;color:#64748b;">Geriatria vive de paciente recorrente</div>
           <button onclick="toggleSection('retencao')" class="btn-section-toggle" title="Ocultar seção">−</button>
@@ -944,7 +961,7 @@
       <!-- ===== PACOTE 2: AQUISIÇÃO E MARKETING ===== -->
       <div style="margin-bottom:24px;" data-section="marketing">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-          <div style="font-size:11.5px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.07em;">📣 Aquisição e Marketing</div>
+          <div class="section-head amber"><i data-lucide="megaphone"></i> Aquisição e Marketing</div>
           <div style="flex:1;height:1px;background:#e2e8f0;"></div>
           <div style="font-size:11px;color:#64748b;">Saiba quais canais valem investimento</div>
           <button onclick="toggleSection('marketing')" class="btn-section-toggle" title="Ocultar seção">−</button>
@@ -1017,7 +1034,7 @@
       <!-- ===== PACOTE 1: INTELIGÊNCIA FINANCEIRA ===== -->
       <div style="margin-bottom:24px;" data-section="financeiro">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-          <div style="font-size:11.5px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.07em;">💰 Inteligência Financeira</div>
+          <div class="section-head green"><i data-lucide="wallet"></i> Inteligência Financeira</div>
           <div style="flex:1;height:1px;background:#e2e8f0;"></div>
           <div style="font-size:11px;color:#64748b;">Projeção, DRE e fôlego de caixa</div>
           <button onclick="toggleSection('financeiro')" class="btn-section-toggle" title="Ocultar seção">−</button>
@@ -1089,7 +1106,7 @@
       <!-- ===== PACOTE 5: TENDÊNCIAS E GRÁFICOS ===== -->
       <div data-section="graficos" style="margin-bottom:24px;">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-          <div style="font-size:11.5px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.07em;">📈 Tendências e Gráficos</div>
+          <div class="section-head indigo"><i data-lucide="trending-up"></i> Tendências e Gráficos</div>
           <div style="flex:1;height:1px;background:#e2e8f0;"></div>
           <div style="font-size:11px;color:#64748b;">Histórico e padrões</div>
           <button onclick="toggleSection('graficos')" class="btn-section-toggle" title="Ocultar seção">−</button>
@@ -1139,7 +1156,7 @@
       <!-- Charts: Receita, Ocupação, Canais, Despesas (colapsável) -->
       <div style="margin-bottom:24px;" data-section="graficos-operacionais">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-          <div style="font-size:11.5px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.07em;">📊 Gráficos Operacionais</div>
+          <div class="section-head blue"><i data-lucide="activity"></i> Gráficos Operacionais</div>
           <div style="flex:1;height:1px;background:#e2e8f0;"></div>
           <div style="font-size:11px;color:#64748b;">Visão do mês em andamento</div>
           <button onclick="toggleSection('graficos-operacionais')" class="btn-section-toggle" title="Ocultar seção">−</button>
@@ -1195,7 +1212,7 @@
       <!-- Bottom row: Funil + Últimas Consultas -->
       <div style="margin-bottom:0;" data-section="funil-ultimas">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-          <div style="font-size:11.5px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.07em;">🔽 Funil e Últimas Consultas</div>
+          <div class="section-head purple"><i data-lucide="filter"></i> Funil e Últimas Consultas</div>
           <div style="flex:1;height:1px;background:#e2e8f0;"></div>
           <div style="font-size:11px;color:#64748b;">Da prospecção ao atendimento</div>
           <button onclick="toggleSection('funil-ultimas')" class="btn-section-toggle" title="Ocultar seção">−</button>
@@ -1630,7 +1647,7 @@
     <!-- ===================== BACKUP ===================== -->
     <div id="page-backup" class="page">
       <div style="margin-bottom:28px;">
-        <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">💾 Backup de Dados</div>
+        <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">Backup de Dados</div>
         <div style="font-size:13.5px;color:#94a3b8;margin-top:4px;">Exporte, importe e gerencie seus dados com segurança</div>
       </div>
 
@@ -1720,7 +1737,7 @@
     <div id="page-configuracoes" class="page">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:28px;">
         <div>
-          <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">⚙️ Configurações</div>
+          <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">Configurações</div>
           <div style="font-size:13.5px;color:#94a3b8;margin-top:4px;">Integrações e preferências do sistema</div>
         </div>
       </div>
@@ -1728,7 +1745,7 @@
       <!-- Sobre o Consultório -->
       <div class="chart-card" style="margin-bottom:20px;">
         <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;">
-          <div style="font-size:30px;line-height:1;">🏥</div>
+          <div class="card-icon-lg green"><i data-lucide="building-2"></i></div>
           <div style="flex:1;">
             <div style="font-size:15px;font-weight:700;color:#0f172a;">Sobre o Consultório</div>
             <div style="font-size:12.5px;color:#64748b;margin-top:3px;">Personalize o nome, especialidade e aparência do sistema</div>
@@ -1773,7 +1790,7 @@
       <!-- Equipe (Multi-usuário) -->
       <div class="chart-card" id="equipe-card" style="margin-bottom:20px;">
         <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;">
-          <div style="font-size:30px;line-height:1;">👥</div>
+          <div class="card-icon-lg blue"><i data-lucide="users"></i></div>
           <div style="flex:1;">
             <div style="font-size:15px;font-weight:700;color:#0f172a;">Equipe</div>
             <div style="font-size:12.5px;color:#64748b;margin-top:3px;" id="equipe-subtitle">Compartilhe o consultório com sua secretária</div>
@@ -1787,7 +1804,7 @@
       <!-- Instalar como App (PWA) -->
       <div class="chart-card" style="margin-bottom:20px;">
         <div style="display:flex;align-items:center;gap:14px;">
-          <div style="font-size:30px;line-height:1;">📱</div>
+          <div class="card-icon-lg indigo"><i data-lucide="smartphone"></i></div>
           <div style="flex:1;">
             <div style="font-size:15px;font-weight:700;color:#0f172a;">Instalar no celular</div>
             <div style="font-size:12.5px;color:#64748b;margin-top:3px;">Use o sistema como um app nativo, com ícone na tela inicial</div>
@@ -1823,9 +1840,12 @@
       <!-- Galeria de Conquistas -->
       <div class="chart-card" id="conquistas-section" style="margin-bottom:20px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
-          <div>
-            <div style="font-size:15px;font-weight:700;color:#0f172a;">🎼 Maestria do Consultório</div>
-            <div style="font-size:12.5px;color:#64748b;margin-top:3px;">Conquistas e nível de evolução no sistema</div>
+          <div style="display:flex;align-items:center;gap:14px;">
+            <div class="card-icon-lg purple"><i data-lucide="music-4"></i></div>
+            <div>
+              <div style="font-size:15px;font-weight:700;color:#0f172a;">Maestria do Consultório</div>
+              <div style="font-size:12.5px;color:#64748b;margin-top:3px;">Conquistas e nível de evolução no sistema</div>
+            </div>
           </div>
           <div id="maestria-nivel-badge" style="background:#0f172a;color:#10b981;padding:6px 14px;border-radius:999px;font-size:12px;font-weight:700;"></div>
         </div>
@@ -1846,7 +1866,7 @@
       <!-- Z-API Card -->
       <div class="chart-card" style="margin-bottom:20px;">
         <div style="display:flex;align-items:center;gap:14px;">
-          <div style="font-size:30px;line-height:1;">💬</div>
+          <div class="card-icon-lg green"><i data-lucide="message-circle"></i></div>
           <div style="flex:1;">
             <div style="font-size:15px;font-weight:700;color:#0f172a;">Integração WhatsApp (Z-API)</div>
             <div style="font-size:12.5px;color:#64748b;margin-top:3px;">Receba contatos no CRM e responda mensagens de dentro do sistema</div>
