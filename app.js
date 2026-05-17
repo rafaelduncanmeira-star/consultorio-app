@@ -869,7 +869,9 @@ function _vigenciaDias(vigencia) {
 
 function getProgramas() {
   let arr = DB.get('programas');
-  if (!localStorage.getItem('consult_progs_seeded_v2')) {
+  // Recompõe seeds se: (a) flag v2 não existe OU (b) array está vazio
+  // (a 2ª condição cobre o caso de backup antigo sem programas)
+  if (!arr.length || !localStorage.getItem('consult_progs_seeded_v2')) {
     arr = [
       {
         id: 'pg_compagni',
@@ -7855,7 +7857,22 @@ function switchPerfilTab(tab, btn) {
 // ====================== INIT ======================
 // ====================== BACKUP ======================
 
-const BACKUP_KEYS = ['pacientes','crm','despesas','followup','agendamentos','bloqueios','procedimentos','agenda_config','metas','chat_history'];
+const BACKUP_KEYS = [
+  // Dados operacionais
+  'pacientes','crm','despesas','followup','agendamentos','bloqueios',
+  // Configurações
+  'procedimentos','agenda_config','metas','metas_proc','metas_proc_valor',
+  // Programas (cuidado longitudinal e assinaturas)
+  'programas','inscricoes',
+  // Personalização do consultório
+  'clinica_config',
+  // Integrações
+  'zapi_config',
+  // Gamificação
+  'maestria',
+  // Histórico do chat (não-crítico, mas útil)
+  'chat_history'
+];
 
 // ====================== CONFIGURAÇÕES / Z-API ======================
 
@@ -8616,9 +8633,11 @@ function exportarJSON() {
     if (raw) dados[k] = JSON.parse(raw);
   });
   dados._meta = {
-    versao: '1.0',
+    versao: '2.0',  // bump: agora inclui programas, inscrições, maestria, clinica_config
     exportadoEm: new Date().toISOString(),
+    exportadoPor: (typeof currentNome !== 'undefined' && currentNome) ? currentNome : 'anon',
     app: 'Consultório App',
+    chaves: BACKUP_KEYS.length,
   };
   const blob = new Blob([JSON.stringify(dados, null, 2)], { type: 'application/json' });
   const url  = URL.createObjectURL(blob);
