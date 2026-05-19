@@ -1156,6 +1156,55 @@ function _addDaysIso(isoDate, dias) {
 }
 
 // Cria inscrição + agendamentos + follow-ups automaticamente
+// Gera o cronograma completo de follow-ups para uma inscrição em programa de Assinatura.
+// Estratégia varia por vigência — pacientes de assinaturas longas (Anual/Semestral) recebem
+// check-ins regulares; mensais recebem só boas-vindas + renovação.
+function _gerarCronogramaFollowups(ins, prog, dataInicio, dataFim) {
+  if (!prog || prog.tipo !== 'Assinatura') return [];
+  const nome = ins.pacienteNome;
+  const tipoBase = { nome, tipoContato: 'WhatsApp', feito: false,
+                     dataReav: dataFim, programaInscricaoId: ins.id };
+  const fus = [];
+  const vigDias = _vigenciaDias(prog.vigencia);
+
+  function addFu(dias, etiqueta, ultConsultaOverride) {
+    const dataContato = _addDaysIso(dataInicio, dias);
+    // Só agenda se a data ainda está dentro da vigência (ou no máximo no dia do venc)
+    if (dataContato > dataFim) return;
+    fus.push({
+      ...tipoBase,
+      ultConsulta: ultConsultaOverride || dataInicio,
+      dataContato,
+      obs: etiqueta,
+    });
+  }
+
+  if (prog.vigencia === 'Mensal') {
+    // 7 dias: boas-vindas | 25 dias: renovação (5 dias antes do fim)
+    addFu(7,  `Check-in inicial · ${prog.nome}`);
+    addFu(Math.max(vigDias - 5, 15), `Renovar ${prog.nome}`);
+  } else if (prog.vigencia === 'Trimestral') {
+    // 7d boas-vindas · 45d meio · 80d renovação (10d antes)
+    addFu(7,  `Boas-vindas · ${prog.nome}`);
+    addFu(45, `Check-in intermediário · ${prog.nome}`);
+    addFu(vigDias - 10, `Renovar ${prog.nome}`);
+  } else if (prog.vigencia === 'Semestral') {
+    // 7d, 60d, 120d, renovação 30d antes do fim
+    addFu(7,   `Boas-vindas · ${prog.nome}`);
+    addFu(60,  `Check-in 2 meses · ${prog.nome}`);
+    addFu(120, `Check-in 4 meses · ${prog.nome}`);
+    addFu(vigDias - 30, `Renovar ${prog.nome}`);
+  } else {
+    // Anual (365d): 7d, 90d, 180d (meio), 270d, renovação 30d antes
+    addFu(7,   `Boas-vindas · ${prog.nome}`);
+    addFu(90,  `Check-in trimestral · ${prog.nome}`);
+    addFu(180, `Check-in semestral · ${prog.nome}`);
+    addFu(270, `Check-in 9 meses · ${prog.nome}`);
+    addFu(vigDias - 30, `Renovar ${prog.nome}`);
+  }
+  return fus;
+}
+
 function inscreverEmPrograma(programaId, pacienteRef, dataInicio, horaPadrao = '08:00', pagamentoOpts = {}) {
   const prog = getProgramas().find(p => p.id === programaId);
   if (!prog) { alert('Programa não encontrado.'); return null; }
@@ -1201,17 +1250,13 @@ function inscreverEmPrograma(programaId, pacienteRef, dataInicio, horaPadrao = '
     });
     DB.set('pacientes', pacs);
 
-    // Follow-up de renovação 30 dias antes do vencimento
+    // Cronograma completo de follow-ups durante a vigência da assinatura
     const fus = DB.get('followup');
-    fus.push({
-      nome, ultConsulta: dataInicio,
-      dataContato: _addDaysIso(dataFim, -30),
-      tipoContato: 'WhatsApp', feito: false,
-      dataReav: dataFim,
-      obs: `Renovar programa ${prog.nome}`,
-      programaInscricaoId: inscricao.id,
-    });
-    DB.set('followup', fus);
+    const cronograma = _gerarCronogramaFollowups(
+      { ...inscricao, pacienteNome: nome, pacienteWhatsapp: whatsapp },
+      prog, dataInicio, dataFim
+    );
+    DB.set('followup', [...fus, ...cronograma]);
 
     const inscricoes = DB.get('inscricoes');
     inscricoes.push(inscricao);
@@ -1361,17 +1406,16 @@ function saveRenovacao(e) {
   ins.valorTotal     = valorTotal;
   DB.set('inscricoes', inscricoes);
 
-  // Novo follow-up de renovação
-  const fus = DB.get('followup');
-  fus.push({
-    nome: ins.pacienteNome, ultConsulta: new Date().toISOString().substring(0, 10),
-    dataContato: _addDaysIso(novaDataFim, -30),
-    tipoContato: 'WhatsApp', feito: false,
-    dataReav: novaDataFim,
-    obs: `Renovar programa ${prog.nome}`,
-    programaInscricaoId: ins.id,
-  });
-  DB.set('followup', fus);
+  // Atualiza/cria follow-ups do programa
+  // — Estratégia: remove os pendentes/futuros desta inscrição e recria o cronograma
+  //   completo a partir da nova data de início (data atual da renovação)
+  const fusOriginal = DB.get('followup');
+  const fusManter = fusOriginal.filter(f =>
+    f.programaInscricaoId !== ins.id || f.feito
+  );
+  const hoje = new Date().toISOString().substring(0, 10);
+  const novosFus = _gerarCronogramaFollowups(ins, prog, hoje, novaDataFim);
+  DB.set('followup', [...fusManter, ...novosFus]);
 
   // Novo lançamento financeiro
   const pacs = DB.get('pacientes');
@@ -3443,9 +3487,42 @@ function renderFollowup() {
   if (cR) cR.textContent = regularAll.length;
   if (cP) cP.textContent = programaAll.length;
 
-  const data = _followupTab === 'programa' ? programaAll : regularAll;
-  // Mantém índice original pra edit/delete funcionarem
+  // Aplica filtro por programa (só na aba programa)
+  let data = _followupTab === 'programa' ? programaAll.slice() : regularAll.slice();
+  const filtroProg = document.getElementById('fu-filtro-programa')?.value || '';
+  const inscricoes = getInscricoes();
+  const programas  = getProgramas();
+  if (_followupTab === 'programa' && filtroProg) {
+    const insDoProg = inscricoes.filter(i => i.programaId === filtroProg).map(i => i.id);
+    data = data.filter(r => insDoProg.includes(r.programaInscricaoId));
+  }
+
+  // Ordena: pendentes (mais urgentes primeiro) → feitos no final
+  data.sort((a, b) => {
+    if (a.feito !== b.feito) return a.feito ? 1 : -1;
+    return (a.dataContato || '').localeCompare(b.dataContato || '');
+  });
+
+  // Mapeia índice original pra edit/delete
   const dataIdx = data.map(r => all.indexOf(r));
+
+  // Render do filtro de programas (só na aba programa)
+  const filtroWrap = document.getElementById('fu-filtros-wrap');
+  if (filtroWrap) {
+    if (_followupTab === 'programa') {
+      const progsComInscr = programas.filter(p => inscricoes.some(i => i.programaId === p.id));
+      filtroWrap.innerHTML = `
+        <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap;">
+          <select id="fu-filtro-programa" onchange="renderFollowup()" class="select" style="min-width:240px;font-size:13px;">
+            <option value="">Todos os programas</option>
+            ${progsComInscr.map(p => `<option value="${p.id}" ${p.id === filtroProg ? 'selected':''}>${_esc(p.nome)}</option>`).join('')}
+          </select>
+          <span style="font-size:11.5px;color:#94a3b8;">${data.length} follow-up(s) • ordenado por urgência</span>
+        </div>`;
+    } else {
+      filtroWrap.innerHTML = '';
+    }
+  }
 
   const vencidos = data.filter(r => !r.feito && r.dataContato && r.dataContato <= today);
 
@@ -3467,40 +3544,76 @@ function renderFollowup() {
     const msg = _followupTab === 'programa'
       ? 'Nenhum follow-up de programa. Inscreva um paciente em um Programa de Acompanhamento na aba Programas.'
       : 'Nenhum follow-up regular registrado.';
-    tbody.innerHTML = `<tr><td colspan="8" class="text-center py-12 text-gray-400">${msg}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-12 text-gray-400">${msg}</td></tr>`;
     return;
   }
-
-  const inscricoes = getInscricoes();
-  const programas  = getProgramas();
 
   tbody.innerHTML = data.map((r, localI) => {
     const i = dataIdx[localI];
     const atrasado = !r.feito && r.dataContato && r.dataContato < today;
-    let badge = '';
+    const hoje = !r.feito && r.dataContato === today;
+    // Etapa (etiqueta extraída do obs) + badge de programa
+    let etiqueta = r.obs || '';
+    let badgeProg = '';
     if (r.programaInscricaoId) {
       const ins  = inscricoes.find(x => x.id === r.programaInscricaoId);
       const prog = ins ? programas.find(p => p.id === ins.programaId) : null;
       const nomeProg = prog ? prog.nome : 'Programa';
-      badge = ` <span title="${_esc(nomeProg)}" style="background:#dbeafe;color:#1d4ed8;font-size:10px;padding:2px 6px;border-radius:999px;margin-left:4px;font-weight:700;">🔁 ${_esc(nomeProg)}</span>`;
+      badgeProg = `<div style="font-size:10.5px;color:#1d4ed8;font-weight:600;background:#dbeafe;display:inline-block;padding:1px 8px;border-radius:999px;margin-top:3px;">🔁 ${_esc(nomeProg)}</div>`;
+      // Extrai etiqueta (parte antes do '·' ou nome do programa)
+      const m = (r.obs || '').match(/^([^·]+)·/);
+      etiqueta = m ? m[1].trim() : (r.obs || '').replace(`Renovar ${nomeProg}`, 'Renovar') || '—';
     }
+    // Indicador de dias
+    let diasIndic = '';
+    if (!r.feito && r.dataContato) {
+      const diff = Math.round((new Date(r.dataContato + 'T12:00') - new Date(today + 'T12:00')) / 86400000);
+      if (diff < 0) diasIndic = `<span style="color:#dc2626;font-weight:700;">atrasado ${Math.abs(diff)}d</span>`;
+      else if (diff === 0) diasIndic = `<span style="color:#f59e0b;font-weight:700;">hoje</span>`;
+      else if (diff <= 7) diasIndic = `<span style="color:#0f172a;font-weight:600;">em ${diff}d</span>`;
+      else diasIndic = `<span style="color:#64748b;">em ${diff}d</span>`;
+    } else if (r.feito) {
+      diasIndic = `<span style="color:#10b981;font-weight:600;">✓ feito</span>`;
+    }
+    const bg = atrasado ? 'bg-orange-50' : hoje ? 'bg-amber-50' : '';
     return `
-    <tr class="border-b border-gray-50 hover:bg-gray-50 ${atrasado ? 'bg-orange-50' : ''}">
-      <td class="px-4 py-3 font-medium text-gray-900">${_esc(r.nome)}${badge}</td>
-      <td class="px-4 py-3 text-gray-600">${formatDate(r.ultConsulta)}</td>
-      <td class="px-4 py-3 text-gray-600 ${atrasado ? 'text-orange-600 font-semibold' : ''}">${formatDate(r.dataContato)}</td>
-      <td class="px-4 py-3 text-gray-600">${_esc(r.tipoContato)}</td>
+    <tr class="border-b border-gray-50 hover:bg-gray-50 ${bg}" data-fu-row="${i}">
       <td class="px-4 py-3">
-        <input type="checkbox" ${r.feito ? 'checked' : ''} onchange="toggleFollowupFeito(${i})" class="w-4 h-4 accent-green-600 cursor-pointer" />
+        <div style="font-weight:600;color:#0f172a;">${_esc(r.nome)}</div>
+        ${badgeProg}
       </td>
-      <td class="px-4 py-3 text-gray-600">${formatDate(r.dataReav)}</td>
-      <td class="px-4 py-3">${statusBadge(r.feito ? 'Feito' : 'Pendente')}</td>
+      <td class="px-4 py-3 text-gray-700" style="font-size:12.5px;">${_esc(etiqueta)}</td>
+      <td class="px-4 py-3 text-gray-600">${formatDate(r.ultConsulta) || '—'}</td>
+      <td class="px-4 py-3">
+        <div style="color:${atrasado ? '#dc2626' : hoje ? '#d97706' : '#475569'};font-weight:${atrasado || hoje ? '700' : '500'};">${formatDate(r.dataContato)}</div>
+        <div style="font-size:11px;margin-top:1px;">${diasIndic}</div>
+      </td>
+      <td class="px-4 py-3 text-gray-600">${_esc(r.tipoContato)}</td>
+      <td class="px-4 py-3 text-center">
+        <input type="checkbox" ${r.feito ? 'checked' : ''} onchange="toggleFollowupFeito(${i})" class="w-4 h-4 accent-green-600 cursor-pointer" title="${r.feito ? 'Desmarcar' : 'Marcar como feito'}" />
+      </td>
       <td class="px-4 py-3" style="white-space:nowrap;">
+        ${r.nome && (r.tipoContato || '').includes('WhatsApp') ? `<button onclick="_openWhatsAppForFu(${i})" title="Abrir WhatsApp" style="background:#dcfce7;color:#16a34a;border:none;border-radius:6px;padding:4px 9px;font-size:12px;cursor:pointer;margin-right:4px;">💬</button>` : ''}
         <button onclick="editRow('followup',${i})" class="text-blue-400 hover:text-blue-600 text-xs mr-2" title="Editar">✏️</button>
         <button onclick="deleteRow('followup',${i})" class="text-red-400 hover:text-red-600 text-xs" title="Excluir">🗑️</button>
       </td>
     </tr>`;
   }).join('');
+}
+
+// Abre WhatsApp com mensagem pré-formatada para o follow-up
+function _openWhatsAppForFu(idx) {
+  const fu = DB.get('followup')[idx];
+  if (!fu) return;
+  // Tenta achar o telefone do paciente
+  const pac = DB.get('pacientes').find(p => p.nome === fu.nome && p.whatsapp);
+  const crm = DB.get('crm').find(c => c.nome === fu.nome && c.whatsapp);
+  const ins = DB.get('inscricoes').find(i => i.id === fu.programaInscricaoId);
+  const wa = (pac?.whatsapp || crm?.whatsapp || ins?.pacienteWhatsapp || '').replace(/\D/g, '');
+  if (!wa) { alert('WhatsApp não encontrado para ' + fu.nome); return; }
+  const fone55 = wa.startsWith('55') ? wa : '55' + wa;
+  const msg = encodeURIComponent(`Olá ${fu.nome.split(' ')[0]}! ${fu.obs}`);
+  window.open(`https://wa.me/${fone55}?text=${msg}`, '_blank');
 }
 
 // ====================== AGENDA ======================

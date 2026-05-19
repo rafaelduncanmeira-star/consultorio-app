@@ -1387,10 +1387,12 @@
       </div>
       <!-- Banner: atendidos sem follow-up (só na aba regular) -->
       <div id="atendidos-sem-followup"></div>
+      <!-- Filtros adicionais (só programa) -->
+      <div id="fu-filtros-wrap"></div>
       <div class="chart-card" style="padding:0;overflow:hidden;">
         <table class="data-table">
-          <thead><tr><th>Paciente</th><th>Última Consulta</th><th>Próx. Contato</th><th>Tipo</th><th>Feito?</th><th>Reavaliação</th><th>Status</th><th></th></tr></thead>
-          <tbody id="followup-tbody"><tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:48px;">Nenhum follow-up registrado.</td></tr></tbody>
+          <thead><tr><th>Paciente</th><th>Etapa</th><th>Última consulta</th><th>Próx. contato</th><th>Tipo</th><th style="text-align:center;">Feito</th><th>Ações</th></tr></thead>
+          <tbody id="followup-tbody"><tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:48px;">Nenhum follow-up registrado.</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -1414,7 +1416,7 @@
       <!-- Tabs -->
       <div style="display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid #e2e8f0;">
         <button id="prog-tab-pacientes" class="prog-tab prog-tab-active" onclick="setProgramasTab('pacientes')" style="padding:8px 16px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;color:#475569;">Pacientes inscritos</button>
-        <button id="prog-tab-templates" class="prog-tab" onclick="setProgramasTab('templates')" style="padding:8px 16px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;color:#94a3b8;">Templates</button>
+        <button id="prog-tab-templates" class="prog-tab" onclick="setProgramasTab('templates')" style="padding:8px 16px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;color:#94a3b8;">Programas</button>
       </div>
 
       <div id="prog-conteudo-pacientes"></div>
