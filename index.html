@@ -2327,7 +2327,8 @@
         <label style="display:flex;align-items:center;justify-content:space-between;">Campos clínicos a registrar<button type="button" onclick="_addCampoClinicoTpl()" style="background:#10b981;color:#fff;border:none;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;">+ Campo</button></label>
         <div id="tpl-campos" style="display:flex;flex-direction:column;gap:6px;margin-top:6px;"></div>
       </div>
-      <!-- Tipo Assinatura (mostrar/esconder via JS) -->
+
+      <!-- Bloco específico de Assinatura: vigência -->
       <div id="tpl-assinatura-wrap" style="display:none;">
         <div style="margin-bottom:14px;">
           <label>Vigência</label>
@@ -2338,25 +2339,38 @@
             <option value="Anual" selected>Anual</option>
           </select>
         </div>
+      </div>
+
+      <!-- Preço (comum a todos os tipos) -->
+      <div id="tpl-preco-wrap" style="margin-bottom:14px;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;">
+        <div style="font-size:12.5px;font-weight:700;color:#0f172a;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+          💰 Valores do programa
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+          <div>
+            <label id="tpl-preco-label">Preço do pacote (R$)</label>
+            <input type="number" id="tpl-preco-avista" name="precoAVista" class="input" min="0" step="0.01" placeholder="0,00" />
+          </div>
+          <div id="tpl-consulta-avulsa-wrap" style="display:none;">
+            <label>Consulta avulsa extra (R$)</label>
+            <input type="number" id="tpl-consulta-avulsa" name="consultaAvulsa" class="input" min="0" step="0.01" placeholder="0,00" />
+          </div>
+        </div>
+        <div style="margin-bottom:6px;">
+          <label style="display:flex;align-items:center;justify-content:space-between;">
+            <span>Opções de parcelamento <span style="font-weight:400;color:#94a3b8;font-size:11.5px;">(opcional)</span></span>
+            <button type="button" onclick="_addParcelaTpl()" style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:3px 10px;font-size:11.5px;font-weight:600;color:#475569;cursor:pointer;">+ parcela</button>
+          </label>
+          <div id="tpl-parcelas" style="margin-top:6px;"></div>
+        </div>
+      </div>
+
+      <!-- Bloco específico de Assinatura: benefícios e políticas -->
+      <div id="tpl-assinatura-extra-wrap" style="display:none;">
         <div style="margin-bottom:14px;">
           <label>Benefícios inclusos</label>
           <div id="tpl-beneficios"></div>
           <button type="button" onclick="_addBeneficioTpl()" style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;color:#475569;cursor:pointer;margin-top:6px;">+ Benefício</button>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
-          <div>
-            <label>Preço à vista (R$)</label>
-            <input type="number" id="tpl-preco-avista" name="precoAVista" class="input" min="0" step="0.01" placeholder="6480" />
-          </div>
-          <div>
-            <label>Consulta avulsa (R$)</label>
-            <input type="number" id="tpl-consulta-avulsa" name="consultaAvulsa" class="input" min="0" step="0.01" placeholder="1500" />
-          </div>
-        </div>
-        <div style="margin-bottom:14px;">
-          <label>Opções de parcelamento</label>
-          <div id="tpl-parcelas"></div>
-          <button type="button" onclick="_addParcelaTpl()" style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;color:#475569;cursor:pointer;margin-top:6px;">+ Opção de parcela</button>
         </div>
         <div style="margin-bottom:14px;">
           <label>Políticas e regras</label>

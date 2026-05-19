@@ -1306,6 +1306,32 @@ function inscreverEmPrograma(programaId, pacienteRef, dataInicio, horaPadrao = '
 
   DB.set('agendamentos', ags);
   DB.set('followup', fus);
+
+  // Lançamento financeiro do pacote (se programa Fixo/Contínuo tem preço definido)
+  if (prog.precoAVista && prog.precoAVista > 0) {
+    const formaPagamento = pagamentoOpts.formaPagamento || 'À vista';
+    const nParcelas      = pagamentoOpts.nParcelas || null;
+    let valorTotal = prog.precoAVista;
+    if (formaPagamento === 'Parcelado') {
+      const opt = (prog.parcelas || []).find(p => p.n === nParcelas);
+      if (opt) valorTotal = opt.n * opt.valor;
+    }
+    inscricao.formaPagamento = formaPagamento;
+    inscricao.nParcelas      = nParcelas;
+    inscricao.valorTotal     = valorTotal;
+    const pacs = DB.get('pacientes');
+    pacs.push({
+      nome, whatsapp, data: dataInicio,
+      procedimento: prog.nome,
+      tipoAtividade: 'Consultório',
+      valor: valorTotal,
+      statusPgto: formaPagamento === 'À vista' ? 'Pago' : 'Parcial',
+      obs: `[Programa ${prog.tipo}]`,
+      pacIdx,
+    });
+    DB.set('pacientes', pacs);
+  }
+
   const inscricoes = DB.get('inscricoes');
   inscricoes.push(inscricao);
   DB.set('inscricoes', inscricoes);
@@ -1846,16 +1872,23 @@ function openModalTemplatePrograma(id) {
   _camposBuffer = p && p.camposClinicos ? p.camposClinicos.map(c => ({...c})) : [];
   _beneficiosBuffer = p && p.beneficios ? [...p.beneficios] : [];
   _parcelasBuffer   = p && p.parcelas   ? p.parcelas.map(x => ({...x})) : [];
-  // Preenche campos de Assinatura
+  // Preenche preço (comum a todos os tipos)
+  const avEl = document.getElementById('tpl-preco-avista');
+  if (avEl) avEl.value = p && p.precoAVista ? p.precoAVista : '';
+  // Campos específicos de Assinatura
   if (p && p.tipo === 'Assinatura') {
     const vigEl = document.getElementById('tpl-vigencia');
     if (vigEl) vigEl.value = p.vigencia || 'Anual';
-    const avEl = document.getElementById('tpl-preco-avista');
-    if (avEl) avEl.value = p.precoAVista || '';
     const caEl = document.getElementById('tpl-consulta-avulsa');
     if (caEl) caEl.value = p.consultaAvulsa || '';
     const polEl = document.getElementById('tpl-politicas');
     if (polEl) polEl.value = p.politicas || '';
+  } else {
+    // Limpa campos de Assinatura
+    const caEl = document.getElementById('tpl-consulta-avulsa');
+    if (caEl) caEl.value = '';
+    const polEl = document.getElementById('tpl-politicas');
+    if (polEl) polEl.value = '';
   }
   _atualizarTipoPrograma();
   _renderMarcoBuffer();
@@ -1870,8 +1903,26 @@ function _atualizarTipoPrograma() {
   document.getElementById('tpl-marcos-wrap').style.display = tipo === 'Fixo' ? '' : 'none';
   const asnWrap = document.getElementById('tpl-assinatura-wrap');
   if (asnWrap) asnWrap.style.display = tipo === 'Assinatura' ? '' : 'none';
+  const asnExtra = document.getElementById('tpl-assinatura-extra-wrap');
+  if (asnExtra) asnExtra.style.display = tipo === 'Assinatura' ? '' : 'none';
   const camposWrap = document.getElementById('tpl-campos-wrap');
   if (camposWrap) camposWrap.style.display = tipo !== 'Assinatura' ? '' : 'none';
+
+  // Ajusta label do preço e exibe consulta avulsa apenas para Assinatura
+  const precoLabel = document.getElementById('tpl-preco-label');
+  const precoInput = document.getElementById('tpl-preco-avista');
+  const consAvWrap = document.getElementById('tpl-consulta-avulsa-wrap');
+  if (precoLabel) {
+    if (tipo === 'Assinatura') precoLabel.textContent = 'Preço à vista (R$)';
+    else if (tipo === 'Contínuo') precoLabel.textContent = 'Preço por consulta (R$)';
+    else precoLabel.textContent = 'Preço do pacote (R$)';
+  }
+  if (precoInput) {
+    if (tipo === 'Assinatura') precoInput.placeholder = '6480';
+    else if (tipo === 'Contínuo') precoInput.placeholder = '300';
+    else precoInput.placeholder = '1500';
+  }
+  if (consAvWrap) consAvWrap.style.display = tipo === 'Assinatura' ? '' : 'none';
 }
 function _renderBeneficiosBuffer() {
   const cont = document.getElementById('tpl-beneficios');
@@ -1944,6 +1995,10 @@ function saveTemplatePrograma(e) {
   const fd = new FormData(e.target);
   const id = fd.get('programaId') || ('pg_' + Date.now());
   const tipo = fd.get('tipo');
+  // Campos de preço comuns a todos os tipos
+  const precoAVista = parseFloat(fd.get('precoAVista')) || 0;
+  const parcelas = _parcelasBuffer.filter(p => p.n && p.valor);
+
   let programa;
   if (tipo === 'Assinatura') {
     programa = {
@@ -1951,9 +2006,9 @@ function saveTemplatePrograma(e) {
       tipo, descricao: fd.get('descricao') || '',
       vigencia: fd.get('vigencia') || 'Anual',
       beneficios: _beneficiosBuffer.filter(b => b.trim()),
-      precoAVista: parseFloat(fd.get('precoAVista')) || 0,
+      precoAVista,
       descontoAVista: 0,
-      parcelas: _parcelasBuffer.filter(p => p.n && p.valor),
+      parcelas,
       consultaAvulsa: parseFloat(fd.get('consultaAvulsa')) || 0,
       politicas: fd.get('politicas') || '',
       ativo: true,
@@ -1965,6 +2020,8 @@ function saveTemplatePrograma(e) {
       marcos: tipo === 'Fixo' ? _marcoBuffer.filter(m => m.descricao).sort((a,b)=>a.dias-b.dias) : [],
       intervaloDias: tipo === 'Contínuo' ? (parseInt(fd.get('intervaloDias'))||90) : null,
       camposClinicos: _camposBuffer.filter(c => c.nome),
+      precoAVista,
+      parcelas,
       ativo: true,
     };
   }
@@ -1974,7 +2031,8 @@ function saveTemplatePrograma(e) {
   DB.set('programas', progs);
   closeModal('modal-template-programa');
   renderProgramas();
-  toast(`✅ Template "${programa.nome}" salvo`);
+  toast(`✅ Programa "${programa.nome}" salvo`);
+  _auditLog(idx >= 0 ? 'editou' : 'criou', 'programa', `${idx >= 0 ? 'Editou' : 'Criou'} programa ${programa.nome} (${tipo})`);
 }
 
 function openModalRegistrarMarco(inscricaoId, marcoIdx) {
