@@ -2318,28 +2318,65 @@ function updateCrmStatus(idx, newStatus) {
   renderCrm();
   // Atualiza banner de integração se Atendidos estiver aberto
   if (document.getElementById('page-pacientes') && document.getElementById('page-pacientes').classList.contains('active')) renderPacientes();
+  // Dispara efeitos do workflow (proposta de agendamento, atendimento, etc.)
+  _aplicarEfeitosMudancaStatusCrm(idx, oldStatus, newStatus);
+}
 
-  // "Marcou" → propõe criar agendamento na agenda
-  if (newStatus === 'Marcou' && oldStatus !== 'Marcou') {
+// Centraliza os efeitos colaterais de mudança de status de um contato CRM.
+// Chamado tanto pelo dropdown da lista quanto pelo kanban (drag/drop e botão →).
+function _aplicarEfeitosMudancaStatusCrm(idx, oldStatus, newStatus) {
+  if (oldStatus === newStatus) return;
+  const data = DB.get('crm');
+  const c = data[idx];
+  if (!c) return;
+
+  // "Marcou" → propõe criar agendamento, SE não tem agendamento futuro vinculado
+  if (newStatus === 'Marcou') {
+    const today = new Date().toISOString().substring(0,10);
+    const jaTemAg = DB.get('agendamentos').some(a =>
+      a.crmIdx === idx ||
+      ((a.pacienteNome || '').toLowerCase().trim() === (c.nome || '').toLowerCase().trim() &&
+       (a.data || '') >= today && a.status !== 'Cancelado')
+    );
+    if (jaTemAg) return; // não importuna se já agendado
     setTimeout(() => {
-      if (confirm(`${data[idx].nome} marcou consulta — deseja agendar na agenda agora?`)) {
+      if (confirm(`${c.nome} marcou consulta — deseja agendar na agenda agora?`)) {
         openNovoAgendamento({
-          pacienteNome: data[idx].nome,
-          whatsapp: data[idx].whatsapp,
-          procedimento: data[idx].tipo,
+          pacienteNome: c.nome,
+          whatsapp: c.whatsapp,
+          procedimento: c.tipo,
           crmIdx: idx,
         });
       }
     }, 100);
+    return;
   }
 
   // "Atendeu" → propõe registrar atendimento em Atendidos
-  if (newStatus === 'Atendeu' && oldStatus !== 'Atendeu' && !data[idx].converted) {
+  if (newStatus === 'Atendeu' && !c.converted) {
     setTimeout(() => {
-      if (confirm(`Marcar "${data[idx].nome}" como Atendeu também cria o registro em Atendidos.\n\nRegistrar o atendimento agora?`)) {
+      if (confirm(`Marcar "${c.nome}" como Atendeu também cria o registro em Atendidos.\n\nRegistrar o atendimento agora?`)) {
         convertCrmToAtendido(idx);
       }
     }, 100);
+    return;
+  }
+
+  // "Não marcou" → marca agendamentos futuros vinculados como Cancelado (se existirem)
+  if (newStatus === 'Não marcou') {
+    const ags = DB.get('agendamentos');
+    const today = new Date().toISOString().substring(0,10);
+    const idsCancelar = ags.filter(a =>
+      (a.crmIdx === idx || (a.pacienteNome || '').toLowerCase().trim() === (c.nome || '').toLowerCase().trim()) &&
+      (a.data || '') >= today &&
+      a.status !== 'Compareceu' && a.status !== 'Cancelado'
+    );
+    if (idsCancelar.length > 0) {
+      idsCancelar.forEach(a => { a.status = 'Cancelado'; });
+      DB.set('agendamentos', ags);
+      toast(`${idsCancelar.length} agendamento(s) cancelado(s)`);
+      if (document.getElementById('page-agenda')?.classList.contains('active')) renderAgenda();
+    }
   }
 }
 
@@ -3014,6 +3051,8 @@ function moverKanbanCard(idx, novoStatus, evt) {
   renderKanban();
   // Atualiza funil no topo
   _atualizarFunilCrm(data);
+  // Dispara efeitos do workflow (mesma lógica que o dropdown da lista)
+  _aplicarEfeitosMudancaStatusCrm(idx, statusAnterior, novoStatus);
 }
 
 function _atualizarFunilCrm(data) {
@@ -4019,6 +4058,25 @@ function updateAgStatus(id, novo) {
   if (!a) return;
   a.status = novo;
   DB.set('agendamentos', ags);
+
+  // Sincronização reversa: agendamento → CRM
+  if (a.crmIdx !== null && a.crmIdx !== undefined) {
+    const crm = DB.get('crm');
+    const c = crm[a.crmIdx];
+    if (c) {
+      let novoCrm = null;
+      if (novo === 'Compareceu') novoCrm = 'Atendeu';
+      else if (novo === 'Cancelado' || novo === 'Faltou') novoCrm = 'Não marcou';
+      else if (novo === 'Confirmado' && c.status !== 'Marcou') novoCrm = 'Marcou';
+      if (novoCrm && c.status !== novoCrm) {
+        c.status = novoCrm;
+        c._statusSince = new Date().toISOString();
+        DB.set('crm', crm);
+        if (document.getElementById('page-crm')?.classList.contains('active')) renderCrm();
+      }
+    }
+  }
+
   if (novo === 'Compareceu' && !a.pacIdx) {
     if (confirm(`${a.pacienteNome} compareceu — registrar o atendimento agora?`)) {
       _registrarAtendimentoDeAgendamento(a);
