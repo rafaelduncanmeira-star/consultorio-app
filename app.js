@@ -3799,7 +3799,15 @@ function getBloqueios()    { return DB.get('bloqueios'); }
 // Helpers de tempo
 function _toMin(hhmm) { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; }
 function _toHHMM(min) { return String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0'); }
-function _ymd(d) { return d.toISOString().split('T')[0]; }
+// Formata Date como YYYY-MM-DD usando componentes LOCAIS (não UTC).
+// Bug original: toISOString() retorna UTC e shift uma data 1 dia pra trás em fusos negativos
+// (ex.: '2026-05-20 00:00 GMT-3' viraria '2026-05-19' no toISOString).
+function _ymd(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 function _addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
 function _startOfWeek(d) { const x = new Date(d); const dow = x.getDay(); const diff = (dow === 0 ? 6 : dow - 1); x.setDate(x.getDate() - diff); return x; }
 function _isSameDay(a, b) { return _ymd(a) === _ymd(b); }
