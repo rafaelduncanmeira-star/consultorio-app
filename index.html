@@ -2589,7 +2589,43 @@
     <form style="padding:20px 24px 24px;" onsubmit="saveDespesa(event)">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
         <div><label>Data</label><input type="date" class="input" name="data" required /></div>
-        <div><label>Categoria</label><select class="select" name="categoria"><option>Estrutura</option><option>Pessoal</option><option>Marketing</option><option>Materiais</option><option>Profissional</option><option>Impostos</option><option>Outros</option></select></div>
+        <div><label>Categoria</label><select class="select" name="categoria">
+          <optgroup label="Estrutura">
+            <option>Aluguel</option>
+            <option>Utilidades</option>
+            <option>Manutenção</option>
+            <option>Limpeza</option>
+          </optgroup>
+          <optgroup label="Pessoal">
+            <option>Salários</option>
+            <option>Pró-labore</option>
+            <option>Encargos / INSS</option>
+            <option>Benefícios</option>
+          </optgroup>
+          <optgroup label="Operacional">
+            <option>Materiais</option>
+            <option>Equipamentos</option>
+            <option>Software / Sistemas</option>
+            <option>Telefonia</option>
+          </optgroup>
+          <optgroup label="Comercial">
+            <option>Marketing</option>
+            <option>Publicidade</option>
+          </optgroup>
+          <optgroup label="Profissional">
+            <option>Contador</option>
+            <option>Advogado</option>
+            <option>Consultoria</option>
+            <option>Educação / Cursos</option>
+          </optgroup>
+          <optgroup label="Tributário">
+            <option>Impostos</option>
+            <option>Taxas / Anuidades</option>
+          </optgroup>
+          <optgroup label="Outros">
+            <option>Outros</option>
+          </optgroup>
+        </select></div>
       </div>
       <div style="margin-bottom:14px;"><label>Fornecedor / Descrição</label><input type="text" class="input" name="descricao" required /></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">

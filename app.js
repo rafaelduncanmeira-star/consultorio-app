@@ -4754,30 +4754,51 @@ function renderDespesas() {
   document.getElementById('pl-lucro').textContent = BRL(lucro);
   document.getElementById('pl-margem').textContent = PCT(margem);
 
-  // Por categoria
-  const cats = ['Estrutura','Pessoal','Marketing','Materiais','Profissional','Impostos','Outros'];
-  const catTotais = cats.map(c => ({ cat: c, val: data.filter(r => r.categoria === c).reduce((s, r) => s + r.valor, 0) }));
-  document.getElementById('desp-categorias').innerHTML = catTotais.filter(c => c.val > 0).map(c => `
-    <div class="flex items-center justify-between">
-      <span class="text-sm text-gray-700">${c.cat}</span>
-      <div class="flex items-center gap-3">
-        <div class="w-24 bg-gray-100 rounded-full h-1.5">
-          <div class="bg-red-400 h-1.5 rounded-full" style="width:${totalDesp ? Math.min((c.val / totalDesp) * 100, 100) : 0}%"></div>
-        </div>
-        <span class="text-sm font-semibold text-gray-900 w-20 text-right">${BRL(c.val)}</span>
-      </div>
-    </div>`).join('') || '<div class="text-gray-400 text-sm text-center py-4">Sem despesas registradas</div>';
+  // Por categoria — agrupa pelas categorias REAIS existentes nas despesas
+  // (antes era lista hardcoded que filtrava silenciosamente Aluguel/Salários/Utilidades)
+  const catMap = {};
+  data.forEach(r => {
+    const c = (r.categoria || 'Outros').trim();
+    catMap[c] = (catMap[c] || 0) + (r.valor || 0);
+  });
+  // Ordena desc por valor
+  const catTotais = Object.entries(catMap)
+    .map(([cat, val]) => ({ cat, val }))
+    .sort((a, b) => b.val - a.val);
 
-  // Chart
+  document.getElementById('desp-categorias').innerHTML = catTotais.length
+    ? catTotais.map(c => {
+        const pct = totalDesp ? (c.val / totalDesp) * 100 : 0;
+        return `
+        <div class="flex items-center justify-between" style="padding:3px 0;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="text-sm text-gray-700">${_esc(c.cat)}</span>
+            <span style="font-size:10.5px;color:#94a3b8;">${pct.toFixed(0)}%</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <div class="w-24 bg-gray-100 rounded-full h-1.5">
+              <div class="bg-red-400 h-1.5 rounded-full" style="width:${Math.min(pct, 100)}%"></div>
+            </div>
+            <span class="text-sm font-semibold text-gray-900 w-20 text-right">${BRL(c.val)}</span>
+          </div>
+        </div>`;
+      }).join('')
+    : '<div class="text-gray-400 text-sm text-center py-4">Sem despesas registradas</div>';
+
+  // Chart — paleta com cores suficientes
   destroyChart('chart-desp-cat');
   const ctx = document.getElementById('chart-desp-cat').getContext('2d');
-  const nzCats = catTotais.filter(c => c.val > 0);
-  if (nzCats.length) {
+  const paleta = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#8b5cf6','#ec4899','#14b8a6','#6b7280','#f59e0b'];
+  if (catTotais.length) {
     charts['chart-desp-cat'] = new Chart(ctx, {
       type: 'doughnut',
       data: {
-        labels: nzCats.map(c => c.cat),
-        datasets: [{ data: nzCats.map(c => c.val), backgroundColor: ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#8b5cf6','#6b7280'], borderWidth: 0 }]
+        labels: catTotais.map(c => c.cat),
+        datasets: [{
+          data: catTotais.map(c => c.val),
+          backgroundColor: catTotais.map((_, i) => paleta[i % paleta.length]),
+          borderWidth: 0
+        }]
       },
       options: { plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }, cutout: '65%' }
     });
