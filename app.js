@@ -2253,6 +2253,9 @@ function updateCrmStatus(idx, newStatus) {
   const data = DB.get('crm');
   const oldStatus = data[idx].status;
   data[idx].status = newStatus;
+  if (oldStatus !== newStatus) {
+    data[idx]._statusSince = new Date().toISOString();
+  }
   DB.set('crm', data);
   renderCrm();
   // Atualiza banner de integração se Atendidos estiver aberto
@@ -2589,6 +2592,7 @@ const KANBAN_COLUNAS = [
 let _crmKanbanFiltro = '';
 let _kanbanDragIdx   = null;
 
+let _kanbanTimerInterval = null;
 function setCrmView(view) {
   const lista  = document.getElementById('crm-lista-view');
   const kanban = document.getElementById('crm-kanban-view');
@@ -2599,7 +2603,22 @@ function setCrmView(view) {
   kanban.style.display = view === 'kanban' ? 'block' : 'none';
   if (tabL) tabL.classList.toggle('active', view === 'lista');
   if (tabK) tabK.classList.toggle('active', view === 'kanban');
-  if (view === 'kanban') renderKanban(_crmKanbanFiltro);
+  if (view === 'kanban') {
+    renderKanban(_crmKanbanFiltro);
+    // Auto-atualiza cronômetros a cada 60s enquanto o kanban estiver visível
+    if (_kanbanTimerInterval) clearInterval(_kanbanTimerInterval);
+    _kanbanTimerInterval = setInterval(() => {
+      const kbView = document.getElementById('crm-kanban-view');
+      if (kbView && kbView.style.display !== 'none' && document.getElementById('page-crm')?.classList.contains('active')) {
+        renderKanban(_crmKanbanFiltro);
+      } else {
+        clearInterval(_kanbanTimerInterval);
+        _kanbanTimerInterval = null;
+      }
+    }, 60000);
+  } else {
+    if (_kanbanTimerInterval) { clearInterval(_kanbanTimerInterval); _kanbanTimerInterval = null; }
+  }
   DB.setObj('crm_view', view);
   // Sincroniza estado do funil — auto-colapsa em kanban, expande em lista
   // (a menos que o usuário tenha forçado um estado)
@@ -2786,6 +2805,40 @@ function _kanbanOnScroll() {
   );
 }
 
+// Renderiza badge com tempo na coluna atual
+// Fallback inteligente: se nunca foi movido (_statusSince ausente), usa r.data como base
+// para não mostrar "0s" em contatos antigos do legacy.
+function _kanbanTempoColuna(r, col) {
+  const desde = r._statusSince || (r.data ? r.data + 'T' + (r.hora || '12:00') : null);
+  if (!desde) return '';
+  const ms = Date.now() - new Date(desde).getTime();
+  if (ms < 0) return '';
+  const min = Math.floor(ms / 60000);
+  const h   = Math.floor(min / 60);
+  const d   = Math.floor(h / 24);
+  let label, cor, bg;
+  if (d >= 1) {
+    label = d === 1 ? '1 dia' : `${d} dias`;
+  } else if (h >= 1) {
+    label = h === 1 ? '1h' : `${h}h`;
+  } else if (min >= 1) {
+    label = `${min} min`;
+  } else {
+    label = 'agora';
+  }
+  // Limiares de alerta — variam por coluna (lead frio vs. atendido)
+  const limiteAmarelo = col.status === 'Contato feito' ? 1 : col.status === 'Em negociação' ? 2 : 3;
+  const limiteVermelho = col.status === 'Contato feito' ? 3 : col.status === 'Em negociação' ? 5 : 7;
+  if (d >= limiteVermelho) { cor = '#991b1b'; bg = '#fee2e2'; }
+  else if (d >= limiteAmarelo) { cor = '#92400e'; bg = '#fef3c7'; }
+  else { cor = '#1e40af'; bg = '#dbeafe'; }
+  // Tooltip com data/hora completa
+  const ts = new Date(desde).toLocaleString('pt-BR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+  return `<div title="Está nesta coluna desde ${ts}" style="display:inline-flex;align-items:center;gap:4px;background:${bg};color:${cor};font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;margin-bottom:8px;">
+    ⏱ ${label}
+  </div>`;
+}
+
 function _kanbanCardHtml(r, col) {
   const idx      = r._idx;
   const colIdx   = KANBAN_COLUNAS.findIndex(c => c.status === r.status);
@@ -2825,9 +2878,10 @@ function _kanbanCardHtml(r, col) {
       ${(r.tipo && r.tipo.trim().toLowerCase() !== col.status.toLowerCase())
           ? `<div style="font-size:11.5px;color:#475569;margin-bottom:2px;">${_esc(r.tipo)}</div>`
           : ''}
-      <div style="font-size:11px;color:#94a3b8;margin-bottom:8px;">
+      <div style="font-size:11px;color:#94a3b8;margin-bottom:6px;">
         ${formatDate(r.data)} · <span style="font-weight:600;color:${dias.cor};">${dias.texto}</span>
       </div>
+      ${_kanbanTempoColuna(r, col)}
       ${whatsBtn}
 
       <div style="border-top:1px solid #f1f5f9;padding-top:8px;">
@@ -2888,7 +2942,12 @@ function moverKanbanCard(idx, novoStatus, evt) {
   if (evt) evt.stopPropagation();
   const data = DB.get('crm');
   if (!data[idx]) return;
+  const statusAnterior = data[idx].status;
   data[idx].status = novoStatus;
+  // Registra o momento da mudança para o cronômetro
+  if (statusAnterior !== novoStatus) {
+    data[idx]._statusSince = new Date().toISOString();
+  }
   DB.set('crm', data);
   const labelMap = {
     'Em negociação': '💬', 'Marcou': '📅', 'Atendeu': '✅', 'Não marcou': '❌', 'Contato feito': '📞'
