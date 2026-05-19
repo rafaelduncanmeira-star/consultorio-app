@@ -6097,7 +6097,16 @@ function renderDashboard(mes) {
 function updateDashboard(val) {
   const [y, m] = val.split('-');
   const label = `${_MESES_FULL[parseInt(m,10)-1]}/${y}`;
-  document.getElementById('dash-mes').textContent = label;
+  // dash-mes foi consolidado em dash-subtitulo — só atualiza se existir
+  const oldEl = document.getElementById('dash-mes');
+  if (oldEl) oldEl.textContent = label;
+  // Atualiza subtítulo com nome da clínica + mês selecionado
+  const subEl = document.getElementById('dash-subtitulo');
+  if (subEl) {
+    const cfg = typeof getClinicaConfig === 'function' ? getClinicaConfig() : {};
+    const partes = [cfg.nomeClinica, cfg.especialidade].filter(Boolean);
+    subEl.textContent = (partes.length ? partes.join(' · ') + ' · ' : '') + label.replace('/', ' de ');
+  }
   renderDashboard(val);
 }
 
