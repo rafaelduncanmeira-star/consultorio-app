@@ -261,35 +261,28 @@ async function _acceptInviteIfPending() {
   if (!token) return;
   localStorage.removeItem('consult_pending_invite');
   try {
-    // Busca o convite pelo token
-    const { data: invite, error: e1 } = await _supa.from('team_invites')
-      .select('*')
-      .eq('token', token)
-      .is('accepted_at', null)
-      .single();
-    if (e1 || !invite) {
-      console.warn('Convite inválido ou expirado.');
+    // Aceite via função SECURITY DEFINER (valida token + insere membro
+    // + marca aceito, tudo server-side, sem expor tokens de terceiros)
+    const { data, error } = await _supa.rpc('accept_invite', { invite_token: token });
+    if (error) {
+      console.warn('accept_invite RPC error:', error.message);
+      if (typeof toast === 'function') {
+        setTimeout(() => toast('⚠️ Não foi possível aceitar o convite. Peça um novo link.', 4000), 1500);
+      }
       return;
     }
-    // Adiciona em team_members
-    const { error: e2 } = await _supa.from('team_members').insert({
-      owner_id: invite.owner_id,
-      member_id: currentUser.id,
-      role: invite.role
-    });
-    if (e2 && !e2.message.includes('duplicate')) {
-      console.warn('Erro ao adicionar membro:', e2.message);
+    if (data && data.error) {
+      console.warn('accept_invite:', data.error);
+      if (typeof toast === 'function') {
+        setTimeout(() => toast('⚠️ ' + data.error, 4000), 1500);
+      }
       return;
     }
-    // Marca convite como aceito
-    await _supa.from('team_invites')
-      .update({ accepted_at: new Date().toISOString(), accepted_by: currentUser.id })
-      .eq('id', invite.id);
-    // Atualiza role do perfil
-    await _supa.from('profiles').update({ role: invite.role }).eq('id', currentUser.id);
-    currentRole = invite.role;
-    if (typeof toast === 'function') {
-      setTimeout(() => toast(`✅ Você entrou em uma equipe! Agora vê os dados compartilhados.`), 1500);
+    if (data && data.ok) {
+      currentRole = data.role || currentRole;
+      if (typeof toast === 'function') {
+        setTimeout(() => toast('✅ Você entrou em uma equipe! Agora vê os dados compartilhados.', 4000), 1500);
+      }
     }
   } catch(e) { console.warn('_acceptInviteIfPending:', e.message); }
 }

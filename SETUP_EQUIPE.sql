@@ -56,22 +56,63 @@ create index if not exists idx_team_invites_owner on team_invites(owner_id);
 
 alter table team_invites enable row level security;
 drop policy if exists "owner manages own invites" on team_invites;
-drop policy if exists "auth can read invite by token" on team_invites;
-drop policy if exists "auth can accept invite" on team_invites;
+drop policy if exists "auth can read invite by token" on team_invites;  -- legado inseguro
+drop policy if exists "auth can accept invite" on team_invites;          -- legado inseguro
 
--- O dono gerencia seus convites
+-- APENAS o dono lê/gerencia seus próprios convites.
+-- O aceite NÃO usa SELECT/UPDATE direto (vazava todos os tokens do sistema);
+-- agora é feito pela função accept_invite() abaixo (SECURITY DEFINER).
 create policy "owner manages own invites" on team_invites
   for all to authenticated
   using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
--- Qualquer autenticado pode LER um convite válido (filtragem feita no app por token)
-create policy "auth can read invite by token" on team_invites
-  for select to authenticated
-  using (accepted_at is null AND expires_at > now());
--- Quem está aceitando pode atualizar (marcar como aceito)
-create policy "auth can accept invite" on team_invites
-  for update to authenticated
-  using (accepted_at is null AND expires_at > now())
-  with check (accepted_at is not null AND accepted_by = auth.uid());
+
+-- ------------------------------------------------------------
+-- 2b) FUNÇÃO DE ACEITE — SECURITY DEFINER
+-- Valida o token server-side, insere o membro e marca o convite
+-- como aceito numa transação. Roda com privilégio elevado (bypassa
+-- RLS), então o convidado consegue entrar mesmo sem ser dono — sem
+-- expor os tokens dos outros.
+-- ------------------------------------------------------------
+create or replace function accept_invite(invite_token text)
+returns json
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare inv team_invites;
+begin
+  -- Busca o convite válido (sem expor via RLS — roda como definer)
+  select * into inv from team_invites
+    where token = invite_token
+      and accepted_at is null
+      and expires_at > now();
+  if not found then
+    return json_build_object('error', 'Convite inválido, expirado ou já utilizado.');
+  end if;
+
+  -- Não deixa a pessoa entrar na própria "equipe"
+  if inv.owner_id = auth.uid() then
+    return json_build_object('error', 'Você não pode aceitar um convite seu mesmo.');
+  end if;
+
+  -- Adiciona como membro (idempotente)
+  insert into team_members (owner_id, member_id, role)
+    values (inv.owner_id, auth.uid(), inv.role)
+    on conflict (owner_id, member_id) do update set role = excluded.role;
+
+  -- Marca convite como aceito
+  update team_invites
+    set accepted_at = now(), accepted_by = auth.uid()
+    where id = inv.id;
+
+  -- Atualiza o papel do perfil de quem aceitou
+  update profiles set role = inv.role where id = auth.uid();
+
+  return json_build_object('ok', true, 'owner_id', inv.owner_id, 'role', inv.role);
+end $$;
+
+-- Garante que usuários autenticados podem chamar a função via RPC
+grant execute on function accept_invite(text) to authenticated;
 
 -- ------------------------------------------------------------
 -- 3) RLS revisada — app_data, crm_leads, crm_messages
