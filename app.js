@@ -3689,6 +3689,16 @@ function savePaciente(e) {
   setTimeout(() => checkAchievements(), 300);
   _auditLog(editState.idx != null ? 'editou' : 'criou', 'paciente',
     `${editState.idx != null ? 'Editou' : 'Cadastrou'} consulta de ${item.nome} (${item.tipo}, ${BRL(item.valor)})`);
+
+  // MELHORIA-02: avisa se o procedimento não tem preço cadastrado na Tabela de Preços
+  if (item.tipo) {
+    const proc = getProcedimentos().find(p => p.nome === item.tipo);
+    if (proc && !proc.valorPix && !proc.valorCartao) {
+      setTimeout(() => toast(`💡 "${item.tipo}" está sem preço na Tabela de Preços. Cadastre para o valor sugerido aparecer automático.`, 5000), 600);
+    } else if (!proc) {
+      setTimeout(() => toast(`💡 "${item.tipo}" não está na Tabela de Preços. Considere cadastrar.`, 5000), 600);
+    }
+  }
 }
 
 // Toast simples (notificação flutuante)
@@ -4524,14 +4534,21 @@ function _renderAgendaKPIs() {
     perdida += p ? (p.valorPix || p.valorCartao || 0) : 0;
   });
 
-  setText('ag-confirmados', confirmados);
-  setText('ag-confirmados-sub', `${ativos.length} total no período`);
+  const cancelados   = ativos.filter(a => a.status === 'Cancelado').length;
+  const totalAgendados = ativos.length;        // tudo no período
+  const naoCancelados  = totalAgendados - cancelados;
+
+  // "Agendados" = total de agendamentos no período (não só status 'Confirmado')
+  setText('ag-confirmados', totalAgendados);
+  setText('ag-confirmados-sub', cancelados > 0
+    ? `${naoCancelados} ativos · ${cancelados} cancelado(s)`
+    : (confirmados > 0 ? `${confirmados} a confirmar` : 'no período'));
   setText('ag-compareceram', compareceram);
   setText('ag-compareceram-sub', total ? `${PCT((compareceram / total) * 100)} compareceram` : 'sem comparecimentos');
   setText('ag-noshow', noshow);
   setText('ag-noshow-sub', total ? `${PCT((noshow / total) * 100)} no-show` : '—');
   setText('ag-ocup', PCT(ocup));
-  setText('ag-ocup-sub', `${slotsUsados} de ${slotsDispo} slots`);
+  setText('ag-ocup-sub', `${slotsUsados} de ${slotsDispo} slots no consultório`);
   setText('ag-perdida', BRL(perdida));
 }
 
@@ -4728,6 +4745,9 @@ function saveDespesa(e) {
   DB.set('despesas', data);
   closeModal('modal-despesa');
   renderDespesas();
+  // Atualiza dashboard se estiver visível (despesas afetam lucro/burn/runway)
+  if (document.getElementById('page-dashboard')?.classList.contains('active')) renderDashboard();
+  _auditLog(editState.idx != null ? 'editou' : 'criou', 'despesa', `${editState.idx != null ? 'Editou' : 'Lançou'} despesa: ${item.descricao} (${BRL(item.valor)})`);
 }
 
 // ====================== RECEITA ======================
@@ -5109,9 +5129,9 @@ function renderGraficos(mes) {
     if (!k) return;
     pacReceita[k] = (pacReceita[k] || 0) + (p.valor || 0);
   });
-  const canaisLista = ['Indicação médica','Indicação paciente','Google','Instagram','WhatsApp','Doctoralia','Outros'];
+  const canaisLista = Array.from(new Set(crm.map(r => (r.canal || 'Outros').trim()).filter(Boolean)));
   const receitaPorCanal = canaisLista.map(c => {
-    const nomesCanal = crm.filter(r => r.canal === c && r.status === 'Atendeu').map(r => (r.nome || '').toLowerCase().trim());
+    const nomesCanal = crm.filter(r => (r.canal || 'Outros').trim() === c && r.status === 'Atendeu').map(r => (r.nome || '').toLowerCase().trim());
     return nomesCanal.reduce((s, n) => s + (pacReceita[n] || 0), 0);
   });
   const totalReceita = receitaPorCanal.reduce((s, v) => s + v, 0);
@@ -5460,10 +5480,10 @@ function renderMarketing(mesAtual) {
     pacReceitaPorNome[k] = (pacReceitaPorNome[k] || 0) + (p.valor || 0);
   });
 
-  // Canais — agrupa CRM e calcula métricas
-  const canais = ['Indicação médica','Indicação paciente','Google','Instagram','WhatsApp','Doctoralia','Outros'];
-  const stats = canais.map(c => {
-    const lista = crm.filter(r => r.canal === c);
+  // Canais — agrupa pelos canais REAIS presentes no CRM (não lista fixa)
+  const canaisSet = new Set(crm.map(r => (r.canal || 'Outros').trim()).filter(Boolean));
+  const stats = Array.from(canaisSet).map(c => {
+    const lista = crm.filter(r => (r.canal || 'Outros').trim() === c);
     const atend = lista.filter(r => r.status === 'Atendeu');
     const receita = atend.reduce((s, r) => {
       const k = (r.nome || '').toLowerCase().trim();
@@ -5731,27 +5751,29 @@ function renderFinanceiro(mes) {
     (despsOutras > 0 ? linhaDRE('(−) Outras', despsOutras, true, false) : '') +
     linhaDRE(`= Lucro Líquido (margem ${PCT(margem)})`, lucroLiq, false, true, lucroLiq >= 0 ? '#10b981' : '#ef4444');
 
-  // ===== Receita por tipo de consulta =====
-  const tipos = ['1ª vez','Consulta','Retorno','Cortesia','Domiciliar','Hospitalar'];
-  const tiposStats = tipos.map(t => {
-    const lista = pacs.filter(p => p.tipo === t);
-    const total = lista.reduce((s, p) => s + (p.valor || 0), 0);
-    const ticket = lista.length ? total / lista.length : 0;
-    return { tipo: t, qtd: lista.length, total, ticket };
-  }).filter(s => s.qtd > 0).sort((a, b) => b.total - a.total);
+  // ===== Receita por tipo de consulta — agrupa pelos tipos REAIS dos atendimentos =====
+  // (antes era lista fixa que filtrava silenciosamente procedimentos com outros nomes)
+  const tiposMap = {};
+  pacs.forEach(p => {
+    if ((p.obs || '').includes('[Programa')) return; // programas têm seção própria
+    const t = (p.tipo || '(sem tipo)').trim();
+    if (!tiposMap[t]) tiposMap[t] = { qtd: 0, total: 0 };
+    tiposMap[t].qtd++;
+    tiposMap[t].total += (p.valor || 0);
+  });
+  const tiposStats = Object.entries(tiposMap)
+    .map(([tipo, v]) => ({ tipo, qtd: v.qtd, total: v.total, ticket: v.qtd ? v.total / v.qtd : 0 }))
+    .sort((a, b) => b.total - a.total);
 
   const tiposEl = document.getElementById('fin-tipos');
   if (!tiposStats.length) {
     tiposEl.innerHTML = '<div style="text-align:center;color:#94a3b8;font-size:13px;padding:20px;">Sem consultas registradas neste mês</div>';
   } else {
     const max = Math.max(...tiposStats.map(s => s.total), 1);
-    const corPorTipo = {
-      '1ª vez': '#3b82f6', 'Consulta': '#10b981', 'Retorno': '#8b5cf6',
-      'Cortesia': '#94a3b8', 'Domiciliar': '#f59e0b', 'Hospitalar': '#ef4444',
-    };
-    tiposEl.innerHTML = tiposStats.map(s => {
+    const paleta = ['#3b82f6','#10b981','#8b5cf6','#f59e0b','#ef4444','#06b6d4','#ec4899','#64748b'];
+    tiposEl.innerHTML = tiposStats.map((s, i) => {
       const pctBar = (s.total / max) * 100;
-      const cor = corPorTipo[s.tipo] || '#64748b';
+      const cor = paleta[i % paleta.length];
       return `
         <div style="margin-bottom:12px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
@@ -5765,21 +5787,23 @@ function renderFinanceiro(mes) {
     }).join('');
   }
 
-  // ===== Burn rate (média despesa fixa últimos 3 meses) =====
+  // ===== Burn rate (média despesa fixa dos meses ANTERIORES) =====
+  // Corrigido: i começa em 1 e usa (mesIdx - i) → meses estritamente anteriores ao atual
+  const todosDespsBurn = DB.get('despesas');
   const ultimos3Meses = [];
   for (let i = 1; i <= 3; i++) {
-    const d = new Date(ano, mesIdx - i + 1, 1);
-    ultimos3Meses.push(d.toISOString().substring(0, 7));
+    const d = new Date(ano, mesIdx - i, 1);
+    ultimos3Meses.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
   }
   const burnAmostras = ultimos3Meses.map(m =>
-    desps.filter(d => getMes(d.data) === m && d.tipo === 'Fixo').reduce((s, d) => s + (d.valor || 0), 0)
+    todosDespsBurn.filter(d => getMes(d.data) === m && d.tipo === 'Fixo').reduce((s, d) => s + (d.valor || 0), 0)
   );
   const burnComDado = burnAmostras.filter(v => v > 0);
   const burn = burnComDado.length ? burnComDado.reduce((s, v) => s + v, 0) / burnComDado.length : despFixas;
   setText('fin-burn', BRL(burn));
   setText('fin-burn-sub', burnComDado.length
-    ? `Média de ${burnComDado.length} mês(es) anteriores`
-    : 'Usando mês atual como base');
+    ? `Média de ${burnComDado.length} mês(es) anterior${burnComDado.length > 1 ? 'es' : ''}`
+    : 'Baseado nas despesas fixas do mês atual');
 
   // ===== Runway (caixa estimado ÷ burn) =====
   // Caixa estimado = soma de (receita líquida - despesas) de todos os meses anteriores ao atual
@@ -5800,19 +5824,23 @@ function renderFinanceiro(mes) {
   const recebidoMesAtual = pacs.filter(p => p.statusPgto === 'Pago').reduce((s, p) => s + (p.valor || 0), 0);
   caixaEstimado += recebidoMesAtual - despTotal;
 
-  if (burn > 0 && caixaEstimado > 0) {
+  // Há histórico financeiro real? (algum atendimento pago OU alguma despesa lançada)
+  const temHistorico = todosPacs.some(p => p.statusPgto === 'Pago') || todosDesps.length > 0;
+  const elRun = document.getElementById('fin-runway');
+
+  if (!temHistorico || burn <= 0) {
+    // Consultório novo / sem dados → estado neutro (sem alarme vermelho)
+    if (elRun) { elRun.textContent = '—'; elRun.style.color = '#94a3b8'; }
+    setText('fin-runway-sub', 'Lance receitas e despesas para calcular');
+  } else if (caixaEstimado > 0) {
     const runwayMeses = caixaEstimado / burn;
     const cor = runwayMeses >= 6 ? '#10b981' : runwayMeses >= 3 ? '#f59e0b' : '#ef4444';
-    const el = document.getElementById('fin-runway');
-    if (el) { el.textContent = runwayMeses.toFixed(1) + ' meses'; el.style.color = cor; }
-    setText('fin-runway-sub', `Caixa estimado: ${BRL(caixaEstimado)}`);
-  } else if (caixaEstimado <= 0) {
-    const el = document.getElementById('fin-runway');
-    if (el) { el.textContent = '⚠️ Negativo'; el.style.color = '#ef4444'; }
+    if (elRun) { elRun.textContent = runwayMeses.toFixed(1) + ' meses'; elRun.style.color = cor; }
     setText('fin-runway-sub', `Caixa estimado: ${BRL(caixaEstimado)}`);
   } else {
-    setText('fin-runway', '— meses');
-    setText('fin-runway-sub', 'Lance despesas fixas para calcular');
+    // Caixa negativo COM histórico real = alerta legítimo
+    if (elRun) { elRun.textContent = '⚠️ Negativo'; elRun.style.color = '#ef4444'; }
+    setText('fin-runway-sub', `Caixa estimado: ${BRL(caixaEstimado)}`);
   }
 }
 
@@ -6481,11 +6509,15 @@ function gerarPDF(mes) {
   }).filter(s => s.qtd > 0).sort((a, b) => b.total - a.total);
   const totalTaxas = formasStats.reduce((s, f) => s + f.taxaValor, 0);
 
-  // Novos vs recorrentes
-  const inicioDoMes = mes + '-01';
-  const nomesAnteriores = new Set(todosPacs.filter(p => p.data < inicioDoMes).map(p => (p.nome || '').toLowerCase().trim()));
-  const pacsNovos = pacs.filter(p => !nomesAnteriores.has((p.nome || '').toLowerCase().trim()));
-  const pacsRec   = pacs.filter(p =>  nomesAnteriores.has((p.nome || '').toLowerCase().trim()));
+  // Novos vs recorrentes — "novo" = 1º atendimento do paciente em toda a base
+  const _primeiraData = {};
+  [...todosPacs].sort((a, b) => (a.data || '').localeCompare(b.data || '')).forEach(p => {
+    const n = (p.nome || '').toLowerCase().trim();
+    if (n && !(n in _primeiraData)) _primeiraData[n] = p.data;
+  });
+  const _ehNovo = p => p.data === _primeiraData[(p.nome || '').toLowerCase().trim()];
+  const pacsNovos = pacs.filter(_ehNovo);
+  const pacsRec   = pacs.filter(p => !_ehNovo(p));
   const novosUnicos = new Set(pacsNovos.map(p => (p.nome || '').toLowerCase().trim())).size;
   const recUnicos   = new Set(pacsRec.map(p =>   (p.nome || '').toLowerCase().trim())).size;
   const fatNovos    = pacsNovos.reduce((s, p) => s + (p.valor || 0), 0);
@@ -7105,13 +7137,16 @@ function renderRelatorio(mes) {
   const pctPix = fat ? ((formasStats.find(f => f.forma === 'PIX')?.total || 0) / fat) * 100 : 0;
 
   // ===== Novos vs recorrentes =====
-  // "Recorrente" = paciente com pelo menos 1 atendimento ANTES do mês selecionado
-  const inicioDoMes = mes + '-01';
-  const nomesAnteriores = new Set(
-    todosPacs.filter(p => p.data < inicioDoMes).map(p => (p.nome || '').toLowerCase().trim())
-  );
-  const pacsNovos = pacs.filter(p => !nomesAnteriores.has((p.nome || '').toLowerCase().trim()));
-  const pacsRecorrentes = pacs.filter(p => nomesAnteriores.has((p.nome || '').toLowerCase().trim()));
+  // Um atendimento é "novo" se é o PRIMEIRO atendimento do paciente em toda a base
+  // (1ª vez na vida). Os demais — inclusive no mesmo mês — são "recorrentes".
+  const primeiraDataPorNome = {};
+  [...todosPacs].sort((a, b) => (a.data || '').localeCompare(b.data || '')).forEach(p => {
+    const n = (p.nome || '').toLowerCase().trim();
+    if (n && !(n in primeiraDataPorNome)) primeiraDataPorNome[n] = p.data;
+  });
+  const ehNovo = p => p.data === primeiraDataPorNome[(p.nome || '').toLowerCase().trim()];
+  const pacsNovos = pacs.filter(ehNovo);
+  const pacsRecorrentes = pacs.filter(p => !ehNovo(p));
   const fatNovos = pacsNovos.reduce((s, p) => s + (p.valor || 0), 0);
   const fatRecorrentes = pacsRecorrentes.reduce((s, p) => s + (p.valor || 0), 0);
   // Conta pacientes únicos
@@ -10131,12 +10166,40 @@ function importarJSON(input) {
   reader.readAsText(file);
 }
 
-function limparTodosDados() {
-  if (!confirm('⚠️ Tem certeza? Isso apaga TODOS os dados do consultório permanentemente.\n\nFaça um backup antes de continuar!')) return;
-  if (!confirm('Segunda confirmação: apagar tudo mesmo?')) return;
-  BACKUP_KEYS.forEach(k => localStorage.removeItem('consult_' + k));
-  toast('Todos os dados foram apagados.', 2500);
-  setTimeout(() => location.reload(), 2500);
+async function limparTodosDados() {
+  // Oferece backup antes
+  if (confirm('Recomendamos exportar um backup ANTES de apagar tudo.\n\nQuer baixar o backup agora? (OK = baixar, Cancelar = pular)')) {
+    exportarJSON();
+    await new Promise(r => setTimeout(r, 800));
+  }
+  // Confirmação forte: digitar APAGAR
+  const resp = prompt('⚠️ ATENÇÃO: isso apaga PERMANENTEMENTE todos os dados do consultório (atendidos, CRM, agenda, despesas, programas, etc.) — no aparelho E na nuvem.\n\nEsta ação NÃO pode ser desfeita.\n\nPara confirmar, digite APAGAR:');
+  if (resp !== 'APAGAR') {
+    if (resp !== null) toast('Cancelado — texto não confere.', 2500);
+    return;
+  }
+
+  toast('Apagando dados…', 2000);
+
+  // 1) Apaga localStorage (chaves de dados + snapshots)
+  Object.keys(localStorage)
+    .filter(k => k.startsWith('consult_'))
+    .filter(k => k !== 'consult_dark_mode' && k !== 'consult_onboarding_done') // preserva preferências de UI
+    .forEach(k => localStorage.removeItem(k));
+
+  // 2) Apaga na nuvem (Supabase) — senão o cloudPull rebaixa tudo no reload
+  if (_supa && currentUser) {
+    const owner = currentDataOwner || currentUser.id;
+    try {
+      await _supa.from('app_data').delete().eq('user_id', owner);
+      await _supa.from('crm_leads').delete().eq('user_id', owner);
+      await _supa.from('crm_messages').delete().eq('user_id', owner);
+    } catch(e) { console.warn('Erro limpando nuvem:', e.message); }
+  }
+
+  _auditLog('excluiu', 'sistema', 'Apagou TODOS os dados do consultório');
+  toast('✅ Todos os dados foram apagados.', 2500);
+  setTimeout(() => location.reload(), 2000);
 }
 
 // ====================== IMPORTAR PLANILHA ======================
