@@ -180,14 +180,18 @@ create policy "team insert crm_messages" on crm_messages for insert to authentic
 );
 
 -- ------------------------------------------------------------
--- 4) Realtime para as novas tabelas (idempotente — ignora se já adicionado)
+-- 4) Realtime para as novas tabelas (idempotente — só adiciona se ainda não está)
 -- ------------------------------------------------------------
 do $$ begin
-  alter publication supabase_realtime add table team_members;
-exception when duplicate_object then null; end $$;
-do $$ begin
-  alter publication supabase_realtime add table team_invites;
-exception when duplicate_object then null; end $$;
+  if not exists (select 1 from pg_publication_tables
+    where pubname='supabase_realtime' and schemaname='public' and tablename='team_members') then
+    alter publication supabase_realtime add table team_members;
+  end if;
+  if not exists (select 1 from pg_publication_tables
+    where pubname='supabase_realtime' and schemaname='public' and tablename='team_invites') then
+    alter publication supabase_realtime add table team_invites;
+  end if;
+end $$;
 
 -- ============================================================
 -- ✅ PRONTO
