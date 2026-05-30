@@ -124,10 +124,22 @@ let currentNome = '';
 let currentDataOwner = null;
 let currentTeamRole  = null; // 'owner' (você é o dono) ou 'member'
 
+let _recoveryFlow = false; // true quando o usuário chegou via link de recuperação de senha
+
 function initSupabase() {
   try {
     if (window.supabase && window.supabase.createClient) {
       _supa = window.supabase.createClient(SUPA_URL, SUPA_KEY);
+      // Detecta retorno pelo link de recuperação de senha
+      _supa.auth.onAuthStateChange((event) => {
+        if (event === 'PASSWORD_RECOVERY') {
+          _recoveryFlow = true;
+          // Mostra a tela de login com o form de nova senha
+          const lp = document.getElementById('login-page');
+          if (lp) lp.style.display = 'flex';
+          if (typeof setLoginTab === 'function') setLoginTab('nova-senha');
+        }
+      });
     }
   } catch(e) { console.warn('Supabase init error:', e); }
 }
@@ -378,24 +390,109 @@ async function signUpUser(email, password, nome, role) {
   } catch(e) { return { error: e.message }; }
 }
 
-// Toggle entre abas Login / Cadastro
+// Toggle entre os estados do login: 'entrar' | 'cadastro' | 'recuperar' | 'nova-senha'
 function setLoginTab(tab) {
   const tEnt = document.getElementById('login-tab-entrar');
   const tCad = document.getElementById('login-tab-cadastro');
   const fEnt = document.getElementById('login-form-entrar');
   const fCad = document.getElementById('login-form-cadastro');
+  const fRec = document.getElementById('login-form-recuperar');
+  const fNova= document.getElementById('login-form-nova-senha');
+  const tabsWrap = (tEnt && tEnt.parentElement) ? tEnt.parentElement : null;
   const errEl = document.getElementById('login-error');
   const okEl  = document.getElementById('login-success');
   if (errEl) errEl.style.display = 'none';
   if (okEl)  okEl.style.display = 'none';
+
+  // Esconde todos os forms
+  [fEnt, fCad, fRec, fNova].forEach(f => { if (f) f.style.display = 'none'; });
+
+  // As tabs Entrar/Criar conta só aparecem nos estados normais
+  if (tabsWrap) tabsWrap.style.display = (tab === 'recuperar' || tab === 'nova-senha') ? 'none' : '';
+
   if (tab === 'cadastro') {
     tCad.style.color = '#0f172a'; tCad.style.borderBottomColor = '#0f172a';
     tEnt.style.color = '#94a3b8'; tEnt.style.borderBottomColor = 'transparent';
-    fEnt.style.display = 'none'; fCad.style.display = '';
+    if (fCad) fCad.style.display = '';
+  } else if (tab === 'recuperar') {
+    if (fRec) fRec.style.display = '';
+    setTimeout(() => document.getElementById('recuperar-email')?.focus(), 100);
+  } else if (tab === 'nova-senha') {
+    if (fNova) fNova.style.display = '';
+    setTimeout(() => document.getElementById('nova-senha')?.focus(), 100);
   } else {
     tEnt.style.color = '#0f172a'; tEnt.style.borderBottomColor = '#0f172a';
     tCad.style.color = '#94a3b8'; tCad.style.borderBottomColor = 'transparent';
-    fEnt.style.display = ''; fCad.style.display = 'none';
+    if (fEnt) fEnt.style.display = '';
+  }
+}
+
+// Envia email de recuperação de senha
+async function doRecuperarSenha() {
+  const email = (document.getElementById('recuperar-email').value || '').trim();
+  const btn   = document.getElementById('recuperar-btn');
+  const errEl = document.getElementById('login-error');
+  const okEl  = document.getElementById('login-success');
+  errEl.style.display = 'none'; okEl.style.display = 'none';
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errEl.textContent = 'Digite um e-mail válido.';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (!_supa) { errEl.textContent = 'Conexão indisponível. Recarregue a página.'; errEl.style.display = 'block'; return; }
+
+  btn.textContent = 'Enviando…'; btn.disabled = true;
+  try {
+    const redirectTo = location.origin + location.pathname;
+    const { error } = await _supa.auth.resetPasswordForEmail(email, { redirectTo });
+    if (error) {
+      errEl.textContent = _traduzirErroAuth(error.message);
+      errEl.style.display = 'block';
+    } else {
+      okEl.innerHTML = `✅ Se existe uma conta com <strong>${_esc(email)}</strong>, enviamos um link de recuperação. Verifique sua caixa de entrada (e o spam).`;
+      okEl.style.display = 'block';
+    }
+  } catch(e) {
+    errEl.textContent = e.message;
+    errEl.style.display = 'block';
+  } finally {
+    btn.textContent = 'Enviar link de recuperação';
+    btn.disabled = false;
+  }
+}
+
+// Salva a nova senha (após clicar no link de recuperação do email)
+async function doNovaSenha() {
+  const s1 = document.getElementById('nova-senha').value || '';
+  const s2 = document.getElementById('nova-senha-conf').value || '';
+  const btn = document.getElementById('nova-senha-btn');
+  const errEl = document.getElementById('login-error');
+  const okEl  = document.getElementById('login-success');
+  errEl.style.display = 'none'; okEl.style.display = 'none';
+
+  if (s1.length < 8) { errEl.textContent = 'A senha precisa de no mínimo 8 caracteres.'; errEl.style.display = 'block'; return; }
+  if (s1 !== s2)     { errEl.textContent = 'As senhas não conferem.'; errEl.style.display = 'block'; return; }
+  if (!_supa) { errEl.textContent = 'Conexão indisponível.'; errEl.style.display = 'block'; return; }
+
+  btn.textContent = 'Salvando…'; btn.disabled = true;
+  try {
+    const { error } = await _supa.auth.updateUser({ password: s1 });
+    if (error) {
+      errEl.textContent = _traduzirErroAuth(error.message);
+      errEl.style.display = 'block';
+      btn.textContent = 'Salvar nova senha'; btn.disabled = false;
+      return;
+    }
+    okEl.innerHTML = '✅ Senha alterada! Entrando…';
+    okEl.style.display = 'block';
+    _auditLog('configurou', 'sistema', 'Redefiniu a senha via recuperação');
+    // A sessão já está ativa após o updateUser — inicia o app
+    setTimeout(() => location.reload(), 1500);
+  } catch(e) {
+    errEl.textContent = e.message;
+    errEl.style.display = 'block';
+    btn.textContent = 'Salvar nova senha'; btn.disabled = false;
   }
 }
 
@@ -508,6 +605,9 @@ function _traduzirErroAuth(msg) {
   if (msg.includes('Password should be at least')) return 'A senha precisa de no mínimo 8 caracteres.';
   if (msg.toLowerCase().includes('invalid email')) return 'E-mail inválido.';
   if (msg.includes('Signups not allowed')) return 'Cadastro temporariamente desabilitado. Contate o administrador.';
+  if (msg.includes('For security purposes') || msg.includes('after')) return 'Aguarde alguns segundos antes de tentar de novo.';
+  if (msg.includes('same as the old') || msg.includes('should be different')) return 'A nova senha precisa ser diferente da anterior.';
+  if (msg.includes('Auth session missing') || msg.includes('session_not_found')) return 'Link de recuperação expirado. Solicite um novo.';
   return msg;
 }
 
@@ -10654,6 +10754,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Captura token de convite da URL (?invite=TOKEN) antes de qualquer coisa
   _checkInviteFromUrl();
+
+  // Fluxo de recuperação de senha: o link do email volta com #type=recovery.
+  // Não faz auto-login — mostra o form de nova senha.
+  if (location.hash.includes('type=recovery') || _recoveryFlow) {
+    _recoveryFlow = true;
+    document.getElementById('login-page').style.display = 'flex';
+    setLoginTab('nova-senha');
+    return;
+  }
 
   // Fecha modais ao clicar fora
   document.querySelectorAll('.modal-overlay').forEach(el => {

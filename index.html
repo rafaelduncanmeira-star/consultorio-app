@@ -3012,16 +3012,64 @@
           onfocus="this.style.borderColor='#0f172a'" onblur="this.style.borderColor='#e5e7eb'"
           onkeydown="if(event.key==='Enter')document.getElementById('login-password').focus()" />
       </div>
-      <div style="margin-bottom:22px;">
+      <div style="margin-bottom:8px;">
         <label style="display:block;font-size:12px;font-weight:500;color:#374151;margin-bottom:5px;">Senha</label>
         <input id="login-password" type="password" placeholder="••••••••"
           style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:10px 13px;font-size:13.5px;outline:none;font-family:'Inter',sans-serif;color:#0f172a;transition:border-color 0.15s;"
           onfocus="this.style.borderColor='#0f172a'" onblur="this.style.borderColor='#e5e7eb'"
           onkeydown="if(event.key==='Enter')doLogin()" />
       </div>
+      <div style="text-align:right;margin-bottom:18px;">
+        <button type="button" onclick="setLoginTab('recuperar')" style="background:none;border:none;font-size:12px;color:#64748b;cursor:pointer;padding:0;font-family:'Inter',sans-serif;text-decoration:underline;">Esqueci minha senha</button>
+      </div>
       <button onclick="doLogin()" id="login-btn"
         style="width:100%;background:#0f172a;color:#fff;border:none;border-radius:9px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;transition:background 0.15s;letter-spacing:-0.2px;">
         Entrar
+      </button>
+    </div>
+
+    <!-- ===== FORM RECUPERAR SENHA ===== -->
+    <div id="login-form-recuperar" style="display:none;">
+      <div style="font-size:13px;color:#475569;margin-bottom:16px;line-height:1.5;">
+        Digite seu e-mail. Vamos enviar um link para você criar uma nova senha.
+      </div>
+      <div style="margin-bottom:18px;">
+        <label style="display:block;font-size:12px;font-weight:500;color:#374151;margin-bottom:5px;">E-mail</label>
+        <input id="recuperar-email" type="email" placeholder="seu@email.com"
+          style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:10px 13px;font-size:13.5px;outline:none;font-family:'Inter',sans-serif;color:#0f172a;"
+          onfocus="this.style.borderColor='#0f172a'" onblur="this.style.borderColor='#e5e7eb'"
+          onkeydown="if(event.key==='Enter')doRecuperarSenha()" />
+      </div>
+      <button onclick="doRecuperarSenha()" id="recuperar-btn"
+        style="width:100%;background:#0f172a;color:#fff;border:none;border-radius:9px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;letter-spacing:-0.2px;">
+        Enviar link de recuperação
+      </button>
+      <div style="text-align:center;margin-top:14px;">
+        <button type="button" onclick="setLoginTab('entrar')" style="background:none;border:none;font-size:12px;color:#64748b;cursor:pointer;padding:0;font-family:'Inter',sans-serif;">← Voltar para o login</button>
+      </div>
+    </div>
+
+    <!-- ===== FORM NOVA SENHA (após clicar no link do email) ===== -->
+    <div id="login-form-nova-senha" style="display:none;">
+      <div style="font-size:13px;color:#475569;margin-bottom:16px;line-height:1.5;">
+        🔑 Crie sua nova senha de acesso.
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:12px;font-weight:500;color:#374151;margin-bottom:5px;">Nova senha <span style="font-weight:400;color:#94a3b8;">(mín. 8 caracteres)</span></label>
+        <input id="nova-senha" type="password" placeholder="••••••••" minlength="8"
+          style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:10px 13px;font-size:13.5px;outline:none;font-family:'Inter',sans-serif;color:#0f172a;"
+          onfocus="this.style.borderColor='#0f172a'" onblur="this.style.borderColor='#e5e7eb'" />
+      </div>
+      <div style="margin-bottom:18px;">
+        <label style="display:block;font-size:12px;font-weight:500;color:#374151;margin-bottom:5px;">Confirmar nova senha</label>
+        <input id="nova-senha-conf" type="password" placeholder="••••••••" minlength="8"
+          style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:10px 13px;font-size:13.5px;outline:none;font-family:'Inter',sans-serif;color:#0f172a;"
+          onfocus="this.style.borderColor='#0f172a'" onblur="this.style.borderColor='#e5e7eb'"
+          onkeydown="if(event.key==='Enter')doNovaSenha()" />
+      </div>
+      <button onclick="doNovaSenha()" id="nova-senha-btn"
+        style="width:100%;background:#10b981;color:#fff;border:none;border-radius:9px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;letter-spacing:-0.2px;">
+        Salvar nova senha
       </button>
     </div>
 
