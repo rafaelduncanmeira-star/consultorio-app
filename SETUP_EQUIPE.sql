@@ -180,10 +180,14 @@ create policy "team insert crm_messages" on crm_messages for insert to authentic
 );
 
 -- ------------------------------------------------------------
--- 4) Realtime para as novas tabelas
+-- 4) Realtime para as novas tabelas (idempotente — ignora se já adicionado)
 -- ------------------------------------------------------------
-alter publication supabase_realtime add table team_members;
-alter publication supabase_realtime add table team_invites;
+do $$ begin
+  alter publication supabase_realtime add table team_members;
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter publication supabase_realtime add table team_invites;
+exception when duplicate_object then null; end $$;
 
 -- ============================================================
 -- ✅ PRONTO
