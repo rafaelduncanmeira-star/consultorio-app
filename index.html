@@ -107,6 +107,15 @@
     body.dark .pg-btn:hover:not(:disabled) { background: var(--bg-soft); }
 
     /* ── Badges ── */
+    /* ── Tooltip (ícone ℹ️ com popover ao hover) ── */
+    .help-tip { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; background: #e2e8f0; color: #64748b; font-size: 9.5px; font-weight: 700; cursor: help; margin-left: 5px; vertical-align: middle; transition: background 0.15s; user-select: none; font-family: 'Inter', sans-serif; }
+    .help-tip:hover { background: #cbd5e1; color: #0f172a; }
+    .help-tip::before { content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); min-width: 200px; max-width: 280px; padding: 10px 12px; background: #0f172a; color: #f1f5f9; font-size: 11.5px; font-weight: 400; line-height: 1.5; border-radius: 7px; box-shadow: 0 8px 24px rgba(0,0,0,0.18); opacity: 0; pointer-events: none; transition: opacity 0.18s; white-space: normal; text-align: left; text-transform: none; letter-spacing: 0; z-index: 9999; }
+    .help-tip::after { content: ''; position: absolute; bottom: calc(100% + 2px); left: 50%; transform: translateX(-50%); border: 6px solid transparent; border-top-color: #0f172a; opacity: 0; pointer-events: none; transition: opacity 0.18s; }
+    .help-tip:hover::before, .help-tip:hover::after { opacity: 1; }
+    body.dark .help-tip { background: #30363d; color: #b1bac4; }
+    body.dark .help-tip:hover { background: #484f58; color: #e6edf3; }
+
     .badge { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 4px; font-size: 11.5px; font-weight: 500; letter-spacing: 0.01em; }
     .badge-green  { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
     .badge-red    { background: #fff1f2; color: #9f1239; border: 1px solid #fecdd3; }
@@ -774,7 +783,7 @@
         <div class="kpi-card">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;">
             <div>
-              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:2px;">Faturamento Bruto</div>
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:2px;">Faturamento Bruto<span class="help-tip" data-tip="Soma de TODOS os valores emitidos no mês (independente de pagamento). Inclui pagos, pendentes e parcelados. É a 'fatia total' que você gerou — usado pra projeção e meta.">i</span></div>
               <div style="font-size:28px;font-weight:800;color:#0f172a;letter-spacing:-1px;" id="kpi-fat">R$ 0</div>
             </div>
             <div class="kpi-icon green"><i data-lucide="banknote"></i></div>
@@ -789,7 +798,7 @@
         <div class="kpi-card">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;">
             <div>
-              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:2px;">Lucro Líquido</div>
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:2px;">Lucro Líquido<span class="help-tip" data-tip="Receita realizada (só consultas pagas) menos todas as despesas operacionais. É o que de fato sobrou no mês — não conta inadimplência nem valores parcelados ainda não recebidos.">i</span></div>
               <div style="font-size:28px;font-weight:800;color:#10b981;letter-spacing:-1px;" id="kpi-lucro">R$ 0</div>
             </div>
             <div class="kpi-icon green"><i data-lucide="trending-up"></i></div>
@@ -819,7 +828,7 @@
         <div class="kpi-card">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;">
             <div>
-              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:2px;">Taxa de Ocupação</div>
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:2px;">Taxa de Ocupação<span class="help-tip" data-tip="% dos slots disponíveis na sua agenda que foram preenchidos com consultas (não conta cancelados nem no-shows). 75%+ é ótimo, 50-75% bom, abaixo de 50% indica capacidade ociosa.">i</span></div>
               <div style="font-size:28px;font-weight:800;color:#10b981;letter-spacing:-1px;" id="kpi-ocup">0%</div>
             </div>
             <div id="kpi-ocup-icon" class="kpi-icon green"><i data-lucide="calendar-check"></i></div>
@@ -848,7 +857,7 @@
         <div class="kpi-card">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;">
             <div>
-              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:2px;">Conversão CRM</div>
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:2px;">Conversão CRM<span class="help-tip" data-tip="% dos contatos do CRM que viraram atendimento (status 'Atendeu'). Quanto maior, mais eficiente está seu funil de vendas. Acima de 40% é excelente pra consultório médico.">i</span></div>
               <div style="font-size:28px;font-weight:800;color:#8b5cf6;letter-spacing:-1px;" id="kpi-conv">0%</div>
             </div>
             <div class="kpi-icon purple"><i data-lucide="target"></i></div>
@@ -873,9 +882,9 @@
         <div data-section-body="mrr">
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
             <div class="kpi-card" style="padding:16px 18px;border-left:3px solid #3b82f6;">
-              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">MRR</div>
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">MRR<span class="help-tip" data-tip="Monthly Recurring Revenue — receita recorrente mensal das assinaturas ativas. Mesmo que o paciente pague anualmente, normalizamos pra valor por mês. Indica a saúde do seu negócio recorrente.">i</span></div>
               <div style="font-size:24px;font-weight:800;color:#1d4ed8;letter-spacing:-0.5px;" id="dash-mrr">R$ 0</div>
-              <div style="font-size:11px;color:#64748b;margin-top:4px;">ARR: <span style="font-weight:600;" id="dash-arr">R$ 0</span></div>
+              <div style="font-size:11px;color:#64748b;margin-top:4px;">ARR: <span style="font-weight:600;" id="dash-arr">R$ 0</span><span class="help-tip" data-tip="Annual Recurring Revenue — projeção anualizada do MRR (MRR × 12). Mostra quanto suas assinaturas ativas valem em 12 meses se ninguém cancelar.">i</span></div>
             </div>
             <div class="kpi-card" style="padding:16px 18px;border-left:3px solid #10b981;">
               <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Assinaturas Ativas</div>
@@ -1071,19 +1080,19 @@
           </div>
 
           <div class="kpi-card" style="padding:16px 18px;">
-            <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Receita Líquida</div>
+            <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Receita Líquida<span class="help-tip" data-tip="Faturamento bruto (tudo emitido) menos a inadimplência (consultas pendentes de pagamento) e isentos. É o quanto realmente entrou no caixa neste mês.">i</span></div>
             <div style="font-size:24px;font-weight:800;color:#10b981;letter-spacing:-0.5px;" id="fin-receita-liq">R$ 0</div>
             <div style="font-size:11px;color:#64748b;margin-top:4px;" id="fin-receita-liq-sub">Bruta menos inadimplência</div>
           </div>
 
           <div class="kpi-card" style="padding:16px 18px;">
-            <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Burn Rate Mensal</div>
+            <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Burn Rate Mensal<span class="help-tip" data-tip="Quanto seu consultório 'queima' de caixa por mês — a média de despesas mensais (aluguel, salário, energia, etc.). Se a receita parasse hoje, é o ritmo que você consumiria da reserva.">i</span></div>
             <div style="font-size:24px;font-weight:800;color:#ef4444;letter-spacing:-0.5px;" id="fin-burn">R$ 0</div>
             <div style="font-size:11px;color:#64748b;margin-top:4px;" id="fin-burn-sub">Média despesas fixas (3m)</div>
           </div>
 
           <div class="kpi-card" style="padding:16px 18px;">
-            <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Runway (Fôlego)</div>
+            <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Runway (Fôlego)<span class="help-tip" data-tip="Quantos meses seu caixa atual aguenta no ritmo de despesas, sem nenhuma receita nova. Cálculo: Caixa ÷ Burn Rate. Saúde: <3m crítico, 3-6m atenção, >6m confortável.">i</span></div>
             <div style="font-size:24px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;" id="fin-runway">— meses</div>
             <div style="font-size:11px;color:#64748b;margin-top:4px;" id="fin-runway-sub">Quanto o caixa aguenta sem receita</div>
           </div>
