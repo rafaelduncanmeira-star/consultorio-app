@@ -405,6 +405,7 @@ async function doSignup() {
   const email    = (document.getElementById('signup-email').value || '').trim();
   const password =  document.getElementById('signup-password').value || '';
   const role     =  document.getElementById('signup-role').value || 'medico';
+  const modo     =  document.getElementById('signup-modo')?.value || 'completo';
   const btn      =  document.getElementById('signup-btn');
   const errEl    =  document.getElementById('login-error');
   const okEl     =  document.getElementById('login-success');
@@ -427,6 +428,13 @@ async function doSignup() {
   const result = await signUpUser(email, password, nome, role);
   btn.textContent = 'Criar conta gratuita';
   btn.disabled = false;
+
+  // Salva o modo escolhido (em clinica_config, que sincroniza)
+  if (!result || !result.error) {
+    const cfg = getClinicaConfig();
+    cfg.modo = modo;
+    DB.setObj('clinica_config', cfg);
+  }
 
   if (result && result.error) {
     errEl.textContent = result.error;
@@ -645,6 +653,29 @@ function _atualizarSidebar() {
 // Páginas restritas à secretária
 const _PAGES_FINANCEIRO = ['receita', 'despesas', 'relatorio', 'metas', 'precos', 'backup'];
 
+// Páginas escondidas no modo "Apenas Financeiro"
+const _PAGES_OPERACIONAL = ['crm', 'followup', 'programas', 'agenda'];
+
+function getAppMode() {
+  // Modo da clínica: 'completo' (default) | 'financeiro'
+  return getClinicaConfig().modo || 'completo';
+}
+
+function setAppMode(modo) {
+  const cfg = getClinicaConfig();
+  cfg.modo = modo;
+  DB.setObj('clinica_config', cfg);
+  _applyRole();            // re-aplica visibilidade da sidebar
+  _aplicarModoUI();        // ajusta rótulos/seções
+  _auditLog('configurou', 'sistema', `Mudou para modo ${modo === 'financeiro' ? 'Apenas Financeiro' : 'Operação Completa'}`);
+  // Se a página atual ficou escondida, volta pro Dashboard
+  const ativo = document.querySelector('.page.active');
+  if (ativo && modo === 'financeiro') {
+    const pid = ativo.id.replace('page-', '');
+    if (_PAGES_OPERACIONAL.includes(pid)) showPage('dashboard');
+  }
+}
+
 function _applyRole() {
   // Sem sessão: esconde toda a sidebar (defesa extra contra bypass)
   if (!currentRole) {
@@ -659,13 +690,58 @@ function _applyRole() {
       const el = document.getElementById('nav-' + p);
       if (el) el.style.display = '';
     });
-    return;
+  } else {
+    // Secretária: oculta financeiro
+    _PAGES_FINANCEIRO.forEach(p => {
+      const el = document.getElementById('nav-' + p);
+      if (el) el.style.display = 'none';
+    });
   }
-  // Secretária: oculta financeiro
-  _PAGES_FINANCEIRO.forEach(p => {
-    const el = document.getElementById('nav-' + p);
-    if (el) el.style.display = 'none';
+  // Modo "Apenas Financeiro" — esconde CRM/Follow-Up/Programas/Agenda
+  if (getAppMode() === 'financeiro') {
+    _PAGES_OPERACIONAL.forEach(p => {
+      const el = document.getElementById('nav-' + p);
+      if (el) el.style.display = 'none';
+      const mob = document.getElementById('mob-nav-' + p);
+      if (mob) mob.style.display = 'none';
+    });
+  } else {
+    _PAGES_OPERACIONAL.forEach(p => {
+      const mob = document.getElementById('mob-nav-' + p);
+      if (mob) mob.style.display = '';
+    });
+  }
+  // Esconde headers de seção que ficaram sem itens visíveis
+  _ajustarSecoesSidebar();
+}
+
+// Esconde um header de seção (.nav-section) se todos os nav-items seguintes estão ocultos
+function _ajustarSecoesSidebar() {
+  document.querySelectorAll('.nav-section').forEach(sec => {
+    let temVisivel = false;
+    let n = sec.nextElementSibling;
+    while (n && n.classList.contains('nav-item')) {
+      if (n.style.display !== 'none') { temVisivel = true; break; }
+      n = n.nextElementSibling;
+    }
+    sec.style.display = temVisivel ? '' : 'none';
   });
+}
+
+// Ajustes de UI específicos do modo (rótulos de seção, etc.)
+function _aplicarModoUI() {
+  // Destaca o botão do modo ativo em Configurações
+  const modo = getAppMode();
+  const comp = document.getElementById('modo-completo-btn');
+  const fin  = document.getElementById('modo-financeiro-btn');
+  if (comp && fin) {
+    const ativo   = '#7c3aed';
+    const inativo = '#e2e8f0';
+    comp.style.borderColor = modo === 'completo'   ? ativo : inativo;
+    comp.style.background   = modo === 'completo'   ? '#faf5ff' : '#fff';
+    fin.style.borderColor   = modo === 'financeiro' ? ativo : inativo;
+    fin.style.background     = modo === 'financeiro' ? '#faf5ff' : '#fff';
+  }
 }
 
 // ====================== HELPERS DE SEGURANÇA ======================
@@ -781,6 +857,8 @@ function showPage(page) {
   }
   // Bloqueia acesso financeiro para secretária
   if (currentRole !== 'medico' && _PAGES_FINANCEIRO.includes(page)) return;
+  // Bloqueia páginas operacionais no modo "Apenas Financeiro"
+  if (getAppMode() === 'financeiro' && _PAGES_OPERACIONAL.includes(page)) { page = 'dashboard'; }
 
   // Close sidebar on mobile when navigating
   closeMobileSidebar();
@@ -9230,6 +9308,9 @@ function renderConfiguracoes() {
 
   // Sincroniza estado dos botões de tema com a preferência atual
   _atualizarBotoesTema(document.body.classList.contains('dark'));
+
+  // Destaca o modo de uso ativo
+  _aplicarModoUI();
 }
 
 // ====================== UI: 2FA ======================
