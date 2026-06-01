@@ -115,6 +115,35 @@ end $$;
 grant execute on function accept_invite(text) to authenticated;
 
 -- ------------------------------------------------------------
+-- 2c) PEEK INVITE — lê dados PÚBLICOS de um convite (sem login)
+-- Retorna só nome do dono + função + email, para mostrar o banner
+-- "Você foi convidado por Dr. X como Secretária" antes do cadastro.
+-- Seguro: só devolve info de um token que a pessoa já possui.
+-- ------------------------------------------------------------
+create or replace function peek_invite(invite_token text)
+returns json
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare inv team_invites; owner_nome text;
+begin
+  select * into inv from team_invites
+    where token = invite_token and accepted_at is null and expires_at > now();
+  if not found then return json_build_object('valid', false); end if;
+  select nome into owner_nome from profiles where id = inv.owner_id;
+  return json_build_object(
+    'valid', true,
+    'role', inv.role,
+    'email', inv.email,
+    'ownerNome', coalesce(owner_nome, 'um consultório')
+  );
+end $$;
+
+-- Disponível inclusive sem login (a pessoa ainda não tem conta ao abrir o link)
+grant execute on function peek_invite(text) to anon, authenticated;
+
+-- ------------------------------------------------------------
 -- 3) RLS revisada — app_data, crm_leads, crm_messages
 -- Acesso permitido se: (a) você é dono OU (b) é membro do dono
 -- ------------------------------------------------------------

@@ -266,6 +266,47 @@ function _checkInviteFromUrl() {
   }
 }
 
+// Mostra o banner "Você foi convidado!" na tela de login e prepara o cadastro.
+// Chamado quando há convite pendente E a pessoa ainda não está logada.
+async function _mostrarBannerConvite() {
+  const token = localStorage.getItem('consult_pending_invite');
+  const banner = document.getElementById('login-invite-banner');
+  if (!token || !banner || !_supa) return;
+  try {
+    const { data, error } = await _supa.rpc('peek_invite', { invite_token: token });
+    if (error || !data || !data.valid) {
+      // Token inválido/expirado — limpa pra não confundir
+      if (data && !data.valid) localStorage.removeItem('consult_pending_invite');
+      return;
+    }
+    const papel = data.role === 'medico' ? 'médico(a)' : 'secretária';
+    const txt = document.getElementById('login-invite-text');
+    if (txt) txt.innerHTML = `<strong>${_esc(data.ownerNome)}</strong> convidou você para a equipe como <strong>${papel}</strong>.<br>Crie sua conta abaixo (ou entre, se já tiver) para aceitar.`;
+    banner.style.display = '';
+
+    // Vai direto pra aba "Criar conta" (a maioria dos convidados é novo)
+    setLoginTab('cadastro');
+
+    // Pré-preenche o e-mail do convite e bloqueia (o aceite valida por e-mail)
+    const emailEl = document.getElementById('signup-email');
+    if (emailEl && data.email) { emailEl.value = data.email; }
+
+    // Esconde seletores de função/modo — o convite já define isso
+    const roleWrap = document.getElementById('signup-role-wrap');
+    const modoWrap = document.getElementById('signup-modo-wrap');
+    const note     = document.getElementById('signup-invite-note');
+    if (roleWrap) roleWrap.style.display = 'none';
+    if (modoWrap) modoWrap.style.display = 'none';
+    if (note) {
+      note.innerHTML = `Você entrará como <strong>${papel}</strong> na equipe de ${_esc(data.ownerNome)}. ${data.role === 'secretaria' ? 'Sem acesso ao financeiro.' : ''}`;
+      note.style.display = '';
+    }
+    // Força o role do signup pro valor do convite
+    const roleSel = document.getElementById('signup-role');
+    if (roleSel) roleSel.value = data.role;
+  } catch(e) { console.warn('peek_invite:', e.message); }
+}
+
 // Aceita um convite pendente (chamado após signup/login)
 async function _acceptInviteIfPending() {
   if (!_supa || !currentUser) return;
@@ -548,8 +589,16 @@ async function doSignup() {
   }
 
   // Login automático bem-sucedido
+  // Se entrou numa equipe (via convite), baixa os dados do dono antes de abrir o app
+  if (currentDataOwner && currentDataOwner !== currentUser?.id) {
+    await cloudPull();
+    if (typeof syncLeadsFromSupabase === 'function') syncLeadsFromSupabase();
+  }
   _iniciarApp();
-  setTimeout(() => mostrarOnboarding(), 400);
+  // Só mostra onboarding pra quem NÃO veio de convite (dono de clínica nova)
+  if (!(currentDataOwner && currentDataOwner !== currentUser?.id)) {
+    setTimeout(() => mostrarOnboarding(), 400);
+  }
 }
 
 // Logout
@@ -10858,8 +10907,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     _iniciarApp();
   } else {
     // Mostra tela de login (já visível por padrão)
-    // Foca o campo e-mail
-    const emailEl = document.getElementById('login-email');
-    if (emailEl) setTimeout(() => emailEl.focus(), 100);
+    // Se há convite pendente, mostra banner + leva pro cadastro
+    if (localStorage.getItem('consult_pending_invite')) {
+      _mostrarBannerConvite();
+    } else {
+      const emailEl = document.getElementById('login-email');
+      if (emailEl) setTimeout(() => emailEl.focus(), 100);
+    }
   }
 });

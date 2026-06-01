@@ -2991,6 +2991,12 @@
       <div style="font-size:12.5px;color:#9ca3af;margin-top:4px;font-weight:400;">Gestão completa · CRM · Programas</div>
     </div>
 
+    <!-- Banner de convite (aparece quando a pessoa abre um link ?invite=) -->
+    <div id="login-invite-banner" style="display:none;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:13px 15px;margin-bottom:18px;">
+      <div style="font-size:13.5px;font-weight:700;color:#1d4ed8;display:flex;align-items:center;gap:6px;">🎉 Você foi convidado!</div>
+      <div id="login-invite-text" style="font-size:12.5px;color:#1e40af;margin-top:4px;line-height:1.5;"></div>
+    </div>
+
     <!-- Tabs Login / Cadastro -->
     <div style="display:flex;border-bottom:1px solid #e5e7eb;margin-bottom:22px;">
       <button id="login-tab-entrar" type="button" onclick="setLoginTab('entrar')"
@@ -3093,7 +3099,7 @@
           style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:10px 13px;font-size:13.5px;outline:none;font-family:'Inter',sans-serif;color:#0f172a;"
           onfocus="this.style.borderColor='#0f172a'" onblur="this.style.borderColor='#e5e7eb'" />
       </div>
-      <div style="margin-bottom:14px;">
+      <div id="signup-role-wrap" style="margin-bottom:14px;">
         <label style="display:block;font-size:12px;font-weight:500;color:#374151;margin-bottom:5px;">Tipo de conta</label>
         <select id="signup-role" class="input"
           style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:10px 13px;font-size:13.5px;color:#0f172a;background:#fff;">
@@ -3101,7 +3107,7 @@
           <option value="secretaria">Secretária — sem financeiro</option>
         </select>
       </div>
-      <div style="margin-bottom:18px;">
+      <div id="signup-modo-wrap" style="margin-bottom:18px;">
         <label style="display:block;font-size:12px;font-weight:500;color:#374151;margin-bottom:5px;">Como você vai usar?</label>
         <select id="signup-modo" class="input"
           style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:10px 13px;font-size:13.5px;color:#0f172a;background:#fff;">
@@ -3110,6 +3116,8 @@
         </select>
         <div style="font-size:10.5px;color:#94a3b8;margin-top:5px;line-height:1.4;">Pode trocar quando quiser em Configurações.</div>
       </div>
+      <!-- Nota quando vem de convite (função definida pelo convite) -->
+      <div id="signup-invite-note" style="display:none;margin-bottom:18px;padding:10px 13px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:12px;color:#1e40af;line-height:1.5;"></div>
       <button onclick="doSignup()" id="signup-btn"
         style="width:100%;background:#10b981;color:#fff;border:none;border-radius:9px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;letter-spacing:-0.2px;">
         Criar conta gratuita
