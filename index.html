@@ -2108,101 +2108,50 @@
         <div id="zapi-tutorial-body" style="display:none;margin-top:18px;padding-top:18px;border-top:1px solid #f1f5f9;">
 
           <div style="font-size:12.5px;color:#64748b;margin-bottom:18px;line-height:1.6;">
-            Esta integração permite que mensagens recebidas no seu WhatsApp apareçam automaticamente no <strong>CRM</strong> do sistema. Você usa 3 serviços gratuitos: Z-API, Make e Supabase.
+            Com isso, toda mensagem nova de paciente aparece sozinha no <strong>CRM</strong>. São só 3 passos — sem montar nada complicado.
           </div>
 
           <!-- Step 1 -->
-          <div style="margin-bottom:18px;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;">
+          <div style="margin-bottom:14px;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
               <div style="width:26px;height:26px;background:#dbeafe;color:#1d4ed8;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">1</div>
-              <div style="font-size:13.5px;font-weight:700;color:#0f172a;">Crie uma conta no Z-API</div>
+              <div style="font-size:13.5px;font-weight:700;color:#0f172a;">Crie uma conta no Z-API e conecte o WhatsApp</div>
             </div>
             <div style="font-size:12.5px;color:#475569;line-height:1.7;padding-left:36px;">
-              Acesse <a href="https://z-api.io" target="_blank" rel="noopener" style="color:#3b82f6;font-weight:600;">z-api.io</a> e crie uma conta. Eles oferecem 3 dias grátis para testes. Após criar a instância, escaneie o QR Code com o WhatsApp que será usado no consultório.
-              <br><br><strong>Anote 2 informações:</strong> Instance ID e Token (estão na página da sua instância).
+              Acesse <a href="https://z-api.io" target="_blank" rel="noopener" style="color:#3b82f6;font-weight:600;">z-api.io</a>, crie a instância e escaneie o QR Code com o WhatsApp do consultório. (É um serviço pago após o teste — é ele que conversa com o WhatsApp.)
             </div>
           </div>
 
           <!-- Step 2 -->
-          <div style="margin-bottom:18px;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;">
+          <div style="margin-bottom:14px;padding:14px 16px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-              <div style="width:26px;height:26px;background:#d1fae5;color:#065f46;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">2</div>
-              <div style="font-size:13.5px;font-weight:700;color:#0f172a;">Cole os dados aqui em cima</div>
+              <div style="width:26px;height:26px;background:#dbeafe;color:#1d4ed8;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">2</div>
+              <div style="font-size:13.5px;font-weight:700;color:#0f172a;">Cole este link no webhook do Z-API</div>
             </div>
             <div style="font-size:12.5px;color:#475569;line-height:1.7;padding-left:36px;">
-              Ative o toggle no card acima e cole o <strong>Instance ID</strong> e o <strong>Token</strong>. Clique em <strong>Salvar</strong> e depois em <strong>Testar conexão</strong> para confirmar.
+              No painel do Z-API, em <strong>Webhooks → "Ao receber"</strong>, cole exatamente esta URL (já tem seu código embutido):
+              <div style="background:#0f172a;border-radius:8px;padding:12px 14px;font-family:monospace;font-size:11px;color:#34d399;line-height:1.6;margin-top:8px;word-break:break-all;" id="wa-webhook-url">—</div>
+              <button onclick="_copyWebhookUrl()" class="btn-primary" style="margin-top:10px;font-size:12px;padding:7px 14px;">📋 Copiar meu link</button>
             </div>
           </div>
 
           <!-- Step 3 -->
-          <div style="margin-bottom:18px;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;">
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-              <div style="width:26px;height:26px;background:#ede9fe;color:#5b21b6;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">3</div>
-              <div style="font-size:13.5px;font-weight:700;color:#0f172a;">Crie um cenário no Make (integromat)</div>
-            </div>
-            <div style="font-size:12.5px;color:#475569;line-height:1.7;padding-left:36px;">
-              Acesse <a href="https://make.com" target="_blank" rel="noopener" style="color:#3b82f6;font-weight:600;">make.com</a> (gratuito). Crie um cenário com 2 módulos:
-              <ol style="margin:8px 0 0 18px;padding:0;line-height:1.8;">
-                <li><strong>Trigger:</strong> "Z-API → New Message Received" (informe seu Instance ID e Token)</li>
-                <li><strong>Action:</strong> "Supabase → Insert a Row" na tabela <code style="background:#f1f5f9;padding:1px 6px;border-radius:4px;font-size:11.5px;">crm_leads</code> com os campos:
-                  <ul style="margin:4px 0 0 14px;padding:0;line-height:1.7;">
-                    <li><code>nome</code> = nome do contato</li>
-                    <li><code>whatsapp</code> = telefone</li>
-                    <li><code>primeira_mensagem</code> = texto da mensagem</li>
-                    <li><code>user_id</code> = <span style="color:#dc2626;font-weight:600;">SEU user_id (veja abaixo)</span></li>
-                  </ul>
-                </li>
-              </ol>
-            </div>
-          </div>
-
-          <!-- Step 4 -->
-          <div style="margin-bottom:18px;padding:14px 16px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;">
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-              <div style="width:26px;height:26px;background:#dbeafe;color:#1d4ed8;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">4</div>
-              <div style="font-size:13.5px;font-weight:700;color:#0f172a;">Dados do Supabase pro Make</div>
-            </div>
-            <div style="font-size:12.5px;color:#475569;line-height:1.7;padding-left:36px;">
-              <div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:11px 13px;font-family:monospace;font-size:11.5px;color:#334155;line-height:2;margin-top:6px;">
-                <div><span style="color:#94a3b8;font-family:'Inter',sans-serif;">Supabase URL: </span>https://ipvztcqlawwslnkzmzzl.supabase.co</div>
-                <div><span style="color:#94a3b8;font-family:'Inter',sans-serif;">Tabela leads: </span>crm_leads</div>
-                <div><span style="color:#94a3b8;font-family:'Inter',sans-serif;">Tabela mensagens: </span>crm_messages</div>
-                <div><span style="color:#94a3b8;font-family:'Inter',sans-serif;">Seu user_id: </span><span id="config-user-id" style="color:#dc2626;font-weight:600;">—</span> <button onclick="_copyUserId()" style="background:#f1f5f9;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;margin-left:6px;font-family:'Inter',sans-serif;">Copiar</button></div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Step 5 -->
           <div style="padding:14px 16px;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-              <div style="width:26px;height:26px;background:#fef3c7;color:#92400e;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">5</div>
+              <div style="width:26px;height:26px;background:#fef3c7;color:#92400e;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">3</div>
               <div style="font-size:13.5px;font-weight:700;color:#0f172a;">Teste enviando uma mensagem</div>
             </div>
             <div style="font-size:12.5px;color:#475569;line-height:1.7;padding-left:36px;">
-              Envie uma mensagem de um número diferente pro WhatsApp conectado. Em poucos segundos ela deve aparecer no <strong>CRM</strong> deste sistema. Pronto! Daqui pra frente todo contato novo entra automaticamente.
+              Mande uma mensagem de outro número pro WhatsApp conectado. Em segundos ela aparece no <strong>CRM</strong>. Pronto — daqui pra frente é automático.
             </div>
           </div>
 
           <div style="margin-top:18px;font-size:11.5px;color:#94a3b8;text-align:center;line-height:1.6;">
-            Dúvidas? A integração é opcional — você pode usar o sistema normalmente sem ela e cadastrar contatos manualmente no CRM.
+            Não usa mais o Make. Se o link ainda mostrar "—", saia e entre de novo no app para carregar seu código.<br>
+            (Pré-requisito: a função <code style="font-family:monospace;">wa-webhook</code> precisa estar implantada no Supabase — feito uma vez só.)
           </div>
         </div>
       </div>
-
-      <!-- Info Make/Supabase (modo expandido) -->
-      <div class="chart-card" id="zapi-info-card" style="display:none;margin-bottom:20px;">
-        <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:4px;">📋 Dados rápidos para o Make</div>
-        <div style="font-size:12.5px;color:#64748b;margin-bottom:14px;">Use essas informações ao criar o cenário no make.com</div>
-        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;font-family:monospace;font-size:12px;color:#334155;line-height:2;">
-          <div><span style="color:#94a3b8;font-family:'Inter',sans-serif;">Supabase URL: </span>https://ipvztcqlawwslnkzmzzl.supabase.co</div>
-          <div><span style="color:#94a3b8;font-family:'Inter',sans-serif;">Tabela leads: </span>crm_leads</div>
-          <div><span style="color:#94a3b8;font-family:'Inter',sans-serif;">Tabela mensagens: </span>crm_messages</div>
-        </div>
-        <div style="margin-top:12px;padding:10px 13px;background:#fffbeb;border:1px solid #fde68a;border-radius:7px;font-size:12px;color:#92400e;">
-          ⚠️ O cenário do Make TEM que incluir o campo <code style="background:#fff7ed;padding:1px 6px;border-radius:4px;">user_id</code> em cada insert para que os dados apareçam só na sua conta.
-        </div>
-      </div>
-    </div>
 
   </main>
 </div>

@@ -9471,9 +9471,14 @@ function renderConfiguracoes() {
   const tokenEl = document.getElementById('zapi-token');
   if (tokenEl) tokenEl.value = cfg.token || '';
   _applyZapiUI(cfg.enabled, !!(cfg.instanceId && cfg.token));
-  // Popula user_id do usuário logado no tutorial
-  const uEl = document.getElementById('config-user-id');
-  if (uEl && currentUser) uEl.textContent = currentUser.id;
+  // Monta a URL pronta do webhook (com o user_id do dono dos dados embutido)
+  const waEl = document.getElementById('wa-webhook-url');
+  if (waEl) {
+    const owner = currentDataOwner || (currentUser && currentUser.id);
+    waEl.textContent = owner
+      ? `${SUPA_URL}/functions/v1/wa-webhook?owner=${owner}`
+      : '— (entre na sua conta para gerar)';
+  }
 
   // Galeria de conquistas
   renderConquistas();
@@ -9781,12 +9786,14 @@ function renderConquistas() {
   }
 }
 
-// Copia o user_id pro clipboard (útil pro Make)
-function _copyUserId() {
-  if (!currentUser) return;
-  navigator.clipboard.writeText(currentUser.id).then(() => {
-    if (typeof toast === 'function') toast('✅ user_id copiado!');
-  }).catch(() => alert('Não foi possível copiar. Selecione e copie manualmente: ' + currentUser.id));
+// Copia a URL pronta do webhook do WhatsApp pro clipboard
+function _copyWebhookUrl() {
+  const owner = currentDataOwner || (currentUser && currentUser.id);
+  if (!owner) { alert('Entre na sua conta primeiro.'); return; }
+  const url = `${SUPA_URL}/functions/v1/wa-webhook?owner=${owner}`;
+  navigator.clipboard.writeText(url).then(() => {
+    if (typeof toast === 'function') toast('✅ Link copiado! Cole no webhook do Z-API.');
+  }).catch(() => alert('Copie manualmente:\n' + url));
 }
 
 function _zapiToggleChange(enabled) {
