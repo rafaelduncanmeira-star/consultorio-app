@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Guia Rápido — Maestria de Consultório</title>
+  <meta name="description" content="Aprenda a usar o sistema de gestão do seu consultório em poucos minutos." />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="icon.svg" />
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+    :root {
+      --verde:#10b981; --verde-esc:#059669; --escuro:#0f172a; --cinza:#64748b;
+      --cinza-claro:#94a3b8; --borda:#e8eaed; --bg:#f5f6f8; --azul:#3b82f6; --roxo:#7c3aed; --ambar:#f59e0b;
+    }
+    body { background:var(--bg); color:var(--escuro); line-height:1.6; }
+
+    /* Header */
+    .hero { background:linear-gradient(135deg,#0f172a,#1a2234); color:#fff; padding:48px 24px 56px; text-align:center; }
+    .hero img { width:180px; border-radius:14px; box-shadow:0 8px 30px rgba(0,0,0,0.35); margin-bottom:20px; }
+    .hero h1 { font-size:28px; font-weight:800; letter-spacing:-0.5px; margin-bottom:8px; }
+    .hero p { font-size:15px; color:#cbd5e1; max-width:520px; margin:0 auto; }
+
+    /* Container */
+    .wrap { max-width:760px; margin:-32px auto 0; padding:0 18px 60px; }
+
+    /* Índice */
+    .indice { background:#fff; border:1px solid var(--borda); border-radius:16px; padding:20px 22px; box-shadow:0 4px 24px rgba(0,0,0,0.06); margin-bottom:28px; }
+    .indice h2 { font-size:13px; font-weight:700; color:var(--cinza); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:14px; }
+    .indice ol { list-style:none; display:grid; grid-template-columns:1fr 1fr; gap:8px 18px; }
+    .indice a { display:flex; align-items:center; gap:9px; color:var(--escuro); text-decoration:none; font-size:13.5px; font-weight:500; padding:5px 0; transition:color 0.15s; }
+    .indice a:hover { color:var(--verde-esc); }
+    .indice .n { width:24px; height:24px; background:#d1fae5; color:var(--verde-esc); border-radius:7px; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:12px; flex-shrink:0; }
+
+    /* Seções */
+    .secao { background:#fff; border:1px solid var(--borda); border-radius:16px; padding:28px 26px; box-shadow:0 1px 3px rgba(0,0,0,0.04); margin-bottom:22px; scroll-margin-top:16px; }
+    .secao-head { display:flex; align-items:center; gap:12px; margin-bottom:8px; }
+    .secao-num { width:34px; height:34px; background:var(--verde); color:#fff; border-radius:10px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:15px; flex-shrink:0; box-shadow:0 3px 8px rgba(16,185,129,0.3); }
+    .secao h3 { font-size:19px; font-weight:800; letter-spacing:-0.3px; }
+    .secao .sub { color:var(--cinza); font-size:14px; margin-bottom:18px; }
+    .secao p { font-size:14.5px; color:#334155; margin-bottom:12px; }
+    .secao strong { color:var(--escuro); font-weight:700; }
+    .passos { list-style:none; counter-reset:p; margin:14px 0; }
+    .passos li { position:relative; padding:8px 0 8px 34px; font-size:14.5px; color:#334155; counter-increment:p; }
+    .passos li::before { content:counter(p); position:absolute; left:0; top:7px; width:22px; height:22px; background:#eff6ff; color:var(--azul); border-radius:50%; font-size:11.5px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+    .dica { background:#f0fdf4; border:1px solid #bbf7d0; border-left:3px solid var(--verde); border-radius:9px; padding:12px 15px; font-size:13.5px; color:#166534; margin-top:14px; }
+    .aviso { background:#fffbeb; border:1px solid #fde68a; border-left:3px solid var(--ambar); border-radius:9px; padding:12px 15px; font-size:13.5px; color:#92400e; margin-top:14px; }
+
+    /* Mockups (ilustrações em CSS) */
+    .mock { background:#fafbfc; border:1px solid var(--borda); border-radius:12px; padding:16px; margin:16px 0; overflow:hidden; }
+    .mock-bar { display:flex; gap:5px; margin-bottom:12px; }
+    .mock-bar span { width:9px; height:9px; border-radius:50%; background:#e2e8f0; }
+    .kpi-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+    .kpi { background:#fff; border:1px solid var(--borda); border-radius:10px; padding:12px; }
+    .kpi .lbl { font-size:9px; font-weight:700; color:var(--cinza-claro); text-transform:uppercase; letter-spacing:0.06em; }
+    .kpi .val { font-size:18px; font-weight:800; margin-top:3px; }
+    .pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700; }
+    .kanban { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+    .kanban-col { background:#fff; border:1px solid var(--borda); border-radius:9px; padding:8px; }
+    .kanban-col .h { font-size:9.5px; font-weight:700; padding:3px 6px; border-radius:6px; margin-bottom:6px; text-align:center; }
+    .kanban-card { background:#fafbfc; border:1px solid var(--borda); border-radius:6px; padding:6px; font-size:9px; color:var(--cinza); margin-bottom:5px; }
+    .sidebar-mock { background:#111318; border-radius:10px; padding:12px; width:170px; }
+    .sidebar-mock .logo { display:flex; align-items:center; gap:8px; margin-bottom:14px; }
+    .sidebar-mock .logo .sq { width:24px; height:24px; background:#1a1f2e; border-radius:6px; display:flex; align-items:center; justify-content:center; color:var(--verde); font-size:12px; }
+    .sidebar-mock .logo .t { color:#e2e8f0; font-size:11px; font-weight:600; }
+    .nav-mock { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; font-size:11px; color:#cbd5e1; margin-bottom:2px; }
+    .nav-mock.on { background:linear-gradient(90deg,rgba(16,185,129,0.15),rgba(16,185,129,0.04)); color:#fff; font-weight:600; }
+    .nav-mock .ico { width:13px; height:13px; }
+    .sec-label { font-size:8.5px; font-weight:700; color:#7c8ba1; text-transform:uppercase; letter-spacing:0.1em; padding:10px 8px 4px; }
+
+    /* CTA */
+    .cta { background:linear-gradient(135deg,var(--verde),var(--verde-esc)); color:#fff; border-radius:16px; padding:32px 26px; text-align:center; margin-top:10px; }
+    .cta h3 { font-size:20px; font-weight:800; margin-bottom:8px; }
+    .cta p { font-size:14.5px; color:#dcfce7; margin-bottom:18px; }
+    .cta a { display:inline-block; background:#fff; color:var(--verde-esc); padding:12px 28px; border-radius:10px; font-weight:700; font-size:15px; text-decoration:none; box-shadow:0 4px 14px rgba(0,0,0,0.15); }
+
+    .foot { text-align:center; color:var(--cinza-claro); font-size:12px; padding:30px 18px; }
+
+    @media (max-width:560px) {
+      .indice ol { grid-template-columns:1fr; }
+      .kpi-row { grid-template-columns:1fr 1fr; }
+      .kanban { grid-template-columns:1fr 1fr; }
+      .hero h1 { font-size:23px; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="hero">
+    <img src="maestria-logo.png" alt="Maestria de Consultório" />
+    <h1>Guia Rápido</h1>
+    <p>Tudo que você precisa para começar a usar seu consultório digital em poucos minutos.</p>
+  </div>
+
+  <div class="wrap">
+
+    <!-- Índice -->
+    <div class="indice">
+      <h2>📑 O que você vai aprender</h2>
+      <ol>
+        <li><a href="#conta"><span class="n">1</span> Criar sua conta</a></li>
+        <li><a href="#precos"><span class="n">2</span> Cadastrar seus preços</a></li>
+        <li><a href="#metas"><span class="n">3</span> Definir suas metas</a></li>
+        <li><a href="#atendimento"><span class="n">4</span> Registrar atendimentos</a></li>
+        <li><a href="#dashboard"><span class="n">5</span> Entender o painel</a></li>
+        <li><a href="#crm"><span class="n">6</span> Captar pacientes (CRM)</a></li>
+        <li><a href="#agenda"><span class="n">7</span> Usar a agenda</a></li>
+        <li><a href="#programas"><span class="n">8</span> Programas / assinaturas</a></li>
+        <li><a href="#equipe"><span class="n">9</span> Convidar a secretária</a></li>
+        <li><a href="#whatsapp"><span class="n">10</span> Conectar o WhatsApp</a></li>
+        <li><a href="#seguranca"><span class="n">11</span> Backup e segurança</a></li>
+        <li><a href="#modo"><span class="n">12</span> Modo simplificado</a></li>
+      </ol>
+    </div>
+
+    <!-- 1 -->
+    <div class="secao" id="conta">
+      <div class="secao-head"><div class="secao-num">1</div><h3>Criar sua conta</h3></div>
+      <div class="sub">É grátis e leva 30 segundos. Não precisa instalar nada.</div>
+      <ol class="passos">
+        <li>Abra o link do sistema no seu navegador (Chrome, Safari, etc.).</li>
+        <li>Clique na aba <strong>"Criar conta"</strong>.</li>
+        <li>Preencha nome, e-mail e uma senha (mínimo 8 caracteres).</li>
+        <li>Escolha o tipo (<strong>Médico</strong>) e como vai usar (completo ou só financeiro).</li>
+        <li>Pronto! Você já entra direto no painel.</li>
+      </ol>
+      <div class="dica">💡 Esqueceu a senha depois? Na tela de login tem <strong>"Esqueci minha senha"</strong> — chega um link no seu e-mail para criar uma nova.</div>
+    </div>
+
+    <!-- 2 -->
+    <div class="secao" id="precos">
+      <div class="secao-head"><div class="secao-num">2</div><h3>Cadastrar seus preços</h3></div>
+      <div class="sub">Faça isso primeiro — assim o valor aparece sozinho ao registrar consultas.</div>
+      <p>No menu lateral, abra <strong>Tabela de Preços</strong> e cadastre cada tipo de atendimento com o valor no PIX e no cartão.</p>
+      <div class="mock">
+        <div class="mock-bar"><span></span><span></span><span></span></div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <tr style="color:var(--cinza);font-size:10px;text-transform:uppercase;"><td style="padding:5px;">Procedimento</td><td style="padding:5px;text-align:right;">PIX</td><td style="padding:5px;text-align:right;">Cartão</td></tr>
+          <tr style="border-top:1px solid var(--borda);"><td style="padding:7px 5px;font-weight:600;">Consulta</td><td style="padding:7px 5px;text-align:right;">R$ 500</td><td style="padding:7px 5px;text-align:right;color:var(--cinza);">R$ 540</td></tr>
+          <tr style="border-top:1px solid var(--borda);"><td style="padding:7px 5px;font-weight:600;">Retorno</td><td style="padding:7px 5px;text-align:right;">R$ 300</td><td style="padding:7px 5px;text-align:right;color:var(--cinza);">R$ 320</td></tr>
+          <tr style="border-top:1px solid var(--borda);"><td style="padding:7px 5px;font-weight:600;">Domiciliar</td><td style="padding:7px 5px;text-align:right;">R$ 800</td><td style="padding:7px 5px;text-align:right;color:var(--cinza);">R$ 870</td></tr>
+        </table>
+      </div>
+      <div class="dica">💡 Se registrar uma consulta de um procedimento sem preço cadastrado, o sistema te avisa para cadastrar.</div>
+    </div>
+
+    <!-- 3 -->
+    <div class="secao" id="metas">
+      <div class="secao-head"><div class="secao-num">3</div><h3>Definir suas metas</h3></div>
+      <div class="sub">Estabeleça o alvo do mês para o painel acompanhar seu ritmo.</div>
+      <p>Em <strong>Metas Anuais → ⚙️ Editar Metas</strong>, defina quantos atendimentos de cada tipo você quer por mês e o valor. O sistema calcula sua meta de faturamento e mostra o quanto você já atingiu.</p>
+      <div class="dica">💡 As metas alimentam os gráficos de "Receita vs Meta" e os alertas inteligentes do painel.</div>
+    </div>
+
+    <!-- 4 -->
+    <div class="secao" id="atendimento">
+      <div class="secao-head"><div class="secao-num">4</div><h3>Registrar atendimentos</h3></div>
+      <div class="sub">O coração do sistema — cada consulta vira receita no painel.</div>
+      <ol class="passos">
+        <li>Clique em <strong>"+ Nova Consulta"</strong> (botão escuro no topo) ou na aba <strong>Atendidos</strong>.</li>
+        <li>Escolha o paciente, o tipo de procedimento e a forma de pagamento.</li>
+        <li>O valor aparece automático (da Tabela de Preços) — você pode ajustar.</li>
+        <li>Marque o status: <span class="pill" style="background:#d1fae5;color:#065f46;">Pago</span> <span class="pill" style="background:#fef3c7;color:#92400e;">Pendente</span> <span class="pill" style="background:#f1f5f9;color:#475569;">Isento</span></li>
+      </ol>
+      <div class="dica">💡 Parcelou no cartão? O sistema distribui os recebimentos pelos meses no fluxo de caixa.</div>
+    </div>
+
+    <!-- 5 -->
+    <div class="secao" id="dashboard">
+      <div class="secao-head"><div class="secao-num">5</div><h3>Entender o painel</h3></div>
+      <div class="sub">Sua clínica em números, atualizado em tempo real.</div>
+      <div class="mock">
+        <div class="kpi-row">
+          <div class="kpi"><div class="lbl">Faturamento</div><div class="val" style="color:var(--escuro);">R$ 17.650</div></div>
+          <div class="kpi"><div class="lbl">Lucro</div><div class="val" style="color:var(--verde);">R$ 7.440</div></div>
+          <div class="kpi"><div class="lbl">Atendidos</div><div class="val" style="color:var(--escuro);">25</div></div>
+        </div>
+      </div>
+      <p>Passe o mouse no ícone <strong>ⓘ</strong> ao lado de cada número para entender o que ele significa (faturamento bruto, lucro líquido, ticket médio, taxa de ocupação, etc.).</p>
+      <p>Mais abaixo você encontra <strong>Inteligência Financeira</strong> (projeção, fôlego de caixa), <strong>gráficos</strong>, <strong>receita por procedimento</strong> e o <strong>funil de conversão</strong>.</p>
+      <div class="dica">💡 Troque o mês no seletor do topo para ver qualquer período.</div>
+    </div>
+
+    <!-- 6 -->
+    <div class="secao" id="crm">
+      <div class="secao-head"><div class="secao-num">6</div><h3>Captar pacientes (CRM)</h3></div>
+      <div class="sub">Acompanhe cada contato da primeira mensagem até virar consulta.</div>
+      <p>Na aba <strong>CRM</strong>, cada contato passa por etapas. Você pode arrastar os cartões no modo <strong>Kanban</strong>:</p>
+      <div class="mock">
+        <div class="kanban">
+          <div class="kanban-col"><div class="h" style="background:#dbeafe;color:#1d4ed8;">Contato</div><div class="kanban-card">Maria · ⏱ 2d</div></div>
+          <div class="kanban-col"><div class="h" style="background:#ede9fe;color:#5b21b6;">Negociação</div><div class="kanban-card">João · ⏱ 1d</div></div>
+          <div class="kanban-col"><div class="h" style="background:#fef3c7;color:#92400e;">Marcou</div><div class="kanban-card">Ana · ⏱ hoje</div></div>
+          <div class="kanban-col"><div class="h" style="background:#d1fae5;color:#065f46;">Atendeu</div><div class="kanban-card">Pedro ✓</div></div>
+        </div>
+      </div>
+      <p>Cada cartão mostra <strong>há quanto tempo</strong> está parado naquela etapa — pra você não esquecer ninguém. Quando arrasta para "Marcou", o sistema oferece já criar o agendamento.</p>
+    </div>
+
+    <!-- 7 -->
+    <div class="secao" id="agenda">
+      <div class="secao-head"><div class="secao-num">7</div><h3>Usar a agenda</h3></div>
+      <div class="sub">Visão de dia, semana ou mês — conectada ao CRM e aos Atendidos.</div>
+      <p>Em <strong>Agenda</strong>, clique num horário livre para agendar. Quando o paciente comparece, marque <strong>"Compareceu"</strong> e o sistema oferece registrar o atendimento na hora — sem digitar duas vezes.</p>
+      <div class="dica">💡 O status do agendamento e do CRM se sincronizam automaticamente nos dois sentidos.</div>
+    </div>
+
+    <!-- 8 -->
+    <div class="secao" id="programas">
+      <div class="secao-head"><div class="secao-num">8</div><h3>Programas e assinaturas</h3></div>
+      <div class="sub">Transforme atendimento avulso em receita recorrente (concierge).</div>
+      <p>Na aba <strong>Programas</strong> você cria planos de acompanhamento: <strong>Assinatura</strong> (mensal/trimestral/anual), <strong>Fixo</strong> (pacote com marcos) ou <strong>Contínuo</strong> (crônicos).</p>
+      <p>Ao inscrever um paciente, o sistema cria sozinho os <strong>follow-ups</strong>, os <strong>retornos na agenda</strong> e o <strong>lançamento financeiro</strong>. O painel mostra seu <strong>MRR</strong> (receita recorrente mensal).</p>
+      <div class="dica">💡 O painel avisa quando uma assinatura está perto de vencer, com botão para renovar e avisar o paciente no WhatsApp.</div>
+    </div>
+
+    <!-- 9 -->
+    <div class="secao" id="equipe">
+      <div class="secao-head"><div class="secao-num">9</div><h3>Convidar a secretária</h3></div>
+      <div class="sub">Sua equipe acessa os mesmos dados, com as permissões certas.</div>
+      <ol class="passos">
+        <li>Vá em <strong>Configurações → 👥 Equipe → + Convidar membro</strong>.</li>
+        <li>Digite o e-mail dela e escolha <strong>Secretária</strong> (sem acesso ao financeiro).</li>
+        <li>Gere o link e envie pelo WhatsApp (tem botão pronto).</li>
+        <li>Ela abre o link, cria a conta e <strong>entra automaticamente</strong> na sua equipe.</li>
+      </ol>
+      <div class="dica">💡 A secretária vê pacientes, agenda e CRM, mas não vê receita, despesas nem relatórios financeiros.</div>
+    </div>
+
+    <!-- 10 -->
+    <div class="secao" id="whatsapp">
+      <div class="secao-head"><div class="secao-num">10</div><h3>Conectar o WhatsApp (opcional)</h3></div>
+      <div class="sub">Receba contatos novos direto no CRM, automaticamente.</div>
+      <p>Em <strong>Configurações</strong> há um tutorial passo a passo para integrar o WhatsApp via Z-API + Make. Toda mensagem nova de paciente vira um contato no seu CRM sozinha.</p>
+      <div class="aviso">⚠️ É opcional. O sistema funciona 100% sem isso — você só cadastra os contatos manualmente.</div>
+    </div>
+
+    <!-- 11 -->
+    <div class="secao" id="seguranca">
+      <div class="secao-head"><div class="secao-num">11</div><h3>Backup e segurança</h3></div>
+      <div class="sub">Seus dados ficam salvos na nuvem e protegidos.</div>
+      <p>Todo dia o sistema faz um <strong>backup automático</strong> (últimos 7 dias guardados). Você pode restaurar qualquer um em <strong>Backup</strong>, ou exportar tudo em JSON/CSV quando quiser.</p>
+      <p>Para mais segurança, ative a <strong>verificação em 2 fatores (2FA)</strong> em Configurações — usando Google Authenticator ou similar.</p>
+      <div class="dica">💡 Seus dados são isolados: ninguém além da sua equipe tem acesso a eles.</div>
+    </div>
+
+    <!-- 12 -->
+    <div class="secao" id="modo">
+      <div class="secao-head"><div class="secao-num">12</div><h3>Modo simplificado</h3></div>
+      <div class="sub">Não quer CRM nem agenda? Use só a parte financeira.</div>
+      <p>Em <strong>Configurações → Modo de uso</strong>, escolha <strong>"Apenas financeiro"</strong>. O menu esconde CRM, Agenda, Follow-Up e Programas — deixando só receita, despesas, preços e relatórios. Dá pra voltar pro completo quando quiser.</p>
+    </div>
+
+    <!-- CTA -->
+    <div class="cta">
+      <h3>🎼 Pronto para reger seu consultório?</h3>
+      <p>Quanto mais você usa, mais o sistema te ajuda — e você ainda desbloqueia conquistas pelo caminho.</p>
+      <a href="index.html">Abrir o sistema →</a>
+    </div>
+
+    <div class="foot">
+      Maestria de Consultório · Guia rápido<br>
+      Dúvidas? Fale com quem te indicou o sistema.
+    </div>
+
+  </div>
+</body>
+</html>
