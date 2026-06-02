@@ -34,6 +34,14 @@
     }
   </script>
   <style>
+    /* ── Blindagem de financeiro: papel sem acesso financeiro (secretária/profissional) ──
+       Esconde os cards e seções financeiras do Dashboard mesmo que renderDashboard
+       tente reexibi-los. !important garante que vença qualquer display inline. */
+    body.role-no-fin [data-fin],
+    body.role-no-fin [data-section="financeiro"],
+    body.role-no-fin [data-section="mrr"],
+    body.role-no-fin [data-section="analise"] { display: none !important; }
+
     /* ── Tokens de tema (light = default) ── */
     :root {
       --bg-page: #f5f6f8;
@@ -780,7 +788,7 @@
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
 
         <!-- Faturamento Bruto -->
-        <div class="kpi-card">
+        <div class="kpi-card" data-fin="1">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;">
             <div>
               <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:2px;">Faturamento Bruto<span class="help-tip" data-tip="Soma de TODOS os valores emitidos no mês (independente de pagamento). Inclui pagos, pendentes e parcelados. É a 'fatia total' que você gerou — usado pra projeção e meta.">i</span></div>
@@ -795,7 +803,7 @@
         </div>
 
         <!-- Lucro Líquido -->
-        <div class="kpi-card">
+        <div class="kpi-card" data-fin="1">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;">
             <div>
               <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:2px;">Lucro Líquido<span class="help-tip" data-tip="Receita realizada (só consultas pagas) menos todas as despesas operacionais. É o que de fato sobrou no mês — não conta inadimplência nem valores parcelados ainda não recebidos.">i</span></div>
@@ -843,7 +851,7 @@
         </div>
 
         <!-- Total Despesas (sem inadimplência — pertence ao faturamento) -->
-        <div class="kpi-card">
+        <div class="kpi-card" data-fin="1">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;">
             <div>
               <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:2px;">Total Despesas</div>

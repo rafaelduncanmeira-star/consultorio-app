@@ -881,20 +881,25 @@ function _atualizarSidebar() {
   const eMedico = currentRole === 'medico';
   const nomeFormatado = eMedico ? `Dr. ${currentNome}` : currentNome;
   const ehMembro = currentTeamRole === 'member';
+  // Etiqueta verdadeira do papel (antes mostrava "Secretária" pra QUALQUER não-médico,
+  // escondendo que a pessoa era na verdade "Profissional").
+  const papelLabel = currentRole === 'medico' ? 'Médico'
+                   : currentRole === 'profissional' ? 'Profissional'
+                   : 'Secretária';
 
   // Footer da sidebar (avatar + nome + role)
   const nomeEl   = document.getElementById('sidebar-nome');
   const roleEl   = document.getElementById('sidebar-role');
   const avatarEl = document.getElementById('sidebar-avatar');
   if (nomeEl)   nomeEl.textContent = nomeFormatado;
-  if (roleEl)   roleEl.textContent = (eMedico ? 'Médico' : 'Secretária') + (ehMembro ? ' · 👥 Em equipe' : '');
+  if (roleEl)   roleEl.textContent = papelLabel + (ehMembro ? ' · 👥 Em equipe' : '');
   if (avatarEl) avatarEl.textContent = currentNome.charAt(0).toUpperCase();
 
   // Header da sidebar (logo)
   const headerNome = document.getElementById('sidebar-header-nome');
   const headerEsp  = document.getElementById('sidebar-header-esp');
   if (headerNome) headerNome.textContent = nomeFormatado;
-  if (headerEsp)  headerEsp.textContent  = eMedico ? 'Geriatria' : 'Secretária';
+  if (headerEsp)  headerEsp.textContent  = eMedico ? 'Geriatria' : papelLabel;
 
   // Nível de maestria
   _atualizarSidebarMaestria();
@@ -930,8 +935,13 @@ function _applyRole() {
   // Sem sessão: esconde toda a sidebar (defesa extra contra bypass)
   if (!currentRole) {
     document.querySelectorAll('.nav-item').forEach(el => el.style.display = 'none');
+    document.body.classList.add('role-no-fin');
     return;
   }
+  // Blindagem financeira do Dashboard: SÓ médico vê cards/seções financeiras
+  // (Faturamento, Lucro, Despesas, Inteligência Financeira, DRE, MRR, Análise).
+  // Secretária e profissional nunca veem — nem que renderDashboard reexiba.
+  document.body.classList.toggle('role-no-fin', currentRole !== 'medico');
   // Garante que itens não-financeiros estão visíveis
   document.querySelectorAll('.nav-item').forEach(el => el.style.display = '');
   if (currentRole === 'medico') {
