@@ -9856,11 +9856,30 @@ function _applyZapiUI(enabled, hasCredentials) {
   if (info)   info.style.display   = (enabled && hasCredentials) ? '' : 'none';
 }
 
+// Tolera o erro mais comum: colar a URL inteira do Z-API
+// (ex.: https://api.z-api.io/instances/XXXX/token/YYYY/...) em vez de só o ID.
+// Extrai o Instance ID e o Token de onde quer que tenham sido colados.
+function _parseZapiCreds(instanceRaw, tokenRaw) {
+  let instanceId = (instanceRaw || '').trim();
+  let token      = (tokenRaw || '').trim();
+  // URL completa colada no campo Instance ID (a URL é a fonte canônica do par id+token)
+  const m = instanceId.match(/instances\/([^/\s?]+)(?:\/token\/([^/?\s]+))?/i);
+  if (m) {
+    instanceId = m[1];
+    if (m[2]) token = m[2];
+  }
+  // URL colada também no campo Token
+  const tm = token.match(/token\/([^/?\s]+)/i);
+  if (tm) token = tm[1];
+  return { instanceId, token };
+}
+
 function saveZapiConfig() {
-  const instanceId  = (document.getElementById('zapi-instance-id')?.value   || '').trim();
-  const token       = (document.getElementById('zapi-token')?.value         || '').trim();
+  const rawInstance = (document.getElementById('zapi-instance-id')?.value   || '').trim();
+  const rawToken    = (document.getElementById('zapi-token')?.value         || '').trim();
   const clientToken = (document.getElementById('zapi-client-token')?.value   || '').trim();
   const statusEl    = document.getElementById('zapi-status');
+  const { instanceId, token } = _parseZapiCreds(rawInstance, rawToken);
   if (!instanceId || !token) {
     if (statusEl) { statusEl.textContent = '⚠️ Preencha Instance ID e Token'; statusEl.style.color = '#f59e0b'; }
     return;
@@ -9870,9 +9889,16 @@ function saveZapiConfig() {
   cfg.token       = token;
   cfg.clientToken = clientToken;
   DB.setObj('zapi_config', cfg);
-  if (statusEl) { statusEl.textContent = '✅ Salvo!'; statusEl.style.color = '#10b981'; }
+  // Reflete os valores limpos nos campos (caso tenham sido extraídos de uma URL)
+  const idEl = document.getElementById('zapi-instance-id'); if (idEl) idEl.value = instanceId;
+  const tkEl = document.getElementById('zapi-token');       if (tkEl) tkEl.value = token;
+  const extraiu = (rawInstance !== instanceId);
+  if (statusEl) {
+    statusEl.textContent = extraiu ? '✅ Salvo! (extraí o ID e o token da URL)' : '✅ Salvo!';
+    statusEl.style.color = '#10b981';
+  }
   _applyZapiUI(cfg.enabled, true);
-  setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000);
+  setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 4000);
   checkAchievements();
 }
 
