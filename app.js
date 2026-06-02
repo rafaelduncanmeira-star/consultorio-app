@@ -4169,6 +4169,8 @@ function openNovoAgendamento(prefill = {}) {
   form.status.value = 'Confirmado';
   document.querySelector('#modal-agendamento .modal-title').textContent = 'Novo Agendamento';
   document.getElementById('ag-conflito-aviso').style.display = 'none';
+  const btnExcluir = document.getElementById('ag-excluir-btn');
+  if (btnExcluir) btnExcluir.style.display = 'none';   // nada pra excluir num agendamento novo
   modal.style.display = 'flex';
 }
 
@@ -4196,6 +4198,8 @@ function editAgendamento(id) {
   _setTipoAtividade(a.tipoAtividade || 'Consultório');
   document.querySelector('#modal-agendamento .modal-title').textContent = 'Editar Agendamento';
   document.getElementById('ag-conflito-aviso').style.display = 'none';
+  const btnExcluir = document.getElementById('ag-excluir-btn');
+  if (btnExcluir) btnExcluir.style.display = '';   // só aparece ao editar um existente
   modal.style.display = 'flex';
 }
 
@@ -4257,6 +4261,19 @@ function saveAgendamento(e) {
   }
 
   renderAgenda();
+}
+
+// Exclui (remove de vez) o agendamento aberto no modal de edição.
+function excluirAgendamento() {
+  if (!editState.agId) { closeModal('modal-agendamento'); return; }
+  const ags  = getAgendamentos();
+  const a    = ags.find(x => x.id === editState.agId);
+  const nome = (a && a.pacienteNome) ? a.pacienteNome : 'este agendamento';
+  if (!confirm(`Excluir o agendamento de "${nome}"?\n\nEle será removido da agenda. Esta ação não pode ser desfeita.`)) return;
+  DB.set('agendamentos', ags.filter(x => x.id !== editState.agId));
+  closeModal('modal-agendamento');
+  renderAgenda();
+  if (typeof toast === 'function') toast('🗑️ Agendamento excluído.');
 }
 
 function _gcalFmt(dateStr, timeStr) {

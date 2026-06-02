@@ -2487,7 +2487,8 @@
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <button type="submit" class="btn-primary" style="flex:1;justify-content:center;">Salvar Agendamento</button>
         <button type="button" onclick="abrirGoogleCalendar()" class="btn-ghost" title="Abre o Google Calendar com este agendamento pré-preenchido">📅 Google Calendar</button>
-        <button type="button" onclick="closeModal('modal-agendamento')" class="btn-ghost">Cancelar</button>
+        <button type="button" id="ag-excluir-btn" onclick="excluirAgendamento()" class="btn-ghost" style="display:none;color:#dc2626;border-color:#fecaca;" title="Remove este agendamento da agenda">🗑️ Excluir</button>
+        <button type="button" onclick="closeModal('modal-agendamento')" class="btn-ghost">Fechar</button>
       </div>
     </form>
   </div>
