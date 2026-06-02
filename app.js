@@ -2789,6 +2789,7 @@ function editRow(col, idx) {
     form.data.value = r.data || '';
     form.tipo.value = r.tipo || '';
     form.nome.value = r.nome || '';
+    if (form.whatsapp) form.whatsapp.value = r.whatsapp || '';
     form.valor.value = r.valor || '';
     form.pagamento.value = r.pagamento || '';
     form.statusPgto.value = r.statusPgto || '';
@@ -2796,6 +2797,7 @@ function editRow(col, idx) {
     atualizarValorSugerido();
   } else if (col === 'followup') {
     form.nome.value = r.nome || '';
+    if (form.whatsapp) form.whatsapp.value = r.whatsapp || '';
     form.ultConsulta.value = r.ultConsulta || '';
     form.dataContato.value = r.dataContato || '';
     form.tipoContato.value = r.tipoContato || '';
@@ -3416,6 +3418,7 @@ function convertCrmToAtendido(crmIdx) {
   popularProcedimentoSelect();
   form.data.value = today;
   form.nome.value = c.nome || '';
+  if (form.whatsapp) form.whatsapp.value = c.whatsapp || '';
   // Tenta usar o tipo do CRM se ele existir no catálogo; se não, deixa o primeiro
   const procs = getProcedimentos();
   form.tipo.value = procs.some(p => p.nome === c.tipo) ? c.tipo : (procs[0]?.nome || '');
@@ -3706,6 +3709,7 @@ function savePaciente(e) {
   const item = {
     data: dataConsulta,
     nome: fd.get('nome'),
+    whatsapp: (fd.get('whatsapp') || '').trim(),
     tipo: fd.get('tipo'),
     valor: valorTotal,
     pagamento,
@@ -3842,7 +3846,7 @@ function saveFollowup(e) {
   const fd = new FormData(e.target);
   const data = DB.get('followup');
   const existFeito = (editState.col === 'followup' && editState.idx !== null) ? (data[editState.idx].feito || false) : false;
-  const item = { nome: fd.get('nome'), ultConsulta: fd.get('ultConsulta'), dataContato: fd.get('dataContato'), tipoContato: fd.get('tipoContato'), feito: existFeito, dataReav: fd.get('dataReav'), obs: fd.get('obs') };
+  const item = { nome: fd.get('nome'), whatsapp: (fd.get('whatsapp') || '').trim(), ultConsulta: fd.get('ultConsulta'), dataContato: fd.get('dataContato'), tipoContato: fd.get('tipoContato'), feito: existFeito, dataReav: fd.get('dataReav'), obs: fd.get('obs') };
   if (editState.col === 'followup' && editState.idx !== null) { data[editState.idx] = item; } else { data.unshift(item); }
   DB.set('followup', data);
   // Marcar paciente como followup criado
@@ -4020,8 +4024,8 @@ function _openWhatsAppForFu(idx) {
   const pac = DB.get('pacientes').find(p => p.nome === fu.nome && p.whatsapp);
   const crm = DB.get('crm').find(c => c.nome === fu.nome && c.whatsapp);
   const ins = DB.get('inscricoes').find(i => i.id === fu.programaInscricaoId);
-  const wa = (pac?.whatsapp || crm?.whatsapp || ins?.pacienteWhatsapp || '').replace(/\D/g, '');
-  if (!wa) { alert('WhatsApp não encontrado para ' + fu.nome); return; }
+  const wa = (fu.whatsapp || pac?.whatsapp || crm?.whatsapp || ins?.pacienteWhatsapp || '').replace(/\D/g, '');
+  if (!wa) { alert('WhatsApp não cadastrado para ' + fu.nome + '.\n\nClique no ✏️ pra editar este follow-up e adicionar o número.'); return; }
   const fone55 = wa.startsWith('55') ? wa : '55' + wa;
   const msg = encodeURIComponent(`Olá ${fu.nome.split(' ')[0]}! ${fu.obs}`);
   window.open(`https://wa.me/${fone55}?text=${msg}`, '_blank');
@@ -4374,6 +4378,7 @@ function _registrarAtendimentoDeAgendamento(a) {
   const procs = getProcedimentos();
   form.data.value = a.data;
   form.nome.value = a.pacienteNome;
+  if (form.whatsapp) form.whatsapp.value = a.whatsapp || '';
   form.tipo.value = procs.some(p => p.nome === a.procedimento) ? a.procedimento : (procs[0]?.nome || '');
   form.valor.value = '';
   form.pagamento.value = 'PIX';
@@ -8636,6 +8641,28 @@ function buscaGlobal(query) {
   el.style.display = 'block';
 }
 
+// Adiciona/edita o WhatsApp de um paciente direto pelo perfil.
+// Grava em TODAS as consultas e follow-ups com aquele nome (mantém consistente).
+function _editarWhatsPerfil(nomeEnc) {
+  const nome = decodeURIComponent(nomeEnc);
+  const chave = nome.toLowerCase().trim();
+  const atual = (DB.get('pacientes').find(p => (p.nome||'').toLowerCase().trim() === chave && p.whatsapp)?.whatsapp)
+             || (DB.get('followup').find(f => (f.nome||'').toLowerCase().trim() === chave && f.whatsapp)?.whatsapp) || '';
+  const novo = prompt(`WhatsApp de ${nome} (com DDD):`, atual);
+  if (novo === null) return; // cancelou
+  const num = novo.replace(/\D/g, '');
+  const pacs = DB.get('pacientes');
+  let mudou = false;
+  pacs.forEach(p => { if ((p.nome||'').toLowerCase().trim() === chave) { p.whatsapp = num; mudou = true; } });
+  if (mudou) DB.set('pacientes', pacs);
+  const fus = DB.get('followup');
+  let mudouF = false;
+  fus.forEach(f => { if ((f.nome||'').toLowerCase().trim() === chave) { f.whatsapp = num; mudouF = true; } });
+  if (mudouF) DB.set('followup', fus);
+  if (typeof renderFollowup === 'function' && document.getElementById('page-followup')?.classList.contains('active')) renderFollowup();
+  abrirPerfilPaciente(nomeEnc); // re-renderiza o perfil com o número novo
+}
+
 function abrirPerfilPaciente(nomeEnc) {
   const nome = decodeURIComponent(nomeEnc);
 
@@ -8678,6 +8705,23 @@ function abrirPerfilPaciente(nomeEnc) {
   if (primeiraCons) subParts.push(`1ª visita: ${formatDate(primeiraCons)}`);
   if (crmStatus)    subParts.push(`CRM: ${crmStatus}`);
   if (subEl) subEl.textContent = subParts.join(' · ') || 'Sem dados';
+
+  // WhatsApp: pega de qualquer fonte (consulta, CRM, agenda, follow-up) + botão de ação
+  const whats = (pacs.find(p => p.whatsapp)?.whatsapp) || (crm.find(c => c.whatsapp)?.whatsapp)
+             || (agenda.find(a => a.whatsapp)?.whatsapp) || (followups.find(f => f.whatsapp)?.whatsapp) || '';
+  const whatsEl = document.getElementById('perfil-whats');
+  if (whatsEl) {
+    if (whats) {
+      const wa = whats.replace(/\D/g, '');
+      const fone = wa.startsWith('55') ? wa : '55' + wa;
+      whatsEl.innerHTML =
+        `<a href="https://wa.me/${fone}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;background:#dcfce7;color:#16a34a;border:none;border-radius:7px;padding:5px 12px;font-size:12.5px;font-weight:600;text-decoration:none;">💬 ${_esc(whats)}</a>` +
+        `<button onclick="_editarWhatsPerfil('${encodeURIComponent(nome)}')" style="background:none;border:none;color:#94a3b8;font-size:11.5px;cursor:pointer;margin-left:8px;">editar</button>`;
+    } else {
+      whatsEl.innerHTML =
+        `<button onclick="_editarWhatsPerfil('${encodeURIComponent(nome)}')" style="background:#f0fdf4;border:1px dashed #86efac;color:#16a34a;border-radius:7px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;">➕ Adicionar WhatsApp</button>`;
+    }
+  }
 
   // KPI elements
   setText('perfil-ltv',        BRL(ltv));
