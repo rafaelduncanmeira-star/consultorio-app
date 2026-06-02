@@ -179,6 +179,14 @@ async function cloudPull() {
   } catch(e) { console.warn('cloudPull error:', e.message); }
   _migrarIds(); // Fase 1: garante ids estáveis após cada carga (idempotente)
   await _sincronizarBlindadas(); // Fase 2/3: migra (dono) + puxa as coleções blindadas da tabela (filtrado por RLS)
+  _limparSensiveisProfissional(); // financeiro/config da clínica não fica no navegador do profissional
+}
+
+// Profissional não deve ver o financeiro nem as metas da clínica (nem via F12).
+// Remove essas chaves do localStorage dele após cada carga.
+function _limparSensiveisProfissional() {
+  if (currentRole !== 'profissional') return;
+  ['despesas', 'metas', 'metas_proc', 'metas_proc_valor'].forEach(k => localStorage.removeItem('consult_' + k));
 }
 
 // ============ BLINDAGEM Fase 2 — coleções sensíveis em tabela por linha (RLS) ============
@@ -191,6 +199,7 @@ const _BLINDADAS = {
   agendamentos: { tabela: 'clinica_agendamentos', flag: 'consult_ag_migrado' },
   crm:          { tabela: 'clinica_crm',          flag: 'consult_crm_migrado' },
   inscricoes:   { tabela: 'clinica_inscricoes',   flag: 'consult_ins_migrado' },
+  followup:     { tabela: 'clinica_followup',     flag: 'consult_fu_migrado' },
 };
 
 function _rowBlindada(rec, owner) {
@@ -1079,6 +1088,12 @@ function _migrarIds() {
       if (i.profissionalId == null) { const pid = _profDoPaciente(i.pacienteNome); if (pid) { i.profissionalId = pid; mi = true; } }
     });
     if (mi) DB.set('inscricoes', ins);
+    const fus = DB.get('followup'); let mf = false;
+    fus.forEach(f => {
+      if (!f.id) { f.id = _novoId('fu'); mf = true; }
+      if (f.profissionalId == null) { const pid = _profDoPaciente(f.nome); if (pid) { f.profissionalId = pid; mf = true; } }
+    });
+    if (mf) DB.set('followup', fus);
   } catch(e) { console.warn('_migrarIds:', e.message); }
 }
 
@@ -1749,7 +1764,8 @@ function _gerarCronogramaFollowups(ins, prog, dataInicio, dataFim) {
   if (!prog || prog.tipo !== 'Assinatura') return [];
   const nome = ins.pacienteNome;
   const tipoBase = { nome, tipoContato: 'WhatsApp', feito: false,
-                     dataReav: dataFim, programaInscricaoId: ins.id };
+                     dataReav: dataFim, programaInscricaoId: ins.id,
+                     profissionalId: ins.profissionalId || null };
   const fus = [];
   const vigDias = _vigenciaDias(prog.vigencia);
 
@@ -1758,6 +1774,7 @@ function _gerarCronogramaFollowups(ins, prog, dataInicio, dataFim) {
     // Só agenda se a data ainda está dentro da vigência (ou no máximo no dia do venc)
     if (dataContato > dataFim) return;
     fus.push({
+      id: _novoId('fu'),
       ...tipoBase,
       ultConsulta: ultConsultaOverride || dataInicio,
       dataContato,
@@ -1877,6 +1894,7 @@ function inscreverEmPrograma(programaId, pacienteRef, dataInicio, horaPadrao = '
     ags.push(ag);
 
     const fuObj = {
+      id: _novoId('fu'), profissionalId: profId,
       nome, ultConsulta: dataInicio,
       dataContato: _addDaysIso(dataPrev, -2),
       tipoContato: 'WhatsApp', feito: false,
@@ -2099,6 +2117,7 @@ function registrarMarco(inscricaoId, marcoIdx, valoresClinicos = {}, obs = '') {
       crmIdx: null, pacIdx: ins.pacIdx,
     });
     fus.push({
+      id: _novoId('fu'), profissionalId: ins.profissionalId || null,
       nome: ins.pacienteNome, ultConsulta: reg.dataReal,
       dataContato: _addDaysIso(dataNova, -2),
       tipoContato: 'WhatsApp', feito: false, dataReav: dataNova,
@@ -4201,8 +4220,12 @@ function saveFollowup(e) {
   e.preventDefault();
   const fd = new FormData(e.target);
   const data = DB.get('followup');
-  const existFeito = (editState.col === 'followup' && editState.idx !== null) ? (data[editState.idx].feito || false) : false;
+  const editIns = (editState.col === 'followup' && editState.idx !== null) ? data[editState.idx] : null;
+  const existFeito = editIns ? (editIns.feito || false) : false;
   const item = { nome: fd.get('nome'), whatsapp: (fd.get('whatsapp') || '').trim(), ultConsulta: fd.get('ultConsulta'), dataContato: fd.get('dataContato'), tipoContato: fd.get('tipoContato'), feito: existFeito, dataReav: fd.get('dataReav'), obs: fd.get('obs') };
+  // Blindagem: id estável + dono profissional (preserva no editar)
+  item.id = (editIns && editIns.id) || _novoId('fu');
+  item.profissionalId = (editIns && editIns.profissionalId) || _profDoPaciente(fd.get('nome')) || null;
   if (editState.col === 'followup' && editState.idx !== null) { data[editState.idx] = item; } else { data.unshift(item); }
   DB.set('followup', data);
   // Marcar paciente como followup criado
@@ -8861,7 +8884,7 @@ function executeAIAction(action) {
     if (document.getElementById('page-crm').classList.contains('active')) renderCrm();
 
   } else if (tipo === 'criar_followup') {
-    const arr = DB.get('followup'); arr.unshift({ ...dados, feito: false }); DB.set('followup', arr);
+    const arr = DB.get('followup'); arr.unshift({ ...dados, feito: false, id: _novoId('fu'), profissionalId: (currentProfissionalId || _profDoPaciente(dados.nome) || null) }); DB.set('followup', arr);
     appendChatMsg('system-ok', `✅ Follow-up de ${dados.nome} criado para ${formatDate(dados.dataContato)}`);
     if (document.getElementById('page-followup').classList.contains('active')) renderFollowup();
 

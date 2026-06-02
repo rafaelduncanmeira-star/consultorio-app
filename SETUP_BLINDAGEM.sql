@@ -170,6 +170,44 @@ begin
   end if;
 end $$;
 
--- Pronto. Rode o arquivo inteiro (é idempotente). O app passa a usar as tabelas
--- conforme as coleções entram no _BLINDADAS. Blindagem completa: atendimentos,
--- agendamentos, crm e inscrições — todas isoladas por profissional via RLS.
+-- ============================================================
+-- Fase 2.5 — Follow-ups por linha (mesma estrutura + RLS)
+-- ============================================================
+create table if not exists clinica_followup (
+  id              text primary key,
+  owner_id        uuid not null references auth.users(id) on delete cascade,
+  profissional_id text,
+  data            jsonb not null,
+  updated_at      timestamptz default now()
+);
+create index if not exists idx_clin_fu_owner on clinica_followup(owner_id);
+create index if not exists idx_clin_fu_prof  on clinica_followup(owner_id, profissional_id);
+
+alter table clinica_followup enable row level security;
+drop policy if exists "acesso followup clinica" on clinica_followup;
+create policy "acesso followup clinica" on clinica_followup
+  for all to authenticated
+  using (
+    auth.uid() = owner_id
+    OR exists (select 1 from team_members tm
+      where tm.member_id = auth.uid() and tm.owner_id = clinica_followup.owner_id
+        and (tm.role <> 'profissional' OR tm.profissional_id = clinica_followup.profissional_id))
+  )
+  with check (
+    auth.uid() = owner_id
+    OR exists (select 1 from team_members tm
+      where tm.member_id = auth.uid() and tm.owner_id = clinica_followup.owner_id
+        and (tm.role <> 'profissional' OR tm.profissional_id = clinica_followup.profissional_id))
+  );
+
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'clinica_followup') then
+    alter publication supabase_realtime add table clinica_followup;
+  end if;
+end $$;
+
+-- Pronto. Rode o arquivo inteiro (é idempotente). Blindagem completa: atendimentos,
+-- agendamentos, crm, inscrições e follow-ups — todas isoladas por profissional via RLS.
+-- (Despesas/metas: escondidas do profissional no app, não ficam no navegador dele.)
