@@ -271,6 +271,11 @@ async function criarConvite(email, role, profissionalId) {
   } catch(e) { return { error: e.message }; }
 }
 
+// Rótulo amigável de um papel da equipe (médico/secretária/profissional)
+function _papelLabel(role) {
+  return role === 'medico' ? 'médico(a)' : role === 'profissional' ? 'profissional' : 'secretária';
+}
+
 // Lista convites pendentes (do dono)
 async function listarConvites() {
   if (!_supa || !currentUser) return [];
@@ -357,7 +362,7 @@ async function _mostrarBannerConvite() {
       if (data && !data.valid) localStorage.removeItem('consult_pending_invite');
       return;
     }
-    const papel = data.role === 'medico' ? 'médico(a)' : 'secretária';
+    const papel = _papelLabel(data.role);
     const txt = document.getElementById('login-invite-text');
     if (txt) txt.innerHTML = `<strong>${_esc(data.ownerNome)}</strong> convidou você para a equipe como <strong>${papel}</strong>.<br>Crie sua conta abaixo (ou entre, se já tiver) para aceitar.`;
     banner.style.display = '';
@@ -376,7 +381,8 @@ async function _mostrarBannerConvite() {
     if (roleWrap) roleWrap.style.display = 'none';
     if (modoWrap) modoWrap.style.display = 'none';
     if (note) {
-      note.innerHTML = `Você entrará como <strong>${papel}</strong> na equipe de ${_esc(data.ownerNome)}. ${data.role === 'secretaria' ? 'Sem acesso ao financeiro.' : ''}`;
+      const extra = data.role === 'secretaria' ? 'Sem acesso ao financeiro.' : data.role === 'profissional' ? 'Você verá só a sua própria agenda e pacientes.' : '';
+      note.innerHTML = `Você entrará como <strong>${papel}</strong> na equipe de ${_esc(data.ownerNome)}. ${extra}`;
       note.style.display = '';
     }
     // Força o role do signup pro valor do convite
@@ -10398,7 +10404,7 @@ async function renderEquipeCard() {
     try {
       const { data: ownerProfile } = await _supa.from('profiles').select('nome').eq('id', currentDataOwner).single();
       const nomeDono = ownerProfile?.nome || 'o titular';
-      subtitleEl.innerHTML = `Você é <strong>${currentRole === 'medico' ? 'médico(a)' : 'secretária'}</strong> na equipe de <strong>${_esc(nomeDono)}</strong>`;
+      subtitleEl.innerHTML = `Você é <strong>${_papelLabel(currentRole)}</strong> na equipe de <strong>${_esc(nomeDono)}</strong>`;
     } catch(e) {
       subtitleEl.textContent = 'Você é membro de uma equipe compartilhada';
     }
