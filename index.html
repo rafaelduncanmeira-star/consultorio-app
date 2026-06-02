@@ -2079,6 +2079,11 @@
               <input type="password" id="zapi-token" class="input" placeholder="Token do Z-API…" />
             </div>
           </div>
+          <div style="margin-bottom:14px;">
+            <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Token de segurança da conta <span style="font-weight:400;color:#94a3b8;">(opcional)</span></label>
+            <input type="password" id="zapi-client-token" class="input" placeholder="Só preencha se o Z-API exigir (Client-Token)" />
+            <div style="font-size:11px;color:#94a3b8;margin-top:5px;line-height:1.5;">No painel do Z-API, em <b>Segurança</b>, se houver um <b>"Token de segurança da conta"</b> ativado, cole-o aqui. Sem isso, o envio de mensagens pode ser bloqueado.</div>
+          </div>
           <div style="display:flex;align-items:center;gap:10px;">
             <button onclick="saveZapiConfig()" class="btn-primary">Salvar</button>
             <button onclick="testZapiConnection()" class="btn-ghost">Testar conexão</button>

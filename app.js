@@ -8876,22 +8876,35 @@ function _formatarMensagemLembrete(ag, template) {
     .replace(/\{duracao\}/g, (ag.duracao || 50) + ' min');
 }
 
+// Normaliza um número brasileiro para o formato do Z-API: 55 + DDD(2) + número.
+// Corrige o caso clássico de celular salvo sem o 9º dígito
+// (ex.: "8198067833" → "5581998067833") e remove 55 duplicado.
+function _zapiPhone(raw) {
+  let d = String(raw || '').replace(/\D/g, '');
+  if (d.startsWith('55') && d.length >= 12) d = d.slice(2);      // tira o 55 pra normalizar
+  if (d.length === 10 && /[6-9]/.test(d.charAt(2))) {            // celular (DDD + 8 díg.) sem o 9
+    d = d.slice(0, 2) + '9' + d.slice(2);
+  }
+  return '55' + d;
+}
+
 // Envia 1 lembrete via Z-API
 async function _enviarLembreteZapi(ag, mensagem) {
   const cfg = getZapiConfig();
   if (!cfg.enabled || !cfg.instanceId || !cfg.token) return { error: 'Z-API não configurado' };
   const fone = (ag.whatsapp || '').replace(/\D/g, '');
   if (!fone || fone.length < 10) return { error: 'WhatsApp inválido' };
-  const phone55 = fone.startsWith('55') ? fone : '55' + fone;
+  const phone = _zapiPhone(fone);
   try {
     const res = await fetch(
       `https://api.z-api.io/instances/${cfg.instanceId}/token/${cfg.token}/send-text`,
       { method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Client-Token': cfg.token },
-        body: JSON.stringify({ phone: phone55, message: mensagem }) }
+        headers: { 'Content-Type': 'application/json', 'Client-Token': cfg.clientToken || cfg.token },
+        body: JSON.stringify({ phone, message: mensagem }) }
     );
-    if (!res.ok) return { error: 'Z-API status ' + res.status };
-    return { ok: true };
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && (data.zaapId || data.messageId || data.id)) return { ok: true };
+    return { error: data.error || data.message || ('Z-API status ' + res.status) };
   } catch(e) { return { error: e.message }; }
 }
 
@@ -9232,7 +9245,7 @@ const BACKUP_KEYS = [
 // ====================== CONFIGURAÇÕES / Z-API ======================
 
 function getZapiConfig() {
-  return DB.getObj('zapi_config', { enabled: false, instanceId: '', token: '' });
+  return DB.getObj('zapi_config', { enabled: false, instanceId: '', token: '', clientToken: '' });
 }
 
 // ====================== 🎼 SISTEMA DE MAESTRIA (GAMIFICAÇÃO) ======================
@@ -9470,6 +9483,8 @@ function renderConfiguracoes() {
   if (idEl) idEl.value = cfg.instanceId || '';
   const tokenEl = document.getElementById('zapi-token');
   if (tokenEl) tokenEl.value = cfg.token || '';
+  const ctEl = document.getElementById('zapi-client-token');
+  if (ctEl) ctEl.value = cfg.clientToken || '';
   _applyZapiUI(cfg.enabled, !!(cfg.instanceId && cfg.token));
   // Monta a URL pronta do webhook (com o user_id do dono dos dados embutido)
   const waEl = document.getElementById('wa-webhook-url');
@@ -9819,16 +9834,18 @@ function _applyZapiUI(enabled, hasCredentials) {
 }
 
 function saveZapiConfig() {
-  const instanceId = (document.getElementById('zapi-instance-id')?.value || '').trim();
-  const token      = (document.getElementById('zapi-token')?.value      || '').trim();
-  const statusEl   = document.getElementById('zapi-status');
+  const instanceId  = (document.getElementById('zapi-instance-id')?.value   || '').trim();
+  const token       = (document.getElementById('zapi-token')?.value         || '').trim();
+  const clientToken = (document.getElementById('zapi-client-token')?.value   || '').trim();
+  const statusEl    = document.getElementById('zapi-status');
   if (!instanceId || !token) {
-    if (statusEl) { statusEl.textContent = '⚠️ Preencha os dois campos'; statusEl.style.color = '#f59e0b'; }
+    if (statusEl) { statusEl.textContent = '⚠️ Preencha Instance ID e Token'; statusEl.style.color = '#f59e0b'; }
     return;
   }
   const cfg = getZapiConfig();
-  cfg.instanceId = instanceId;
-  cfg.token      = token;
+  cfg.instanceId  = instanceId;
+  cfg.token       = token;
+  cfg.clientToken = clientToken;
   DB.setObj('zapi_config', cfg);
   if (statusEl) { statusEl.textContent = '✅ Salvo!'; statusEl.style.color = '#10b981'; }
   _applyZapiUI(cfg.enabled, true);
@@ -9846,25 +9863,28 @@ async function testZapiConnection() {
   if (statusEl) { statusEl.textContent = '⏳ Testando…'; statusEl.style.color = '#64748b'; }
   try {
     const res  = await fetch(`https://api.z-api.io/instances/${cfg.instanceId}/token/${cfg.token}/status`, {
-      headers: { 'Client-Token': cfg.token }
+      headers: { 'Client-Token': cfg.clientToken || cfg.token }
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     const ok   = data.connected || data.status === 'CONNECTED' || data.value === 'CONNECTED';
     if (ok) {
       if (statusEl) { statusEl.textContent = '✅ Conectado!'; statusEl.style.color = '#10b981'; }
       const lbl = document.getElementById('zapi-phone-label');
       if (lbl && data.phone) lbl.textContent = '· ' + data.phone;
+    } else if (data.error || (typeof data.message === 'string' && /token/i.test(data.message))) {
+      // Erro de credencial/segurança — geralmente falta o "token de segurança da conta"
+      if (statusEl) { statusEl.textContent = '❌ ' + (data.error || data.message); statusEl.style.color = '#ef4444'; }
     } else {
-      if (statusEl) { statusEl.textContent = '❌ Não conectado — verifique as credenciais'; statusEl.style.color = '#ef4444'; }
+      if (statusEl) { statusEl.textContent = '❌ Não conectado — abra o Z-API e leia o QR Code'; statusEl.style.color = '#ef4444'; }
     }
   } catch(e) {
-    if (statusEl) { statusEl.textContent = '❌ Erro de conexão'; statusEl.style.color = '#ef4444'; }
+    if (statusEl) { statusEl.textContent = '❌ Erro de conexão: ' + e.message; statusEl.style.color = '#ef4444'; }
   }
 }
 
 function disconnectZapi() {
   if (!confirm('Desconectar o WhatsApp? As mensagens salvas não serão apagadas.')) return;
-  DB.setObj('zapi_config', { enabled: false, instanceId: '', token: '' });
+  DB.setObj('zapi_config', { enabled: false, instanceId: '', token: '', clientToken: '' });
   renderConfiguracoes();
 }
 
@@ -9953,9 +9973,9 @@ function _renderChatMessages(container, msgs) {
   container.scrollTop = container.scrollHeight;
 }
 
-function _appendChatMessage(m) {
+function _appendChatMessage(m, pending) {
   const container = document.getElementById('chat-messages');
-  if (!container) return;
+  if (!container) return null;
   // Remove empty state
   if (container.children.length === 1 && container.children[0].style.textAlign === 'center') {
     container.innerHTML = '';
@@ -9964,10 +9984,12 @@ function _appendChatMessage(m) {
   const time  = new Date(m.created_at || Date.now()).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
   const el    = document.createElement('div');
   el.className = `chat-msg-wrap ${isOut ? 'out' : 'in'}`;
+  if (pending) el.style.opacity = '0.5';
   el.innerHTML = `<div class="chat-bubble ${isOut ? 'out' : 'in'}">${_esc(m.mensagem).replace(/\n/g,'<br>')}</div>
-    <div class="chat-ts">${time}</div>`;
+    <div class="chat-ts">${pending ? 'enviando…' : time}</div>`;
   container.appendChild(el);
   container.scrollTop = container.scrollHeight;
+  return el;
 }
 
 function _subscribeChatRealtime(phone) {
@@ -9979,7 +10001,11 @@ function _subscribeChatRealtime(phone) {
       event: 'INSERT', schema: 'public', table: 'crm_messages',
       filter: `whatsapp=eq.${phone}`
     }, payload => {
-      if (_chatPhone === phone) _appendChatMessage(payload.new);
+      // Só renderiza mensagens RECEBIDAS aqui; as enviadas já aparecem otimista
+      // (evita duplicar a própria mensagem ao confirmar o envio).
+      if (_chatPhone === phone && payload.new && payload.new.remetente !== 'consultorio') {
+        _appendChatMessage(payload.new);
+      }
     })
     .subscribe();
 }
@@ -9994,18 +10020,30 @@ async function sendChatMessage() {
   input.value    = '';
   input.disabled = true;
 
-  // Otimista: mostra na tela imediatamente
-  _appendChatMessage({ remetente: 'consultorio', mensagem: text, created_at: new Date().toISOString() });
+  // Otimista: mostra na tela como "enviando…" (cinza) até o Z-API confirmar
+  const pendingEl = _appendChatMessage({ remetente: 'consultorio', mensagem: text, created_at: new Date().toISOString() }, true);
 
   try {
-    const phone55 = _chatPhone.startsWith('55') ? _chatPhone : '55' + _chatPhone;
+    const phone = _zapiPhone(_chatPhone);
     const res = await fetch(
       `https://api.z-api.io/instances/${cfg.instanceId}/token/${cfg.token}/send-text`,
       { method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Client-Token': cfg.token },
-        body: JSON.stringify({ phone: phone55, message: text }) }
+        headers: { 'Content-Type': 'application/json', 'Client-Token': cfg.clientToken || cfg.token },
+        body: JSON.stringify({ phone, message: text }) }
     );
-    if (!res.ok) throw new Error('Z-API error ' + res.status);
+    const data = await res.json().catch(() => ({}));
+    const ok = res.ok && (data.zaapId || data.messageId || data.id);
+    if (!ok) {
+      const motivo = data.error || data.message ||
+        (data.value != null ? JSON.stringify(data.value) : '') || ('HTTP ' + res.status);
+      throw new Error(motivo);
+    }
+    // Confirmado: tira o estado "enviando…" e marca a hora real
+    if (pendingEl) {
+      pendingEl.style.opacity = '1';
+      const ts = pendingEl.querySelector('.chat-ts');
+      if (ts) ts.textContent = new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+    }
     // Persiste no Supabase
     if (_supa && currentUser) {
       await _supa.from('crm_messages').insert({
@@ -10013,7 +10051,16 @@ async function sendChatMessage() {
       });
     }
   } catch(e) {
-    alert('Erro ao enviar mensagem. Verifique a conexão com o Z-API.');
+    // Marca a mensagem como NÃO enviada (vermelha) e mostra o motivo real do Z-API
+    if (pendingEl) {
+      pendingEl.style.opacity = '1';
+      const bubble = pendingEl.querySelector('.chat-bubble');
+      if (bubble) { bubble.style.background = '#fee2e2'; bubble.style.color = '#b91c1c'; }
+      const ts = pendingEl.querySelector('.chat-ts');
+      if (ts) { ts.textContent = '⚠ não enviada'; ts.style.color = '#dc2626'; }
+    }
+    alert('⚠️ A mensagem NÃO foi enviada.\n\nMotivo informado pelo Z-API:\n' + e.message +
+          '\n\nVerifique:\n• O número está correto e tem WhatsApp?\n• Em Configurações, se o Z-API pedir, preencha o "Token de segurança da conta".');
   } finally {
     input.disabled = false;
     input.focus();
