@@ -60,29 +60,45 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   );
 
-  // Não duplica: se já há um lead pendente desse número pra esse consultório, pula
+  // Chave do chat: o app salva o contato SEM o 55 inicial (ex.: "8199158387").
+  // Gravamos a mensagem com a mesma chave, senão ela não aparece na conversa.
+  const phoneChat = phone.replace(/^55/, '');
+  const texto = (mensagem && String(mensagem).trim()) || '[mensagem sem texto]';
+
+  // 1) SEMPRE registra a mensagem recebida no histórico do chat (crm_messages).
+  //    É isso que faz a mensagem aparecer na conversa e permite responder.
+  const { error: msgErr } = await supa.from('crm_messages').insert({
+    user_id: owner,
+    whatsapp: phoneChat,
+    remetente: 'contato',
+    mensagem: texto,
+  });
+  if (msgErr) return json({ error: 'crm_messages: ' + msgErr.message }, 500);
+
+  // 2) Cria o card no CRM só se ainda não existir um lead desse número
+  //    (evita cards duplicados pra quem já está no funil; as mensagens
+  //    seguintes continuam sendo gravadas no passo 1).
   const { data: existente } = await supa
     .from('crm_leads')
     .select('id')
     .eq('user_id', owner)
     .eq('whatsapp', phone)
-    .eq('processado', false)
     .limit(1);
   if (existente && existente.length) {
-    return json({ ok: true, skipped: 'já existe lead pendente' });
+    return json({ ok: true, stored: 'mensagem', lead: 'já existe' });
   }
 
   const { error } = await supa.from('crm_leads').insert({
     user_id: owner,
     nome,
     whatsapp: phone,
-    primeira_mensagem: mensagem,
+    primeira_mensagem: texto,
     canal: 'WhatsApp',
     processado: false,
   });
   if (error) return json({ error: error.message }, 500);
 
-  return json({ ok: true, nome, whatsapp: phone });
+  return json({ ok: true, stored: 'mensagem + lead', nome, whatsapp: phone });
 });
 
 function json(body: unknown, status = 200) {

@@ -9966,15 +9966,26 @@ async function loadChatHistory(phone) {
   }
   try {
     if (!currentUser) { container.innerHTML = '<div style="text-align:center;color:#94a3b8;font-size:12.5px;padding:32px;">Sem sessão</div>'; return; }
+    const owner = currentDataOwner || currentUser.id;
     const { data, error } = await _supa
       .from('crm_messages')
       .select('*')
-      .eq('user_id', currentUser.id)
+      .eq('user_id', owner)
       .eq('whatsapp', phone)
       .order('created_at', { ascending: true })
       .limit(100);
     if (error) throw error;
     if (!data || data.length === 0) {
+      // Fallback p/ contatos antigos: a 1ª mensagem ficava só no obs do card
+      const c = (_chatIdx != null) ? DB.get('crm')[_chatIdx] : null;
+      const m = c && c.obs && c.obs.match(/^Primeira msg:\s*([\s\S]+)/);
+      if (m && m[1].trim()) {
+        _renderChatMessages(container, [{
+          remetente: 'contato', mensagem: m[1].trim(),
+          created_at: (c.data || '') + 'T' + (c.hora || '00:00')
+        }]);
+        return;
+      }
       container.innerHTML = '<div style="text-align:center;color:#94a3b8;font-size:12.5px;padding:40px 20px;">Nenhuma mensagem ainda.<br><span style="font-size:11.5px;">As mensagens do WhatsApp aparecerão aqui.</span></div>';
       return;
     }
@@ -10055,10 +10066,10 @@ async function sendChatMessage() {
       const ts = pendingEl.querySelector('.chat-ts');
       if (ts) ts.textContent = new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
     }
-    // Persiste no Supabase
+    // Persiste no Supabase (sob o dono dos dados, p/ a secretária também ver)
     if (_supa && currentUser) {
       await _supa.from('crm_messages').insert({
-        user_id: currentUser.id, whatsapp: _chatPhone, remetente: 'consultorio', mensagem: text
+        user_id: currentDataOwner || currentUser.id, whatsapp: _chatPhone, remetente: 'consultorio', mensagem: text
       });
     }
   } catch(e) {
