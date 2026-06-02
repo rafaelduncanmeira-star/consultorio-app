@@ -27,6 +27,7 @@ Deno.serve(async (req) => {
 
   const url = new URL(req.url);
   const owner = url.searchParams.get('owner');
+  const prof  = url.searchParams.get('prof'); // opcional: número por profissional (Tijolo 4B)
   if (!owner) {
     return json({ error: 'Faltou ?owner=<user_id> na URL do webhook.' }, 400);
   }
@@ -88,14 +89,18 @@ Deno.serve(async (req) => {
     return json({ ok: true, stored: 'mensagem', lead: 'já existe' });
   }
 
-  const { error } = await supa.from('crm_leads').insert({
+  const leadObj: any = {
     user_id: owner,
     nome,
     whatsapp: phone,
     primeira_mensagem: texto,
     canal: 'WhatsApp',
     processado: false,
-  });
+  };
+  // Só inclui profissional_id quando veio na URL (evita depender da coluna
+  // se o número for compartilhado / o SQL ainda não tiver rodado).
+  if (prof) leadObj.profissional_id = prof;
+  const { error } = await supa.from('crm_leads').insert(leadObj);
   if (error) return json({ error: error.message }, 500);
 
   return json({ ok: true, stored: 'mensagem + lead', nome, whatsapp: phone });

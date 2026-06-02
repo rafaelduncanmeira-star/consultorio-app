@@ -9996,6 +9996,7 @@ function renderConfiguracoes() {
       ? `${SUPA_URL}/functions/v1/wa-webhook?owner=${owner}`
       : '— (entre na sua conta para gerar)';
   }
+  _montarWebhookProfUI(); // número por profissional (clínica)
 
   // Galeria de conquistas
   renderConquistas();
@@ -10334,6 +10335,37 @@ function _copyWebhookUrl() {
   const url = `${SUPA_URL}/functions/v1/wa-webhook?owner=${owner}`;
   navigator.clipboard.writeText(url).then(() => {
     if (typeof toast === 'function') toast('✅ Link copiado! Cole no webhook do Z-API.');
+  }).catch(() => alert('Copie manualmente:\n' + url));
+}
+
+// ── Número por profissional (Tijolo 4B) ──
+function _montarWebhookProfUI() {
+  const block = document.getElementById('wa-prof-block');
+  const sel   = document.getElementById('wa-prof-select');
+  if (!block || !sel) return;
+  const profs = getProfissionaisAtivos();
+  // Só mostra se houver 2+ profissionais (clínica)
+  block.style.display = profs.length > 1 ? '' : 'none';
+  if (profs.length > 1) {
+    sel.innerHTML = profs.map(p => `<option value="${p.id}">${_esc(p.nome)}</option>`).join('');
+    _renderWebhookProf();
+  }
+}
+function _webhookUrlProf() {
+  const owner = currentDataOwner || (currentUser && currentUser.id);
+  const pid   = document.getElementById('wa-prof-select')?.value;
+  if (!owner || !pid) return '';
+  return `${SUPA_URL}/functions/v1/wa-webhook?owner=${owner}&prof=${pid}`;
+}
+function _renderWebhookProf() {
+  const el = document.getElementById('wa-prof-url');
+  if (el) el.textContent = _webhookUrlProf() || '—';
+}
+function _copyWebhookUrlProf() {
+  const url = _webhookUrlProf();
+  if (!url) { alert('Selecione um profissional.'); return; }
+  navigator.clipboard.writeText(url).then(() => {
+    if (typeof toast === 'function') toast('✅ Link do profissional copiado!');
   }).catch(() => alert('Copie manualmente:\n' + url));
 }
 
@@ -10724,6 +10756,7 @@ async function syncLeadsFromSupabase() {
           canal:     'WhatsApp',
           tipo:      '',
           status:    'Contato feito',
+          profissionalId: lead.profissional_id || null,   // roteamento por número (Tijolo 4B)
           obs:       lead.primeira_mensagem ? `Primeira msg: ${lead.primeira_mensagem}` : ''
         });
         novos++;
