@@ -4193,7 +4193,7 @@ function _slotsDoDia(dataStr) {
 
 function setAgendaView(v) {
   agView = v;
-  ['dia', 'semana', 'mes'].forEach(view => {
+  ['dia', 'semana', 'mes', 'profissionais'].forEach(view => {
     const btn = document.getElementById('btn-ag-' + view);
     if (btn) btn.classList.toggle('active', view === v);
   });
@@ -4201,7 +4201,7 @@ function setAgendaView(v) {
 }
 
 function agendaNavegar(dir) {
-  if (agView === 'dia') agAnchor = _addDays(agAnchor, dir);
+  if (agView === 'dia' || agView === 'profissionais') agAnchor = _addDays(agAnchor, dir);
   else if (agView === 'semana') agAnchor = _addDays(agAnchor, dir * 7);
   else { const x = new Date(agAnchor); x.setMonth(x.getMonth() + dir); agAnchor = x; }
   renderAgenda();
@@ -4653,6 +4653,26 @@ function _agDrop(e, ds, hora) {
   renderAgenda();
 }
 
+// Drop no quadro de profissionais: além de mover hora, REATRIBUI o profissional
+// da coluna em que soltou (arrastar do Dr. A pro Dr. B troca o responsável).
+function _agDropProf(e, ds, hora, profId) {
+  e.preventDefault();
+  e.stopPropagation();
+  e.currentTarget.classList.remove('ag-drop-hover');
+  if (!_agDragId) return;
+  const ags = getAgendamentos();
+  const idx = ags.findIndex(a => a.id === _agDragId);
+  if (idx === -1) { _agDragId = null; return; }
+  const novoProf = profId || null;
+  if (ags[idx].data === ds && ags[idx].hora === hora && (ags[idx].profissionalId || null) === novoProf) { _agDragId = null; return; }
+  ags[idx].data = ds;
+  ags[idx].hora = hora;
+  ags[idx].profissionalId = novoProf;
+  DB.set('agendamentos', ags);
+  _agDragId = null;
+  renderAgenda();
+}
+
 // ===== Render principal =====
 function renderAgenda() {
   // Atualiza KPIs
@@ -4667,11 +4687,12 @@ function renderAgenda() {
 
   if (agView === 'mes') cont.innerHTML = _viewMes();
   else if (agView === 'semana') cont.innerHTML = _viewSemana();
+  else if (agView === 'profissionais') cont.innerHTML = _viewProfissionais();
   else cont.innerHTML = _viewDia();
 }
 
 function _labelPeriodo() {
-  if (agView === 'dia') {
+  if (agView === 'dia' || agView === 'profissionais') {
     return DIAS[agAnchor.getDay()] + ', ' + agAnchor.getDate() + ' ' + MESES[agAnchor.getMonth()] + ' ' + agAnchor.getFullYear();
   }
   if (agView === 'semana') {
@@ -4686,7 +4707,7 @@ function _renderAgendaKPIs() {
   const ags = getAgendamentos();
   // Filtra agendamentos no período da view
   let ini, fim;
-  if (agView === 'dia')        { ini = new Date(agAnchor); fim = new Date(agAnchor); }
+  if (agView === 'dia' || agView === 'profissionais') { ini = new Date(agAnchor); fim = new Date(agAnchor); }
   else if (agView === 'semana'){ ini = _startOfWeek(agAnchor); fim = _addDays(ini, 6); }
   else { ini = new Date(agAnchor.getFullYear(), agAnchor.getMonth(), 1); fim = new Date(agAnchor.getFullYear(), agAnchor.getMonth() + 1, 0); }
   const iniStr = _ymd(ini), fimStr = _ymd(fim);
@@ -4912,6 +4933,103 @@ function _viewWeekOrDay(numDias) {
       <div style="display:flex;">
         ${timeAxis}
         <div style="display:flex;flex:1;">${dayCols}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ===== Quadro de profissionais (1 dia, 1 coluna por profissional) =====
+function _viewProfissionais() {
+  const cfg     = getAgConfig();
+  const ags     = getAgendamentos();
+  const dayStr  = _ymd(agAnchor);
+  const naoUtil = !cfg.diasUteis.includes(agAnchor.getDay());
+
+  const SNAP     = 10;
+  const iniMin   = _toMin(cfg.horaInicio);
+  const fimMin   = _toMin(cfg.horaFim);
+  const totalMin = fimMin - iniMin;
+  const targetH  = Math.max(window.innerHeight - 300, 400);
+  const PX_MIN   = targetH / totalMin;
+  const totalH   = totalMin * PX_MIN;
+
+  const dayAgs = ags.filter(a => a.data === dayStr);
+  const profs  = getProfissionaisAtivos();
+  const ehDaColuna = (a, colId) => {
+    const pid = a.profissionalId || null;
+    if (colId === null) return !pid || !profs.some(p => p.id === pid);
+    return pid === colId;
+  };
+
+  const colunas = profs.map(p => ({ id: p.id, nome: p.nome, cor: p.cor }));
+  if (dayAgs.some(a => ehDaColuna(a, null))) colunas.push({ id: null, nome: 'Sem profissional', cor: '#94a3b8' });
+  if (!colunas.length) {
+    return `<div style="padding:48px 20px;text-align:center;color:#94a3b8;font-size:13px;">Cadastre profissionais em <strong>Configurações → Profissionais da clínica</strong> para usar o quadro.</div>`;
+  }
+  const COLW = 150;
+  const minW = 52 + colunas.length * COLW;
+
+  // Cabeçalho
+  let headHtml = `<div style="width:52px;flex-shrink:0;background:#fafafa;border-bottom:2px solid #e5e7eb;border-right:1px solid #e5e7eb;"></div>`;
+  colunas.forEach(c => {
+    const n = dayAgs.filter(a => ehDaColuna(a, c.id) && a.status !== 'Cancelado').length;
+    headHtml += `<div style="flex:1;min-width:${COLW}px;text-align:center;padding:8px 4px;border-bottom:3px solid ${c.cor};border-right:1px solid #e5e7eb;">
+      <div style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:700;color:#0f172a;"><span style="width:9px;height:9px;border-radius:3px;background:${c.cor};flex-shrink:0;"></span>${_esc(c.nome)}</div>
+      <div style="font-size:10.5px;color:#94a3b8;font-weight:600;margin-top:1px;">${n} agend.</div></div>`;
+  });
+
+  // Eixo de horas
+  let timeAxis = `<div style="position:relative;width:52px;flex-shrink:0;border-right:1px solid #e5e7eb;">`;
+  for (let m = iniMin; m <= fimMin; m += 60) {
+    const top = (m - iniMin) * PX_MIN;
+    timeAxis += `<div style="position:absolute;top:${top}px;right:7px;transform:translateY(-50%);font-size:10px;color:#9ca3af;white-space:nowrap;line-height:1;">${_toHHMM(m)}</div>`;
+  }
+  timeAxis += `</div>`;
+
+  // Colunas
+  let cols = '';
+  colunas.forEach(c => {
+    let guides = '';
+    for (let m = iniMin; m <= fimMin; m += 60) { const top=(m-iniMin)*PX_MIN; guides += `<div style="position:absolute;top:${top}px;left:0;right:0;height:1px;background:#e5e7eb;pointer-events:none;z-index:0;"></div>`; }
+    for (let m = iniMin+30; m < fimMin; m += 60) { const top=(m-iniMin)*PX_MIN; guides += `<div style="position:absolute;top:${top}px;left:0;right:0;height:1px;background:#f3f4f6;pointer-events:none;z-index:0;"></div>`; }
+
+    let drops = '';
+    for (let m = iniMin; m < fimMin; m += SNAP) {
+      const top = (m-iniMin)*PX_MIN, h = SNAP*PX_MIN, hora = _toHHMM(m);
+      const bloq = _isBloqueado(dayStr, hora, SNAP);
+      const disabled = naoUtil || bloq;
+      const bgBloq = bloq ? 'background:repeating-linear-gradient(45deg,transparent,transparent 4px,rgba(251,191,36,0.08) 4px,rgba(251,191,36,0.08) 8px);' : '';
+      const profArg = c.id ? `, profissionalId:'${c.id}'` : '';
+      drops += `<div style="position:absolute;top:${top}px;left:0;right:0;height:${h}px;z-index:1;cursor:${disabled?'not-allowed':'pointer'};${bgBloq}" class="week-slot-micro${disabled?' fora':''}" ${!disabled?`onclick="openNovoAgendamento({data:'${dayStr}', hora:'${hora}'${profArg}})"`:''} ondragover="_agDragOver(event)" ondragleave="_agDragLeave(event)" ondrop="_agDropProf(event,'${dayStr}','${hora}',${c.id?`'${c.id}'`:'null'})"></div>`;
+    }
+
+    let evts = '';
+    dayAgs.filter(a => ehDaColuna(a, c.id)).forEach(a => {
+      const startMin = _toMin(a.hora);
+      const dur = parseInt(a.duracao) || 60;
+      const top = (startMin - iniMin) * PX_MIN;
+      const height = Math.max(dur * PX_MIN - 2, 18);
+      const tipo = a.tipoAtividade || 'Consultório';
+      const ts = _TIPO_STYLE[tipo] || _TIPO_STYLE['Consultório'];
+      const ec = (a.status||'confirmado').toLowerCase().replace('no-show','noshow');
+      const isCancelado = ec === 'cancelado';
+      const showDur = height >= 30;
+      const borda = isCancelado ? '#d1d5db' : c.cor;
+      evts += `<div class="week-evt ${ec}" style="position:absolute;top:${top}px;left:3px;right:3px;height:${height}px;z-index:3;overflow:hidden;cursor:grab;background:${isCancelado?'#f5f5f5':ts.bg};color:${isCancelado?'#9ca3af':ts.color};border-left:4px solid ${borda};" draggable="true" ondragstart="_agDragStart(event,'${a.id}')" ondragend="_agDragEnd(event)" onclick="event.stopPropagation();editAgendamento('${a.id}')" title="${ts.icon} ${_esc(a.pacienteNome)} — ${_esc(a.procedimento||tipo)} (${dur}min)">
+        <strong style="font-size:10.5px;">${ts.icon} ${_esc(a.pacienteNome)}</strong>
+        ${showDur ? `<br><span style="font-size:9px;opacity:0.75;">${_esc(a.hora)} · ${_esc(a.procedimento||tipo)}</span>` : ''}
+      </div>`;
+    });
+
+    cols += `<div style="flex:1;min-width:${COLW}px;position:relative;height:${totalH}px;border-right:1px solid #e5e7eb;background:${naoUtil?'#fafafa':'#fff'};">${guides}${drops}${evts}</div>`;
+  });
+
+  return `<div style="padding:14px;">
+    <div style="border:1px solid #e5e7eb;border-radius:8px;overflow-x:auto;">
+      <div style="display:flex;background:#fafafa;border-bottom:2px solid #e5e7eb;min-width:${minW}px;">${headHtml}</div>
+      <div style="display:flex;min-width:${minW}px;">
+        ${timeAxis}
+        <div style="display:flex;flex:1;">${cols}</div>
       </div>
     </div>
   </div>`;
