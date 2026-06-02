@@ -4547,10 +4547,11 @@ function saveAgendamento(e) {
   if (idx >= 0) ags[idx] = item; else ags.push(item);
   DB.set('agendamentos', ags);
 
-  // Marca CRM como convertido se veio de lá
-  if (item.crmIdx !== null && item.crmIdx !== undefined && item.status === 'Confirmado') {
+  // Marca CRM como convertido se veio de lá (por id; fallback índice — Fase 1b)
+  if ((item.crmId != null || (item.crmIdx !== null && item.crmIdx !== undefined)) && item.status === 'Confirmado') {
     const crm = DB.get('crm');
-    if (crm[item.crmIdx]) { crm[item.crmIdx].status = 'Marcou'; crm[item.crmIdx].converted = false; DB.set('crm', crm); }
+    const c = (item.crmId && crm.find(x => x.id === item.crmId)) || (item.crmIdx != null ? crm[item.crmIdx] : null);
+    if (c) { c.status = 'Marcou'; c.converted = false; DB.set('crm', crm); }
   }
 
   closeModal('modal-agendamento');
@@ -4643,10 +4644,10 @@ function updateAgStatus(id, novo) {
   a.status = novo;
   DB.set('agendamentos', ags);
 
-  // Sincronização reversa: agendamento → CRM
-  if (a.crmIdx !== null && a.crmIdx !== undefined) {
+  // Sincronização reversa: agendamento → CRM (por id; fallback índice — Fase 1b)
+  if (a.crmId != null || (a.crmIdx !== null && a.crmIdx !== undefined)) {
     const crm = DB.get('crm');
-    const c = crm[a.crmIdx];
+    const c = (a.crmId && crm.find(x => x.id === a.crmId)) || (a.crmIdx != null ? crm[a.crmIdx] : null);
     if (c) {
       let novoCrm = null;
       if (novo === 'Compareceu') novoCrm = 'Atendeu';
