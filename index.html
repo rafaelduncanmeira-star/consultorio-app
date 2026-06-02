@@ -2202,7 +2202,10 @@
         <div><label>Canal de Origem</label><select class="select" name="canal"><option>Indicação médica</option><option>Indicação paciente</option><option>Google</option><option>Instagram</option><option>WhatsApp</option><option>Doctoralia</option><option>Outros</option></select></div>
         <div><label>Tipo</label><select class="select" name="tipo"><option>1ª vez</option><option>Consulta</option><option>Retorno</option><option>Cortesia</option><option>Domiciliar</option><option>Hospitalar</option></select></div>
       </div>
-      <div style="margin-bottom:14px;"><label>Status</label><select class="select" name="status"><option>Contato feito</option><option>Em negociação</option><option>Marcou</option><option>Atendeu</option><option>Não marcou</option></select></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+        <div><label>Status</label><select class="select" name="status"><option>Contato feito</option><option>Em negociação</option><option>Marcou</option><option>Atendeu</option><option>Não marcou</option></select></div>
+        <div><label>Profissional</label><select class="select" name="profissionalId" id="crm-profissional"></select></div>
+      </div>
       <div style="margin-bottom:20px;"><label>Observações</label><textarea class="input" name="obs" rows="2" placeholder="Anotações..."></textarea></div>
       <div style="display:flex;gap:10px;">
         <button type="submit" class="btn-primary" style="flex:1;justify-content:center;">Salvar Contato</button>

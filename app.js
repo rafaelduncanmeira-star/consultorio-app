@@ -1095,6 +1095,7 @@ function openModal(id) {
     atualizarValorSugerido();
   }
   if (id === 'modal-crm' && !editState.col) {
+    _popularProfissionalSelect(null, 'crm-profissional', true);
     // Auto-preenche data e hora com o momento atual para novos contatos
     const now  = new Date();
     const form = document.querySelector('#modal-crm form');
@@ -2920,6 +2921,7 @@ function editRow(col, idx) {
     form.canal.value = r.canal || '';
     form.tipo.value = r.tipo || '';
     form.status.value = r.status || '';
+    _popularProfissionalSelect(r.profissionalId, 'crm-profissional', true);
     form.obs.value = r.obs || '';
   } else if (col === 'pacientes') {
     popularProcedimentoSelect();
@@ -2982,7 +2984,7 @@ function destroyChart(id) {
 function saveCrm(e) {
   e.preventDefault();
   const fd = new FormData(e.target);
-  const item = { data: fd.get('data'), hora: fd.get('hora'), nome: fd.get('nome'), whatsapp: fd.get('whatsapp'), idade: fd.get('idade'), canal: fd.get('canal'), tipo: fd.get('tipo'), status: fd.get('status'), obs: fd.get('obs') };
+  const item = { data: fd.get('data'), hora: fd.get('hora'), nome: fd.get('nome'), whatsapp: fd.get('whatsapp'), idade: fd.get('idade'), canal: fd.get('canal'), tipo: fd.get('tipo'), status: fd.get('status'), obs: fd.get('obs'), profissionalId: fd.get('profissionalId') || null };
   const data = DB.get('crm');
   // Bloqueia duplicata por WhatsApp (compara só dígitos)
   const cleanPhone = (item.whatsapp || '').replace(/\D/g, '');
@@ -3332,6 +3334,7 @@ function _kanbanCardHtml(r, col) {
   const badge    = _canalBadge(r.canal);
   const dias     = _diasDesde(r.data);
   const _zapiOn = getZapiConfig().enabled;
+  const _prof   = r.profissionalId ? getProfissional(r.profissionalId) : null;
   const whatsBtn = r.whatsapp
     ? (_zapiOn
         ? `<button onclick="openCrmChat(${idx})"
@@ -3367,6 +3370,7 @@ function _kanbanCardHtml(r, col) {
       <div style="font-size:11px;color:#94a3b8;margin-bottom:6px;">
         ${formatDate(r.data)} · <span style="font-weight:600;color:${dias.cor};">${dias.texto}</span>
       </div>
+      ${_prof ? `<div style="margin-bottom:6px;"><span style="display:inline-flex;align-items:center;gap:4px;background:${_prof.cor}1a;color:${_prof.cor};border-radius:999px;padding:1px 9px;font-size:10.5px;font-weight:700;"><span style="width:7px;height:7px;border-radius:50%;background:${_prof.cor};"></span>${_esc(_prof.nome)}</span></div>` : ''}
       ${_kanbanTempoColuna(r, col)}
       ${whatsBtn}
 
@@ -3563,7 +3567,7 @@ function convertCrmToAtendido(crmIdx) {
   form.data.value = today;
   form.nome.value = c.nome || '';
   if (form.whatsapp) form.whatsapp.value = c.whatsapp || '';
-  _popularProfissionalSelect(currentProfissionalId || null, 'pac-profissional');
+  _popularProfissionalSelect(c.profissionalId || currentProfissionalId || null, 'pac-profissional');
   // Tenta usar o tipo do CRM se ele existir no catálogo; se não, deixa o primeiro
   const procs = getProcedimentos();
   form.tipo.value = procs.some(p => p.nome === c.tipo) ? c.tipo : (procs[0]?.nome || '');
@@ -4322,15 +4326,19 @@ function _inferirDuracao(nomeProc) {
   return null;
 }
 
-// Popula um <select> de profissional (default: o do modal de agendamento)
-function _popularProfissionalSelect(selectedId, elId) {
+// Popula um <select> de profissional (default: o do modal de agendamento).
+// permitirVazio=true adiciona a opção "não atribuído" (usado no CRM).
+function _popularProfissionalSelect(selectedId, elId, permitirVazio) {
   const sel = document.getElementById(elId || 'ag-profissional');
   if (!sel) return;
   const profs = getProfissionaisAtivos();
-  sel.innerHTML = profs.length
+  let html = permitirVazio ? '<option value="">— não atribuído —</option>' : '';
+  html += profs.length
     ? profs.map(p => `<option value="${p.id}">${_esc(p.nome)}</option>`).join('')
-    : '<option value="">(cadastre em Configurações)</option>';
+    : (permitirVazio ? '' : '<option value="">(cadastre em Configurações)</option>');
+  sel.innerHTML = html;
   if (selectedId && profs.some(p => p.id === selectedId)) sel.value = selectedId;
+  else if (permitirVazio) sel.value = '';
   else if (profs.length) sel.value = profs[0].id;
 }
 
