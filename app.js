@@ -8902,14 +8902,16 @@ function _zapiPhoneCandidates(raw) {
 // evitando qualquer risco de mensagem duplicada.
 async function _zapiSendText(cfg, rawPhone, text) {
   const cands = _zapiPhoneCandidates(rawPhone);
+  // Só envia o header Client-Token se houver um token de segurança da conta.
+  // (Mandar o token da instância aqui faz o Z-API rejeitar com "client-token is not configured".)
+  const headers = { 'Content-Type': 'application/json' };
+  if (cfg.clientToken) headers['Client-Token'] = cfg.clientToken;
   let lastErr = 'número inválido';
   for (const phone of cands) {
     try {
       const res = await fetch(
         `https://api.z-api.io/instances/${cfg.instanceId}/token/${cfg.token}/send-text`,
-        { method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Client-Token': cfg.clientToken || cfg.token },
-          body: JSON.stringify({ phone, message: text }) }
+        { method: 'POST', headers, body: JSON.stringify({ phone, message: text }) }
       );
       const data = await res.json().catch(() => ({}));
       if (res.ok && (data.zaapId || data.messageId || data.id)) return { ok: true, phone };
@@ -9911,9 +9913,10 @@ async function testZapiConnection() {
   }
   if (statusEl) { statusEl.textContent = '⏳ Testando…'; statusEl.style.color = '#64748b'; }
   try {
-    const res  = await fetch(`https://api.z-api.io/instances/${cfg.instanceId}/token/${cfg.token}/status`, {
-      headers: { 'Client-Token': cfg.clientToken || cfg.token }
-    });
+    // Só manda Client-Token se a conta tiver token de segurança configurado
+    const headers = {};
+    if (cfg.clientToken) headers['Client-Token'] = cfg.clientToken;
+    const res  = await fetch(`https://api.z-api.io/instances/${cfg.instanceId}/token/${cfg.token}/status`, { headers });
     const data = await res.json().catch(() => ({}));
     const ok   = data.connected || data.status === 'CONNECTED' || data.value === 'CONNECTED';
     if (ok) {
