@@ -180,12 +180,14 @@ async function cloudPull() {
 // ====================== EQUIPE: CONVITES E MEMBROS ======================
 
 // Cria um convite e retorna o link de aceite
-async function criarConvite(email, role) {
+async function criarConvite(email, role, profissionalId) {
   if (!_supa || !currentUser) return { error: 'Não autenticado.' };
   if (currentTeamRole !== 'owner') return { error: 'Apenas o dono da equipe pode convidar.' };
   try {
+    const payload = { owner_id: currentUser.id, email: email.toLowerCase().trim(), role };
+    if (role === 'profissional' && profissionalId) payload.profissional_id = profissionalId;
     const { data, error } = await _supa.from('team_invites')
-      .insert({ owner_id: currentUser.id, email: email.toLowerCase().trim(), role })
+      .insert(payload)
       .select()
       .single();
     if (error) return { error: error.message };
@@ -334,6 +336,7 @@ async function _acceptInviteIfPending() {
     }
     if (data && data.ok) {
       currentRole = data.role || currentRole;
+      if (data.profissional_id) currentProfissionalId = data.profissional_id;
       if (typeof toast === 'function') {
         setTimeout(() => toast('✅ Você entrou em uma equipe! Agora vê os dados compartilhados.', 4000), 1500);
       }
@@ -355,9 +358,14 @@ async function resolveDataOwner() {
       currentDataOwner = data[0].owner_id;
       currentTeamRole  = 'member';
       currentRole      = data[0].role || currentRole; // role na equipe
+      // Vínculo com profissional (defensivo: coluna só existe após o SQL do Tijolo 2)
+      const r2 = await _supa.from('team_members').select('profissional_id')
+        .eq('member_id', currentUser.id).eq('owner_id', currentDataOwner).limit(1);
+      if (!r2.error && r2.data && r2.data.length) currentProfissionalId = r2.data[0].profissional_id || null;
     } else {
       currentDataOwner = currentUser.id;
       currentTeamRole  = 'owner';
+      currentProfissionalId = null;
     }
   } catch(e) {
     console.warn('resolveDataOwner error:', e.message);
@@ -611,6 +619,8 @@ async function logoutUser() {
   currentNome  = '';
   currentDataOwner = null;
   currentTeamRole  = null;
+  currentProfissionalId = null;
+  _agFiltroProf = '';
   // Limpa todas as chaves consult_* do localStorage (evita cross-pollination entre usuários)
   Object.keys(localStorage).filter(k => k.startsWith('consult_')).forEach(k => localStorage.removeItem(k));
   document.getElementById('login-page').style.display = 'flex';
@@ -9981,7 +9991,25 @@ function openModalConvite() {
   document.getElementById('convite-role').value = 'secretaria';
   document.getElementById('convite-form-wrap').style.display = '';
   document.getElementById('convite-link-wrap').style.display = 'none';
+  _conviteRoleChange(); // esconde o seletor de profissional (role padrão = secretária)
   openModal('modal-convite');
+}
+
+// Mostra/esconde o seletor de profissional conforme a função escolhida
+function _conviteRoleChange() {
+  const role = document.getElementById('convite-role')?.value;
+  const wrap = document.getElementById('convite-prof-wrap');
+  const sel  = document.getElementById('convite-profissional');
+  if (!wrap || !sel) return;
+  if (role === 'profissional') {
+    const profs = getProfissionaisAtivos();
+    sel.innerHTML = profs.length
+      ? profs.map(p => `<option value="${p.id}">${_esc(p.nome)}</option>`).join('')
+      : '<option value="">(cadastre um profissional em Configurações)</option>';
+    wrap.style.display = '';
+  } else {
+    wrap.style.display = 'none';
+  }
 }
 
 async function gerarConvite() {
@@ -9989,8 +10017,13 @@ async function gerarConvite() {
   const role  = document.getElementById('convite-role').value;
   if (!email) { alert('Informe o e-mail.'); return; }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { alert('E-mail inválido.'); return; }
-  const result = await criarConvite(email, role);
-  if (result.error) { alert('Erro: ' + result.error); return; }
+  let profissionalId = null;
+  if (role === 'profissional') {
+    profissionalId = document.getElementById('convite-profissional')?.value || '';
+    if (!profissionalId) { alert('Selecione qual profissional (ou cadastre um em Configurações).'); return; }
+  }
+  const result = await criarConvite(email, role, profissionalId);
+  if (result.error) { alert('Erro: ' + result.error + '\n\n(Se falar de "profissional_id", rode o SQL SETUP_EQUIPE_PROFISSIONAL.sql no Supabase primeiro.)'); return; }
   // Mostra o link gerado
   document.getElementById('convite-form-wrap').style.display = 'none';
   document.getElementById('convite-link-wrap').style.display = '';
@@ -9998,7 +10031,8 @@ async function gerarConvite() {
   // Botão WhatsApp
   const wa = document.getElementById('btn-convite-wa');
   if (wa) {
-    const msg = `Olá! Você foi convidado(a) para acessar o sistema do consultório como ${role === 'medico' ? 'médico(a)' : 'secretária'}. Acesse o link para entrar: ${result.link}`;
+    const papel = role === 'medico' ? 'médico(a)' : role === 'profissional' ? 'profissional' : 'secretária';
+    const msg = `Olá! Você foi convidado(a) para acessar o sistema do consultório como ${papel}. Acesse o link para entrar: ${result.link}`;
     wa.onclick = () => window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
   }
 }

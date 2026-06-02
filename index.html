@@ -3225,10 +3225,16 @@
       </div>
       <div style="margin-bottom:18px;">
         <label>Função na equipe</label>
-        <select id="convite-role" class="select">
+        <select id="convite-role" class="select" onchange="_conviteRoleChange()">
           <option value="secretaria">Secretária — sem financeiro</option>
+          <option value="profissional">Profissional — vê só a própria agenda</option>
           <option value="medico">Médico(a) — acesso completo</option>
         </select>
+      </div>
+      <div id="convite-prof-wrap" style="margin-bottom:18px;display:none;">
+        <label>Qual profissional?</label>
+        <select id="convite-profissional" class="select"></select>
+        <div style="font-size:11px;color:#94a3b8;margin-top:5px;line-height:1.5;">A agenda dele(a) vai abrir <strong>travada</strong> só nos atendimentos deste profissional.</div>
       </div>
       <div style="padding:12px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:12px;color:#1d4ed8;margin-bottom:16px;line-height:1.6;">
         💡 Vamos gerar um link de convite. Você copia e envia pra pessoa por WhatsApp, email ou onde preferir. O link vale por 7 dias.
