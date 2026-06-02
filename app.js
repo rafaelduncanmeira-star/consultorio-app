@@ -123,6 +123,7 @@ let currentNome = '';
 // da equipe de outra pessoa, vira o user_id do dono.
 let currentDataOwner = null;
 let currentTeamRole  = null; // 'owner' (você é o dono) ou 'member'
+let currentProfissionalId = null; // se o login for de um profissional, qual (Tijolo 2)
 
 let _recoveryFlow = false; // true quando o usuário chegou via link de recuperação de senha
 
@@ -4109,8 +4110,16 @@ function _openWhatsAppForFu(idx) {
 //   consult_agenda_config: { horaInicio, horaFim, slotDuracao, almocoInicio, almocoFim, diasUteis: [1..5] }
 //   consult_bloqueios: [{ id, motivo, dataInicio, horaInicio, dataFim, horaFim }]
 
-let agView = 'semana';            // 'dia' | 'semana' | 'mes'
+let agView = 'semana';            // 'dia' | 'semana' | 'mes' | 'profissionais'
 let agAnchor = new Date();        // data de referência para a view
+let _agFiltroProf = '';           // '' = todos; senão id do profissional p/ filtrar a agenda
+
+// Agendamentos visíveis na tela conforme o filtro de profissional ativo.
+// (Só afeta a EXIBIÇÃO — salvar/conflito/arrastar usam getAgendamentos() cru.)
+function _agsVisiveis() {
+  const all = getAgendamentos();
+  return _agFiltroProf ? all.filter(a => (a.profissionalId || '') === _agFiltroProf) : all;
+}
 
 function _agId() { return 'ag_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6); }
 
@@ -4208,6 +4217,23 @@ function agendaNavegar(dir) {
 }
 function agendaHoje() { agAnchor = new Date(); renderAgenda(); }
 
+// Filtro de profissional na agenda (Tijolo 2). No login de um profissional,
+// isto vem travado na agenda dele (Leva B).
+function setAgFiltroProf(id) { _agFiltroProf = id || ''; renderAgenda(); }
+
+function _popularFiltroProfAgenda() {
+  const sel  = document.getElementById('ag-filtro-prof');
+  const wrap = document.getElementById('ag-filtro-prof-wrap');
+  if (!sel) return;
+  const profs = getProfissionaisAtivos();
+  // Profissional logado (Leva B) → filtro travado na dele e escondido
+  const travado = currentRole === 'profissional' && currentProfissionalId;
+  if (travado) _agFiltroProf = currentProfissionalId;
+  if (wrap) wrap.style.display = (!travado && profs.length > 1) ? 'inline-flex' : 'none';
+  sel.innerHTML = `<option value="">Todos</option>` + profs.map(p => `<option value="${p.id}">${_esc(p.nome)}</option>`).join('');
+  sel.value = _agFiltroProf || '';
+}
+
 // ===== Modais =====
 // Infere duração padrão pelo nome do procedimento
 function _inferirDuracao(nomeProc) {
@@ -4243,7 +4269,7 @@ function openNovoAgendamento(prefill = {}) {
   const sel = document.getElementById('ag-procedimento');
   const procs = getProcedimentos();
   sel.innerHTML = procs.map(p => `<option value="${_esc(p.nome)}">${_esc(p.nome)}</option>`).join('');
-  _popularProfissionalSelect(prefill.profissionalId);
+  _popularProfissionalSelect(prefill.profissionalId || _agFiltroProf || null);
   // Pré-preenche
   form.data.value = prefill.data || _ymd(new Date());
   form.hora.value = prefill.hora || '09:00';
@@ -4675,6 +4701,8 @@ function _agDropProf(e, ds, hora, profId) {
 
 // ===== Render principal =====
 function renderAgenda() {
+  // Filtro de profissional (sincroniza dropdown + trava se for login de profissional)
+  _popularFiltroProfAgenda();
   // Atualiza KPIs
   _renderAgendaKPIs();
 
@@ -4704,7 +4732,7 @@ function _labelPeriodo() {
 }
 
 function _renderAgendaKPIs() {
-  const ags = getAgendamentos();
+  const ags = _agsVisiveis();
   // Filtra agendamentos no período da view
   let ini, fim;
   if (agView === 'dia' || agView === 'profissionais') { ini = new Date(agAnchor); fim = new Date(agAnchor); }
@@ -4759,7 +4787,7 @@ function _viewMes() {
   const ano = agAnchor.getFullYear(); const mes = agAnchor.getMonth();
   const primeiro = new Date(ano, mes, 1);
   const inicio = _addDays(primeiro, -((primeiro.getDay() + 6) % 7));
-  const ags = getAgendamentos();
+  const ags = _agsVisiveis();
   const bloqs = getBloqueios();
   const hojeStr = _ymd(new Date());
   const cfg = getAgConfig();
@@ -4827,7 +4855,7 @@ function _setTipoAtividade(tipo) {
 function _viewWeekOrDay(numDias) {
   const cfg    = getAgConfig();
   const ini    = numDias === 7 ? _startOfWeek(agAnchor) : new Date(agAnchor);
-  const ags    = getAgendamentos();
+  const ags    = _agsVisiveis();
   const hojeStr = _ymd(new Date());
 
   const SNAP    = 10;
@@ -4954,15 +4982,18 @@ function _viewProfissionais() {
   const totalH   = totalMin * PX_MIN;
 
   const dayAgs = ags.filter(a => a.data === dayStr);
-  const profs  = getProfissionaisAtivos();
+  const todosProfs = getProfissionaisAtivos();
+  // Filtro ativo → quadro mostra só a coluna daquele profissional
+  const profs  = _agFiltroProf ? todosProfs.filter(p => p.id === _agFiltroProf) : todosProfs;
   const ehDaColuna = (a, colId) => {
     const pid = a.profissionalId || null;
-    if (colId === null) return !pid || !profs.some(p => p.id === pid);
+    if (colId === null) return !pid || !todosProfs.some(p => p.id === pid); // genuinamente sem dono
     return pid === colId;
   };
 
   const colunas = profs.map(p => ({ id: p.id, nome: p.nome, cor: p.cor }));
-  if (dayAgs.some(a => ehDaColuna(a, null))) colunas.push({ id: null, nome: 'Sem profissional', cor: '#94a3b8' });
+  // Coluna "Sem profissional" só sem filtro (com filtro, foco em 1 profissional)
+  if (!_agFiltroProf && dayAgs.some(a => ehDaColuna(a, null))) colunas.push({ id: null, nome: 'Sem profissional', cor: '#94a3b8' });
   if (!colunas.length) {
     return `<div style="padding:48px 20px;text-align:center;color:#94a3b8;font-size:13px;">Cadastre profissionais em <strong>Configurações → Profissionais da clínica</strong> para usar o quadro.</div>`;
   }
