@@ -14,8 +14,8 @@ window.loadDemoData = async function loadDemoData() {
     });
     // Limpa flag de seed de programas pra forçar carregar os templates
     localStorage.removeItem('consult_progs_seeded_v2');
-    // Re-migra pacientes pra tabela por linha (blindagem) no próximo load
-    localStorage.removeItem('consult_atend_migrado');
+    // Re-migra as coleções blindadas pra tabela por linha no próximo load
+    try { Object.values(_BLINDADAS).forEach(c => localStorage.removeItem(c.flag)); } catch(e) {}
 
     console.log('☁️ Sincronizando com Supabase...');
     const chaves = Object.keys(dump);
@@ -178,61 +178,76 @@ async function cloudPull() {
     }
   } catch(e) { console.warn('cloudPull error:', e.message); }
   _migrarIds(); // Fase 1: garante ids estáveis após cada carga (idempotente)
-  await _migrarAtendimentosParaTabela(); // Fase 2: dono empurra "pacote" → tabela (1x)
-  await _pullAtendimentos();             // Fase 2/3: pacientes vem da tabela (filtrado por RLS)
+  await _sincronizarBlindadas(); // Fase 2/3: migra (dono) + puxa as coleções blindadas da tabela (filtrado por RLS)
 }
 
-// ============ BLINDAGEM Fase 2 — atendimentos (pacientes) em tabela por linha ============
-function _atendRow(rec, owner) {
+// ============ BLINDAGEM Fase 2 — coleções sensíveis em tabela por linha (RLS) ============
+// Cada coleção vai numa tabela própria: cada registro = 1 linha (id, owner_id,
+// profissional_id, data jsonb). RLS no servidor garante que profissional só lê
+// as linhas dele. DB.get continua síncrono (cache em localStorage).
+// Só entram aqui coleções cuja TABELA já exista no banco.
+const _BLINDADAS = {
+  pacientes:    { tabela: 'clinica_atendimentos', flag: 'consult_atend_migrado' },
+  agendamentos: { tabela: 'clinica_agendamentos', flag: 'consult_ag_migrado' },
+};
+
+function _rowBlindada(rec, owner) {
   return { id: rec.id, owner_id: owner, profissional_id: rec.profissionalId || null, data: rec, updated_at: new Date().toISOString() };
 }
+
 // Upsert das linhas atuais + delete das removidas (diff por id). Scope-safe:
 // um profissional só mexe nas linhas dele (RLS bloqueia o resto no servidor).
-async function _pushAtendimentos(oldArr, newArr) {
-  if (!_supa || !currentUser) return;
+async function _pushBlindada(tabela, oldArr, newArr) {
+  if (!_supa || !currentUser) return false;
   const owner = currentDataOwner || currentUser.id;
   try {
     const comId = (newArr || []).filter(r => r && r.id);
-    if (comId.length) {
-      await _supa.from('clinica_atendimentos').upsert(comId.map(r => _atendRow(r, owner)), { onConflict: 'id' });
-    }
+    if (comId.length) await _supa.from(tabela).upsert(comId.map(r => _rowBlindada(r, owner)), { onConflict: 'id' });
     const novos = new Set(comId.map(r => r.id));
     const removidos = (oldArr || []).filter(r => r && r.id && !novos.has(r.id)).map(r => r.id);
-    if (removidos.length) await _supa.from('clinica_atendimentos').delete().in('id', removidos);
+    if (removidos.length) await _supa.from(tabela).delete().in('id', removidos);
     return true;
-  } catch(e) { console.warn('_pushAtendimentos:', e.message); return false; }
+  } catch(e) { console.warn('_pushBlindada', tabela, e.message); return false; }
 }
-// Pull filtrado por RLS → escreve consult_pacientes (só o que o usuário pode ver).
-async function _pullAtendimentos() {
+
+// Pull filtrado por RLS → escreve consult_<key> (só o que o usuário pode ver).
+async function _pullBlindada(key, cfg) {
   if (!_supa || !currentUser) return;
   const owner = currentDataOwner || currentUser.id;
   try {
-    const { data, error } = await _supa.from('clinica_atendimentos').select('data').eq('owner_id', owner);
-    if (error) { console.warn('_pullAtendimentos:', error.message); return; }
+    const { data, error } = await _supa.from(cfg.tabela).select('data').eq('owner_id', owner);
+    if (error) { console.warn('_pullBlindada', cfg.tabela, error.message); return; }
     const arr = (data || []).map(row => row.data).filter(Boolean)
       .sort((a, b) => (b.data || '').localeCompare(a.data || ''));
-    // Anti-zeramento: se a tabela veio vazia mas já há dados locais e a migração
-    // do dono ainda não concluiu, NÃO sobrescreve (evita sumir tudo na transição).
-    const atual = JSON.parse(localStorage.getItem('consult_pacientes') || '[]');
-    if (arr.length === 0 && atual.length > 0 && localStorage.getItem('consult_atend_migrado') !== '1') return;
-    localStorage.setItem('consult_pacientes', JSON.stringify(arr));
-  } catch(e) { console.warn('_pullAtendimentos:', e.message); }
+    // Anti-zeramento: tabela vazia + já há dados locais + migração do dono pendente → não sobrescreve.
+    const atual = JSON.parse(localStorage.getItem('consult_' + key) || '[]');
+    if (arr.length === 0 && atual.length > 0 && localStorage.getItem(cfg.flag) !== '1') return;
+    localStorage.setItem('consult_' + key, JSON.stringify(arr));
+  } catch(e) { console.warn('_pullBlindada', cfg.tabela, e.message); }
 }
-// Migração única (só o dono): "pacote" pacientes → tabela e remove o blob do
-// app_data (pra ele não vazar mais no cloudPull dos membros).
-async function _migrarAtendimentosParaTabela() {
+
+// Migração única (só o dono): "pacote" → tabela e remove o blob do app_data
+// (pra ele não vazar mais no cloudPull dos membros). Só apaga o blob se o envio deu certo.
+async function _migrarBlindada(key, cfg) {
   if (!_supa || !currentUser) return;
-  if (localStorage.getItem('consult_atend_migrado') === '1') return;
+  if (localStorage.getItem(cfg.flag) === '1') return;
   if ((currentDataOwner || currentUser.id) !== currentUser.id) return; // membro não migra
   try {
-    const arr = DB.get('pacientes');
-    // Só apaga o blob antigo se o envio pra tabela tiver dado certo (anti perda de dado)
+    const arr = JSON.parse(localStorage.getItem('consult_' + key) || '[]');
     let ok = true;
-    if (arr.length) ok = await _pushAtendimentos([], arr);
-    if (!ok) { console.warn('migração de atendimentos falhou — blob preservado, tenta no próximo load'); return; }
-    await _supa.from('app_data').delete().eq('user_id', currentUser.id).eq('key', 'pacientes');
-    localStorage.setItem('consult_atend_migrado', '1');
-  } catch(e) { console.warn('_migrarAtendimentosParaTabela:', e.message); }
+    if (arr.length) ok = await _pushBlindada(cfg.tabela, [], arr);
+    if (!ok) { console.warn('migração blindada falhou —', key, '— blob preservado'); return; }
+    await _supa.from('app_data').delete().eq('user_id', currentUser.id).eq('key', key);
+    localStorage.setItem(cfg.flag, '1');
+  } catch(e) { console.warn('_migrarBlindada', key, e.message); }
+}
+
+// Roda migração + pull de todas as coleções blindadas (chamado no fim do cloudPull).
+async function _sincronizarBlindadas() {
+  for (const [key, cfg] of Object.entries(_BLINDADAS)) {
+    await _migrarBlindada(key, cfg);
+    await _pullBlindada(key, cfg);
+  }
 }
 
 // ====================== EQUIPE: CONVITES E MEMBROS ======================
@@ -993,11 +1008,12 @@ function setGeminiKey(key) {
 const DB = {
   get: (key) => JSON.parse(localStorage.getItem('consult_' + key) || '[]'),
   set: (key, val) => {
-    // Blindagem: 'pacientes' sincroniza na tabela por linha (não no "pacote único")
-    if (key === 'pacientes') {
-      const old = JSON.parse(localStorage.getItem('consult_pacientes') || '[]');
-      localStorage.setItem('consult_pacientes', JSON.stringify(val));
-      _pushAtendimentos(old, val);
+    // Blindagem: coleções sensíveis sincronizam na tabela por linha (não no "pacote único")
+    const cfg = _BLINDADAS[key];
+    if (cfg) {
+      const old = JSON.parse(localStorage.getItem('consult_' + key) || '[]');
+      localStorage.setItem('consult_' + key, JSON.stringify(val));
+      _pushBlindada(cfg.tabela, old, val);
       return;
     }
     localStorage.setItem('consult_' + key, JSON.stringify(val));

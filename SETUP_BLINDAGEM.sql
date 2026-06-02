@@ -56,4 +56,43 @@ begin
   end if;
 end $$;
 
--- Pronto. A tabela existe, mas o app só passa a usá-la na Fase 2.1b (próximo passo).
+-- ============================================================
+-- Fase 2.2 — Agendamentos por linha (mesma estrutura + RLS)
+-- ============================================================
+create table if not exists clinica_agendamentos (
+  id              text primary key,
+  owner_id        uuid not null references auth.users(id) on delete cascade,
+  profissional_id text,
+  data            jsonb not null,
+  updated_at      timestamptz default now()
+);
+create index if not exists idx_clin_ag_owner on clinica_agendamentos(owner_id);
+create index if not exists idx_clin_ag_prof  on clinica_agendamentos(owner_id, profissional_id);
+
+alter table clinica_agendamentos enable row level security;
+drop policy if exists "acesso agendamentos clinica" on clinica_agendamentos;
+create policy "acesso agendamentos clinica" on clinica_agendamentos
+  for all to authenticated
+  using (
+    auth.uid() = owner_id
+    OR exists (select 1 from team_members tm
+      where tm.member_id = auth.uid() and tm.owner_id = clinica_agendamentos.owner_id
+        and (tm.role <> 'profissional' OR tm.profissional_id = clinica_agendamentos.profissional_id))
+  )
+  with check (
+    auth.uid() = owner_id
+    OR exists (select 1 from team_members tm
+      where tm.member_id = auth.uid() and tm.owner_id = clinica_agendamentos.owner_id
+        and (tm.role <> 'profissional' OR tm.profissional_id = clinica_agendamentos.profissional_id))
+  );
+
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'clinica_agendamentos') then
+    alter publication supabase_realtime add table clinica_agendamentos;
+  end if;
+end $$;
+
+-- Pronto. Rode o arquivo inteiro (é idempotente). O app passa a usar as tabelas
+-- conforme as coleções entram no _BLINDADAS.
