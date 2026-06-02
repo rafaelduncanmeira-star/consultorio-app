@@ -175,6 +175,7 @@ async function cloudPull() {
       console.log(`cloudPull: ${data.length} chaves sincronizadas`);
     }
   } catch(e) { console.warn('cloudPull error:', e.message); }
+  _migrarIds(); // Fase 1: garante ids estáveis após cada carga (idempotente)
 }
 
 // ====================== EQUIPE: CONVITES E MEMBROS ======================
@@ -944,6 +945,44 @@ const DB = {
     cloudPush(key);
   },
 };
+
+// ============ IDs ESTÁVEIS — Fase 1 da blindagem (aditivo, não muda comportamento) ============
+function _novoId(pref) { return (pref || 'id') + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+// Resolve paciente/contato por id (preferido) com fallback pro índice (compat).
+function _pacientePorRef(pacId, pacIdx) {
+  const pacs = DB.get('pacientes');
+  if (pacId) { const p = pacs.find(x => x.id === pacId); if (p) return p; }
+  return (pacIdx != null && pacs[pacIdx]) ? pacs[pacIdx] : null;
+}
+function _crmPorRef(crmId, crmIdx) {
+  const crm = DB.get('crm');
+  if (crmId) { const c = crm.find(x => x.id === crmId); if (c) return c; }
+  return (crmIdx != null && crm[crmIdx]) ? crm[crmIdx] : null;
+}
+
+// Migração idempotente: garante id em pacientes/crm e converte vínculos
+// por índice (pacIdx/crmIdx) em vínculos por id (pacId/crmId), mantendo os
+// índices em paralelo. Roda no init; só grava quando há algo a preencher.
+function _migrarIds() {
+  try {
+    const pacs = DB.get('pacientes'); let mp = false;
+    pacs.forEach(p => { if (!p.id) { p.id = _novoId('pac'); mp = true; } });
+    if (mp) DB.set('pacientes', pacs);
+    const crm = DB.get('crm'); let mc = false;
+    crm.forEach(c => { if (!c.id) { c.id = _novoId('crm'); mc = true; } });
+    if (mc) DB.set('crm', crm);
+    const ags = DB.get('agendamentos'); let ma = false;
+    ags.forEach(a => {
+      if (a.pacId == null && a.pacIdx != null && pacs[a.pacIdx]) { a.pacId = pacs[a.pacIdx].id; ma = true; }
+      if (a.crmId == null && a.crmIdx != null && crm[a.crmIdx]) { a.crmId = crm[a.crmIdx].id; ma = true; }
+    });
+    if (ma) DB.set('agendamentos', ags);
+    const ins = DB.get('inscricoes'); let mi = false;
+    ins.forEach(i => { if (i.pacId == null && i.pacIdx != null && pacs[i.pacIdx]) { i.pacId = pacs[i.pacIdx].id; mi = true; } });
+    if (mi) DB.set('inscricoes', ins);
+  } catch(e) { console.warn('_migrarIds:', e.message); }
+}
 
 let charts = {};
 let editState = { col: null, idx: null, crmIdx: null, pacIdx: null };
@@ -3056,6 +3095,7 @@ function saveCrm(e) {
       if (!confirm(`Já existe um contato com este WhatsApp: "${dupNome}".\n\nDeseja criar mesmo assim?`)) return;
     }
   }
+  item.id = (editIdx >= 0 && data[editIdx] && data[editIdx].id) || _novoId('crm'); // id estável (Fase 1)
   if (editIdx >= 0) { data[editIdx] = item; } else { data.unshift(item); }
   DB.set('crm', data);
   closeModal('modal-crm');
@@ -3929,6 +3969,8 @@ function savePaciente(e) {
     obs: fd.get('obs')
   };
   const data = DB.get('pacientes');
+  // id estável: preserva no editar, gera no criar
+  item.id = (editState.col === 'pacientes' && editState.idx !== null && data[editState.idx] && data[editState.idx].id) || _novoId('pac');
   if (editState.col === 'pacientes' && editState.idx !== null) {
     data[editState.idx] = item;
   } else {
@@ -3936,13 +3978,14 @@ function savePaciente(e) {
   }
   DB.set('pacientes', data);
 
-  // Se veio de um agendamento, fecha o agendamento (marca como Compareceu + pacIdx)
+  // Se veio de um agendamento, fecha o agendamento (marca como Compareceu + vínculo)
   if (editState.agId) {
     const ags = DB.get('agendamentos');
     const a = ags.find(x => x.id === editState.agId);
     if (a) {
       a.status = 'Compareceu';
       a.pacIdx = data.indexOf(item) >= 0 ? data.indexOf(item) : 0;
+      a.pacId  = item.id;   // vínculo por id (Fase 1)
       DB.set('agendamentos', ags);
     }
   }
@@ -4478,6 +4521,9 @@ function saveAgendamento(e) {
     tipoAtividade: fd.get('tipoAtividade') || 'Consultório',
     crmIdx: editState.crmIdx ?? null,
     pacIdx: editState.pacIdx ?? null,
+    // vínculos por id (Fase 1) — resolvidos a partir do índice atual
+    crmId: (editState.crmIdx != null && DB.get('crm')[editState.crmIdx]) ? DB.get('crm')[editState.crmIdx].id : null,
+    pacId: (editState.pacIdx != null && DB.get('pacientes')[editState.pacIdx]) ? DB.get('pacientes')[editState.pacIdx].id : null,
   };
 
   // Verifica conflito
@@ -10812,6 +10858,7 @@ async function syncLeadsFromSupabase() {
         const d = new Date(lead.created_at);
         crm.unshift({
           data:      d.toISOString().substring(0, 10),
+          id:        _novoId('crm'),                       // id estável (Fase 1)
           hora:      `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`,
           nome:      lead.nome || 'Contato WhatsApp',
           whatsapp:  cleanPhone.replace(/^55/, ''),
