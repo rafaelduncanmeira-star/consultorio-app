@@ -211,6 +211,10 @@ async function _pullAtendimentos() {
     if (error) { console.warn('_pullAtendimentos:', error.message); return; }
     const arr = (data || []).map(row => row.data).filter(Boolean)
       .sort((a, b) => (b.data || '').localeCompare(a.data || ''));
+    // Anti-zeramento: se a tabela veio vazia mas já há dados locais e a migração
+    // do dono ainda não concluiu, NÃO sobrescreve (evita sumir tudo na transição).
+    const atual = JSON.parse(localStorage.getItem('consult_pacientes') || '[]');
+    if (arr.length === 0 && atual.length > 0 && localStorage.getItem('consult_atend_migrado') !== '1') return;
     localStorage.setItem('consult_pacientes', JSON.stringify(arr));
   } catch(e) { console.warn('_pullAtendimentos:', e.message); }
 }
