@@ -8889,8 +8889,8 @@ function _zapiPhoneCandidates(raw) {
     out.push('55' + ddd + rest);              // como veio (com o 9)
     out.push('55' + ddd + rest.slice(1));     // sem o 9
   } else if (rest.length === 8 && /[6-9]/.test(rest.charAt(0))) {
-    out.push('55' + ddd + '9' + rest);        // celular: adiciona o 9
-    out.push('55' + ddd + rest);              // como veio (sem o 9)
+    out.push('55' + ddd + rest);              // como veio (sem o 9) — formato que o Z-API costuma entregar
+    out.push('55' + ddd + '9' + rest);        // alternativa: adiciona o 9
   } else {
     out.push('55' + d);                        // fixo ou já completo
   }
@@ -10073,9 +10073,10 @@ async function sendChatMessage() {
     const err = String(e.message || '');
     let dica;
     if (/NOT_?FOUND/i.test(err)) {
-      dica = 'Esse número não tem uma conta de WhatsApp — geralmente é um contato de teste/simulado.\n\n' +
-             'Para testar de verdade: mande uma mensagem de OUTRO celular para o WhatsApp do consultório, ' +
-             'espere o contato aparecer aqui no CRM e responda a esse.';
+      dica = 'O WhatsApp não localizou esse número (já tentei com e sem o 9º dígito).\n\n' +
+             '• Confirme que o número tem WhatsApp ativo.\n' +
+             '• Se o envio falhar para TODOS os contatos, clique em "Testar conexão" em ' +
+             'Configurações → WhatsApp para checar as credenciais do Z-API.';
     } else if (/token/i.test(err)) {
       dica = 'Parece faltar o "Token de segurança da conta". Pegue no painel do Z-API (menu Segurança) ' +
              'e cole em Configurações → WhatsApp → Token de segurança da conta.';
