@@ -1810,6 +1810,21 @@
         </div>
       </div>
 
+      <!-- Profissionais da clínica -->
+      <div class="chart-card" style="margin-bottom:20px;">
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px;">
+          <div style="width:42px;height:42px;background:#dbeafe;color:#1d4ed8;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <i data-lucide="users" style="width:22px;height:22px;"></i>
+          </div>
+          <div style="flex:1;">
+            <div style="font-size:15px;font-weight:700;color:#0f172a;">Profissionais da clínica</div>
+            <div style="font-size:12.5px;color:#64748b;margin-top:2px;">Cadastre médicos, fisioterapeutas, ed. física, etc. Cada agendamento pode ser atribuído a um deles.</div>
+          </div>
+          <button onclick="novoProfissional()" class="btn-primary" style="font-size:12.5px;padding:7px 13px;white-space:nowrap;">+ Profissional</button>
+        </div>
+        <div id="config-profissionais-lista"></div>
+      </div>
+
       <!-- Aparência (tema claro/escuro) -->
       <div class="chart-card" style="margin-bottom:20px;">
         <div style="display:flex;align-items:center;gap:14px;">
@@ -2482,12 +2497,15 @@
         <div><label>WhatsApp</label><input type="text" class="input" name="whatsapp" placeholder="(11) 99999-9999" /></div>
         <div><label>Procedimento</label><select class="select" name="procedimento" id="ag-procedimento"></select></div>
       </div>
-      <div style="margin-bottom:14px;"><label>Status</label><select class="select" name="status">
-        <option value="Confirmado">Confirmado</option>
-        <option value="Compareceu">Compareceu</option>
-        <option value="No-show">No-show</option>
-        <option value="Cancelado">Cancelado</option>
-      </select></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+        <div><label>Profissional</label><select class="select" name="profissionalId" id="ag-profissional"></select></div>
+        <div><label>Status</label><select class="select" name="status">
+          <option value="Confirmado">Confirmado</option>
+          <option value="Compareceu">Compareceu</option>
+          <option value="No-show">No-show</option>
+          <option value="Cancelado">Cancelado</option>
+        </select></div>
+      </div>
       <div style="margin-bottom:20px;"><label>Observações</label><textarea class="input" name="obs" rows="2"></textarea></div>
       <div id="ag-conflito-aviso" style="display:none;background:#fef3c7;border:1px solid #fcd34d;color:#92400e;padding:10px 14px;border-radius:8px;font-size:12.5px;margin-bottom:14px;"></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;">

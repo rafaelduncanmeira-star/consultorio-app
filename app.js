@@ -1168,6 +1168,77 @@ function _metaCategoria(tipo) {
   return 'Consulta';
 }
 
+// ====================== PROFISSIONAIS (CLÍNICA) ======================
+// Modelo: consult_profissionais: [{ id, nome, tipo, especialidade, cor, ativo }]
+// Base do "Plano Clínica": cada agendamento/receita é etiquetado por profissional.
+const _PROF_CORES = ['#10b981','#3b82f6','#8b5cf6','#f59e0b','#ec4899','#14b8a6','#ef4444','#0ea5e9','#65a30d','#d946ef'];
+
+function getProfissionais() {
+  let arr = DB.get('profissionais');
+  if (!arr.length && !localStorage.getItem('consult_prof_seeded')) {
+    arr = [{ id: 'prof_titular', nome: 'Titular', tipo: 'Médico', especialidade: '', cor: _PROF_CORES[0], ativo: true }];
+    DB.set('profissionais', arr);
+    localStorage.setItem('consult_prof_seeded', '1');
+  }
+  return arr;
+}
+function getProfissionaisAtivos() { return getProfissionais().filter(p => p.ativo !== false); }
+function getProfissional(id) { return getProfissionais().find(p => p.id === id) || null; }
+function _corProfissional(id) { const p = getProfissional(id); return p ? p.cor : '#94a3b8'; }
+function _profId() { return 'prof_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5); }
+
+function renderProfissionais() {
+  const el = document.getElementById('config-profissionais-lista');
+  if (!el) return;
+  const profs = getProfissionais();
+  if (!profs.length) {
+    el.innerHTML = '<div style="color:#94a3b8;font-size:13px;padding:10px 0;">Nenhum profissional. Clique em “+ Profissional”.</div>';
+    return;
+  }
+  el.innerHTML = profs.map(p => `
+    <div style="display:flex;align-items:center;gap:11px;padding:10px 0;border-bottom:1px solid #f1f5f9;">
+      <span style="width:14px;height:14px;border-radius:4px;background:${p.cor};flex-shrink:0;"></span>
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:600;color:#0f172a;font-size:13.5px;">${_esc(p.nome)}${p.ativo===false?' <span style="color:#94a3b8;font-weight:400;font-size:11px;">(inativo)</span>':''}</div>
+        <div style="font-size:11.5px;color:#64748b;">${_esc(p.tipo||'—')}${p.especialidade?' · '+_esc(p.especialidade):''}</div>
+      </div>
+      <button onclick="editarProfissional('${p.id}')" title="Editar" style="background:none;border:none;color:#3b82f6;cursor:pointer;font-size:13px;">✏️</button>
+      <button onclick="excluirProfissional('${p.id}')" title="Remover" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:13px;">🗑️</button>
+    </div>`).join('');
+}
+
+function novoProfissional()      { _editarProfissionalPrompt(null); }
+function editarProfissional(id)  { _editarProfissionalPrompt(id); }
+
+function _editarProfissionalPrompt(id) {
+  const p = id ? getProfissional(id) : null;
+  const nome = prompt('Nome do profissional:', p ? p.nome : '');
+  if (nome === null || !nome.trim()) return;
+  const tipo = prompt('Tipo (Médico, Fisioterapeuta, Ed. Física, Nutricionista, Psicólogo...):', p ? p.tipo : 'Médico');
+  if (tipo === null) return;
+  const esp = prompt('Especialidade (opcional):', p ? (p.especialidade || '') : '');
+  if (esp === null) return;
+  const profs = getProfissionais();
+  if (p) {
+    const idx = profs.findIndex(x => x.id === id);
+    profs[idx] = { ...p, nome: nome.trim(), tipo: (tipo||'').trim(), especialidade: (esp||'').trim() };
+  } else {
+    const cor = _PROF_CORES[profs.length % _PROF_CORES.length];
+    profs.push({ id: _profId(), nome: nome.trim(), tipo: (tipo||'').trim(), especialidade: (esp||'').trim(), cor, ativo: true });
+  }
+  DB.set('profissionais', profs);
+  renderProfissionais();
+  if (typeof toast === 'function') toast('✅ Profissional salvo.');
+}
+
+function excluirProfissional(id) {
+  const p = getProfissional(id);
+  if (!p) return;
+  if (!confirm(`Remover "${p.nome}"?\n\nOs agendamentos dele não são apagados — apenas ficam sem profissional.`)) return;
+  DB.set('profissionais', getProfissionais().filter(x => x.id !== id));
+  renderProfissionais();
+}
+
 // ====================== PROGRAMAS DE ACOMPANHAMENTO ======================
 //
 // Modelo:
@@ -4151,6 +4222,18 @@ function _inferirDuracao(nomeProc) {
   return null;
 }
 
+// Popula o <select> de profissional do modal de agendamento
+function _popularProfissionalSelect(selectedId) {
+  const sel = document.getElementById('ag-profissional');
+  if (!sel) return;
+  const profs = getProfissionaisAtivos();
+  sel.innerHTML = profs.length
+    ? profs.map(p => `<option value="${p.id}">${_esc(p.nome)}</option>`).join('')
+    : '<option value="">(cadastre em Configurações)</option>';
+  if (selectedId && profs.some(p => p.id === selectedId)) sel.value = selectedId;
+  else if (profs.length) sel.value = profs[0].id;
+}
+
 function openNovoAgendamento(prefill = {}) {
   editState = { col: null, idx: null, crmIdx: prefill.crmIdx || null, pacIdx: null, agId: null };
   const modal = document.getElementById('modal-agendamento');
@@ -4160,6 +4243,7 @@ function openNovoAgendamento(prefill = {}) {
   const sel = document.getElementById('ag-procedimento');
   const procs = getProcedimentos();
   sel.innerHTML = procs.map(p => `<option value="${_esc(p.nome)}">${_esc(p.nome)}</option>`).join('');
+  _popularProfissionalSelect(prefill.profissionalId);
   // Pré-preenche
   form.data.value = prefill.data || _ymd(new Date());
   form.hora.value = prefill.hora || '09:00';
@@ -4191,6 +4275,7 @@ function editAgendamento(id) {
   let opts = procs.map(p => `<option value="${_esc(p.nome)}">${_esc(p.nome)}</option>`).join('');
   if (a.procedimento && !procs.some(p => p.nome === a.procedimento)) opts += `<option value="${_esc(a.procedimento)}">${_esc(a.procedimento)} (legado)</option>`;
   sel.innerHTML = opts;
+  _popularProfissionalSelect(a.profissionalId);
   form.data.value = a.data;
   form.hora.value = a.hora;
   form.duracao.value = a.duracao || 60;
@@ -4219,6 +4304,7 @@ function saveAgendamento(e) {
     pacienteNome: (fd.get('pacienteNome') || '').trim(),
     whatsapp: (fd.get('whatsapp') || '').trim(),
     procedimento: fd.get('procedimento') || '',
+    profissionalId: fd.get('profissionalId') || null,
     status: fd.get('status') || 'Confirmado',
     obs: (fd.get('obs') || '').trim(),
     tipoAtividade: fd.get('tipoAtividade') || 'Consultório',
@@ -4799,17 +4885,21 @@ function _viewWeekOrDay(numDias) {
       const ec       = (a.status || 'confirmado').toLowerCase().replace('no-show', 'noshow');
       const showDur  = height >= 30;
       const isCancelado = ec === 'cancelado';
+      const profObj  = a.profissionalId ? getProfissional(a.profissionalId) : null;
+      const corProf  = profObj ? profObj.cor : null;
+      const profNome = profObj ? (profObj.nome || '').split(' ')[0] : '';
+      const borda    = isCancelado ? '#d1d5db' : (corProf || ts.border);
       evts += `<div class="week-evt ${ec}"
         style="position:absolute;top:${top}px;left:3px;right:3px;height:${height}px;z-index:3;overflow:hidden;
                cursor:grab;background:${isCancelado ? '#f5f5f5' : ts.bg};
-               color:${isCancelado ? '#9ca3af' : ts.color};border-left:3px solid ${isCancelado ? '#d1d5db' : ts.border};"
+               color:${isCancelado ? '#9ca3af' : ts.color};border-left:4px solid ${borda};"
         draggable="true"
         ondragstart="_agDragStart(event,'${a.id}')"
         ondragend="_agDragEnd(event)"
         onclick="event.stopPropagation();editAgendamento('${a.id}')"
-        title="${ts.icon} ${a.pacienteNome} — ${a.procedimento || tipo} (${dur}min)">
-        <strong style="font-size:10.5px;">${ts.icon} ${a.pacienteNome}</strong>
-        ${showDur ? `<br><span style="font-size:9px;opacity:0.75;">${a.procedimento || tipo} · ${dur}min</span>` : ''}
+        title="${ts.icon} ${_esc(a.pacienteNome)} — ${_esc(a.procedimento || tipo)} (${dur}min)${profNome ? ' · ' + _esc(profObj.nome) : ''}">
+        <strong style="font-size:10.5px;">${ts.icon} ${_esc(a.pacienteNome)}</strong>
+        ${showDur ? `<br><span style="font-size:9px;opacity:0.75;">${_esc(a.procedimento || tipo)} · ${dur}min${profNome ? ' · <span style="color:'+borda+';font-weight:700;">'+_esc(profNome)+'</span>' : ''}</span>` : ''}
       </div>`;
     });
 
@@ -9575,6 +9665,8 @@ function _mesAtualLabel() {
 }
 
 function renderConfiguracoes() {
+  // Profissionais da clínica
+  renderProfissionais();
   // Clinica config
   const clinica = getClinicaConfig();
   const fields = { 'clinica-nome': clinica.nome, 'clinica-especialidade': clinica.especialidade,
