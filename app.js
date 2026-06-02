@@ -1212,33 +1212,93 @@ function renderProfissionais() {
       <span style="width:14px;height:14px;border-radius:4px;background:${p.cor};flex-shrink:0;"></span>
       <div style="flex:1;min-width:0;">
         <div style="font-weight:600;color:#0f172a;font-size:13.5px;">${_esc(p.nome)}${p.ativo===false?' <span style="color:#94a3b8;font-weight:400;font-size:11px;">(inativo)</span>':''}</div>
-        <div style="font-size:11.5px;color:#64748b;">${_esc(p.tipo||'—')}${p.especialidade?' · '+_esc(p.especialidade):''}</div>
+        <div style="font-size:11.5px;color:#64748b;">${_esc(p.tipo||'—')}${p.especialidade?' · '+_esc(p.especialidade):''} · 💰 ${_repasseLabel(p)}</div>
       </div>
       <button onclick="editarProfissional('${p.id}')" title="Editar" style="background:none;border:none;color:#3b82f6;cursor:pointer;font-size:13px;">✏️</button>
       <button onclick="excluirProfissional('${p.id}')" title="Remover" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:13px;">🗑️</button>
     </div>`).join('');
 }
 
-function novoProfissional()      { _editarProfissionalPrompt(null); }
-function editarProfissional(id)  { _editarProfissionalPrompt(id); }
+// Rótulo curto do repasse (lista de profissionais)
+function _repasseLabel(prof) {
+  const r = (prof && prof.repasse) || { tipo: 'percentual', valor: 100 };
+  if (r.tipo === 'fixo')    return `${BRL(r.valor || 0)}/atend.`;
+  if (r.tipo === 'aluguel') return `aluguel ${BRL(r.valor || 0)}/mês`;
+  return `${r.valor || 0}% pra ele`;
+}
 
-function _editarProfissionalPrompt(id) {
+// Calcula a divisão da receita de um profissional num período
+function _calcRepasse(prof, receita, qtd) {
+  if (!prof) return { profGanho: 0, clinicaGanho: receita, label: '—' };
+  const r = prof.repasse || { tipo: 'percentual', valor: 100 };
+  if (r.tipo === 'fixo')    { const g = (r.valor || 0) * qtd; return { profGanho: g, clinicaGanho: receita - g, label: `${BRL(r.valor || 0)}/atend.` }; }
+  if (r.tipo === 'aluguel') { const c = (r.valor || 0);       return { profGanho: receita - c, clinicaGanho: c, label: `aluguel ${BRL(r.valor || 0)}` }; }
+  const g = receita * ((r.valor || 0) / 100); return { profGanho: g, clinicaGanho: receita - g, label: `${r.valor || 0}%` };
+}
+
+function novoProfissional()     { _abrirModalProfissional(null); }
+function editarProfissional(id) { _abrirModalProfissional(id); }
+
+function _abrirModalProfissional(id) {
   const p = id ? getProfissional(id) : null;
-  const nome = prompt('Nome do profissional:', p ? p.nome : '');
-  if (nome === null || !nome.trim()) return;
-  const tipo = prompt('Tipo (Médico, Fisioterapeuta, Ed. Física, Nutricionista, Psicólogo...):', p ? p.tipo : 'Médico');
-  if (tipo === null) return;
-  const esp = prompt('Especialidade (opcional):', p ? (p.especialidade || '') : '');
-  if (esp === null) return;
+  const form = document.querySelector('#modal-profissional form');
+  if (!form) return;
+  form.reset();
+  form.id.value = id || '';
+  form.nome.value = p ? p.nome : '';
+  form.tipo.value = p ? (p.tipo || 'Médico') : 'Médico';
+  form.especialidade.value = p ? (p.especialidade || '') : '';
+  form.ativo.checked = p ? p.ativo !== false : true;
+  const cor = p ? p.cor : _PROF_CORES[getProfissionais().length % _PROF_CORES.length];
+  document.getElementById('prof-cor-input').value = cor;
+  document.getElementById('prof-cor-swatches').innerHTML = _PROF_CORES.map(c =>
+    `<button type="button" data-cor="${c}" onclick="_selecionarCor('${c}')" class="prof-cor-sw" style="width:28px;height:28px;border-radius:8px;background:${c};border:3px solid ${c === cor ? '#0f172a' : 'transparent'};cursor:pointer;padding:0;"></button>`
+  ).join('');
+  const rep = (p && p.repasse) || { tipo: 'percentual', valor: 100 };
+  form.repasseTipo.value = rep.tipo || 'percentual';
+  form.repasseValor.value = (rep.valor != null ? rep.valor : '');
+  _repasseLabelUpdate();
+  document.querySelector('#modal-profissional .modal-title').textContent = id ? 'Editar profissional' : 'Novo profissional';
+  document.getElementById('modal-profissional').style.display = 'flex';
+}
+
+function _selecionarCor(c) {
+  const inp = document.getElementById('prof-cor-input');
+  if (inp) inp.value = c;
+  document.querySelectorAll('#prof-cor-swatches .prof-cor-sw').forEach(b => {
+    b.style.borderColor = b.dataset.cor === c ? '#0f172a' : 'transparent';
+  });
+}
+
+function _repasseLabelUpdate() {
+  const tipo = document.getElementById('prof-repasse-tipo')?.value;
+  const hint = document.getElementById('prof-repasse-hint');
+  const inp  = document.getElementById('prof-repasse-valor');
+  if (!hint) return;
+  if (tipo === 'percentual')   { hint.innerHTML = 'Ex.: <b>70</b> → o profissional fica com <b>70%</b> e a clínica com 30% da receita dele.'; if (inp) inp.placeholder = '70'; }
+  else if (tipo === 'fixo')    { hint.innerHTML = 'Ex.: <b>150</b> → o profissional recebe <b>R$ 150 por atendimento</b>; a clínica fica com o resto.'; if (inp) inp.placeholder = '150'; }
+  else                         { hint.innerHTML = 'Ex.: <b>2000</b> → a clínica recebe <b>R$ 2.000/mês</b> de aluguel e o profissional fica com o resto.'; if (inp) inp.placeholder = '2000'; }
+}
+
+function salvarProfissional(e) {
+  e.preventDefault();
+  const form = e.target;
+  const nome = (form.nome.value || '').trim();
+  if (!nome) { alert('Informe o nome.'); return; }
+  const id  = form.id.value || _profId();
+  const obj = {
+    id, nome,
+    tipo: form.tipo.value || '',
+    especialidade: (form.especialidade.value || '').trim(),
+    cor: document.getElementById('prof-cor-input').value || _PROF_CORES[0],
+    ativo: form.ativo.checked,
+    repasse: { tipo: form.repasseTipo.value || 'percentual', valor: parseFloat(form.repasseValor.value) || 0 },
+  };
   const profs = getProfissionais();
-  if (p) {
-    const idx = profs.findIndex(x => x.id === id);
-    profs[idx] = { ...p, nome: nome.trim(), tipo: (tipo||'').trim(), especialidade: (esp||'').trim() };
-  } else {
-    const cor = _PROF_CORES[profs.length % _PROF_CORES.length];
-    profs.push({ id: _profId(), nome: nome.trim(), tipo: (tipo||'').trim(), especialidade: (esp||'').trim(), cor, ativo: true });
-  }
+  const idx = profs.findIndex(p => p.id === id);
+  if (idx >= 0) profs[idx] = { ...profs[idx], ...obj }; else profs.push(obj);
   DB.set('profissionais', profs);
+  closeModal('modal-profissional');
   renderProfissionais();
   if (typeof toast === 'function') toast('✅ Profissional salvo.');
 }
@@ -7485,9 +7545,13 @@ function renderRelatorio(mes) {
   });
   const profStats = Object.entries(profMap).map(([id, v]) => {
     const prof = id === '__sem__' ? null : _profsList.find(x => x.id === id);
+    const split = _calcRepasse(prof, v.total, v.qtd);
     return { nome: prof ? prof.nome : 'Sem profissional', cor: prof ? prof.cor : '#94a3b8',
-             qtd: v.qtd, total: v.total, ticket: v.qtd ? v.total / v.qtd : 0, pct: fat ? (v.total / fat) * 100 : 0 };
+             qtd: v.qtd, total: v.total, ticket: v.qtd ? v.total / v.qtd : 0,
+             regra: split.label, profGanho: split.profGanho, clinicaGanho: split.clinicaGanho };
   }).sort((a, b) => b.total - a.total);
+  const totalProfGanho = profStats.reduce((s, x) => s + x.profGanho, 0);
+  const totalClinica   = profStats.reduce((s, x) => s + x.clinicaGanho, 0);
   const mostrarProfSection = _profsList.length > 1 || pacs.some(p => p.profissionalId);
 
   // ===== Mix de pagamento + taxa estimada =====
@@ -7664,28 +7728,48 @@ function renderRelatorio(mes) {
 
     ${mostrarProfSection ? `
     <div class="chart-card">
-      <h3 class="font-bold text-gray-800 mb-4 text-base">👥 Receita por profissional</h3>
-      <table class="w-full text-sm">
-        <thead><tr class="border-b"><th class="text-left py-2 text-gray-600">Profissional</th><th class="text-right py-2 text-gray-600">Atend.</th><th class="text-right py-2 text-gray-600">Receita</th><th class="text-right py-2 text-gray-600">% do mês</th><th class="text-right py-2 text-gray-600">Ticket</th></tr></thead>
+      <h3 class="font-bold text-gray-800 mb-4 text-base">👥 Receita por profissional <span style="font-size:11px;font-weight:500;color:#94a3b8;">— com repasse</span></h3>
+      <div style="overflow-x:auto;">
+      <table class="w-full text-sm" style="min-width:560px;">
+        <thead><tr class="border-b">
+          <th class="text-left py-2 text-gray-600">Profissional</th>
+          <th class="text-right py-2 text-gray-600">Atend.</th>
+          <th class="text-right py-2 text-gray-600">Receita</th>
+          <th class="text-right py-2 text-gray-600">Regra</th>
+          <th class="text-right py-2 text-gray-600">Profissional leva</th>
+          <th class="text-right py-2 text-gray-600">Clínica fica</th>
+        </tr></thead>
         <tbody>
           ${profStats.map(s => `
             <tr class="border-b border-gray-50">
               <td class="py-2 text-gray-700"><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${s.cor};margin-right:7px;vertical-align:middle;"></span>${_esc(s.nome)}</td>
               <td class="py-2 text-right">${s.qtd}</td>
               <td class="py-2 text-right font-semibold">${BRL(s.total)}</td>
-              <td class="py-2 text-right text-gray-600">${PCT(s.pct)}</td>
-              <td class="py-2 text-right text-gray-600">${BRL(s.ticket)}</td>
+              <td class="py-2 text-right text-gray-500" style="font-size:12px;">${_esc(s.regra)}</td>
+              <td class="py-2 text-right font-semibold" style="color:#1d4ed8;">${BRL(s.profGanho)}</td>
+              <td class="py-2 text-right font-semibold" style="color:#15803d;">${BRL(s.clinicaGanho)}</td>
             </tr>`).join('')}
           <tr style="background:#f8fafc;border-top:2px solid #e2e8f0;">
             <td class="py-2 font-bold text-gray-800">Total</td>
             <td class="py-2 text-right font-bold">${pacs.length}</td>
             <td class="py-2 text-right font-bold">${BRL(fat)}</td>
-            <td class="py-2 text-right">100%</td>
-            <td class="py-2 text-right font-bold">${BRL(ticket)}</td>
+            <td class="py-2 text-right"></td>
+            <td class="py-2 text-right font-bold" style="color:#1d4ed8;">${BRL(totalProfGanho)}</td>
+            <td class="py-2 text-right font-bold" style="color:#15803d;">${BRL(totalClinica)}</td>
           </tr>
         </tbody>
       </table>
-      <div style="margin-top:10px;font-size:11.5px;color:#94a3b8;">💡 No próximo passo (3B) entra o <strong>repasse</strong> de cada profissional e quanto a clínica fica.</div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:160px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;">
+          <div style="font-size:10.5px;color:#1d4ed8;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">Repasse aos profissionais</div>
+          <div style="font-size:18px;font-weight:800;color:#1e40af;margin-top:2px;">${BRL(totalProfGanho)}</div>
+        </div>
+        <div style="flex:1;min-width:160px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 14px;">
+          <div style="font-size:10.5px;color:#15803d;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">Fica com a clínica</div>
+          <div style="font-size:18px;font-weight:800;color:#166534;margin-top:2px;">${BRL(totalClinica)}</div>
+        </div>
+      </div>
     </div>` : ''}
 
     <div class="chart-card">
