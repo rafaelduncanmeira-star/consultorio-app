@@ -1067,7 +1067,7 @@ function openModal(id) {
           }
           valEl.value = valorSalvo || mrrMed || '';
         } else {
-          const proc = procs.find(p => p.nome === tipo || p.nome.toLowerCase().includes(tipo.toLowerCase().split(' ')[0]));
+          const proc = procs.find(p => p.nome === tipo) || procs.find(p => _metaCategoria(p.nome) === tipo);
           valEl.value = valorSalvo || (proc ? proc.valorPix : '') || '';
         }
       }
@@ -1130,6 +1130,7 @@ function getProcedimentos() {
   // Seed inicial na primeira execução
   if (!arr.length && !localStorage.getItem('consult_proc_seeded')) {
     arr = [
+      { nome: 'Primeira consulta',        valorPix: 1000, valorCartao: 1050, obs: 'Paciente novo (1ª vez)' },
       { nome: 'Consulta no consultório', valorPix: 1000, valorCartao: 1050, obs: '' },
       { nome: 'Retorno',                  valorPix: 0,    valorCartao: 0,    obs: 'Defina o valor' },
       { nome: 'Visita domiciliar',        valorPix: 800,  valorCartao: 800,  obs: '' },
@@ -1139,8 +1140,32 @@ function getProcedimentos() {
     ];
     DB.set('procedimentos', arr);
     localStorage.setItem('consult_proc_seeded', '1');
+    localStorage.setItem('consult_proc_1vez', '1');
+  }
+  // Migração (uma vez): adiciona "Primeira consulta" pra quem já tinha a lista antiga.
+  // É o procedimento que alimenta a meta de "1ª vez".
+  if (arr.length && !localStorage.getItem('consult_proc_1vez') &&
+      !arr.some(p => /1[aª°]?\s*vez|primeira/i.test(p.nome || ''))) {
+    const base = arr.find(p => /consulta/i.test(p.nome || '')) || { valorPix: 0, valorCartao: 0 };
+    arr.unshift({ nome: 'Primeira consulta', valorPix: base.valorPix || 0, valorCartao: base.valorCartao || 0, obs: 'Paciente novo (1ª vez)' });
+    DB.set('procedimentos', arr);
+    localStorage.setItem('consult_proc_1vez', '1');
   }
   return arr;
+}
+
+// Mapeia o nome de um procedimento para a CATEGORIA usada nas metas
+// (ex.: "Consulta no consultório" → 'Consulta', "Primeira consulta" → '1ª vez').
+// Antes a meta comparava o nome exato e só batia em alguns casos.
+function _metaCategoria(tipo) {
+  const s = (tipo || '').toLowerCase();
+  if (/1[aª°]?\s*vez|primeira|primeiro/.test(s)) return '1ª vez';
+  if (/retorno|reavalia/.test(s))                return 'Retorno';
+  if (/domicil/.test(s))                         return 'Domiciliar';
+  if (/hospital/.test(s))                        return 'Hospitalar';
+  if (/telemed|online|remot|v[ií]deo/.test(s))   return 'Telemedicina';
+  if (/programa|assinatura/.test(s))             return 'Programa';
+  return 'Consulta';
 }
 
 // ====================== PROGRAMAS DE ACOMPANHAMENTO ======================
@@ -7746,7 +7771,7 @@ function renderMetasProc() {
             const isProg = tipo === 'Programa';
             const totAnual = isProg
               ? allIns.filter(i => (i.dataInicio || '').startsWith(String(anoAtual))).length
-              : allPacs.filter(p => getMes(p.data).startsWith(String(anoAtual)) && (p.tipo||'Consulta') === tipo).length;
+              : allPacs.filter(p => getMes(p.data).startsWith(String(anoAtual)) && _metaCategoria(p.tipo) === tipo).length;
             return `
               <tr style="border-bottom:1px solid #f8fafc;">
                 <td style="padding:9px 12px;">
@@ -7761,7 +7786,7 @@ function renderMetasProc() {
                 ${colunas.map(col => {
                   const real = isProg
                     ? inscricoesNoMes(col.mes)
-                    : allPacs.filter(p => getMes(p.data) === col.mes && (p.tipo||'Consulta') === tipo).length;
+                    : allPacs.filter(p => getMes(p.data) === col.mes && _metaCategoria(p.tipo) === tipo).length;
                   const pct = meta ? (real / meta) * 100 : 0;
                   const cor = real === 0 ? '#d1d5db' : real >= meta ? '#10b981' : real >= meta * 0.7 ? '#f59e0b' : '#ef4444';
                   const bg  = col.isAtual ? '#f0fdf4' : '';
