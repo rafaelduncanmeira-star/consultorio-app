@@ -8876,16 +8876,50 @@ function _formatarMensagemLembrete(ag, template) {
     .replace(/\{duracao\}/g, (ag.duracao || 50) + ' min');
 }
 
-// Normaliza um número brasileiro para o formato do Z-API: 55 + DDD(2) + número.
-// Corrige o caso clássico de celular salvo sem o 9º dígito
-// (ex.: "8198067833" → "5581998067833") e remove 55 duplicado.
-function _zapiPhone(raw) {
+// Gera os formatos possíveis de um número BR para o Z-API, em ordem de tentativa.
+// Resolve a ambiguidade do 9º dígito: o WhatsApp pode ter registrado o número
+// COM ou SEM o 9, então devolvemos os dois candidatos pra tentar em sequência.
+function _zapiPhoneCandidates(raw) {
   let d = String(raw || '').replace(/\D/g, '');
-  if (d.startsWith('55') && d.length >= 12) d = d.slice(2);      // tira o 55 pra normalizar
-  if (d.length === 10 && /[6-9]/.test(d.charAt(2))) {            // celular (DDD + 8 díg.) sem o 9
-    d = d.slice(0, 2) + '9' + d.slice(2);
+  if (d.startsWith('55') && d.length >= 12) d = d.slice(2);   // normaliza removendo o 55
+  const ddd  = d.slice(0, 2);
+  const rest = d.slice(2);
+  const out = [];
+  if (rest.length === 9 && rest.charAt(0) === '9') {
+    out.push('55' + ddd + rest);              // como veio (com o 9)
+    out.push('55' + ddd + rest.slice(1));     // sem o 9
+  } else if (rest.length === 8 && /[6-9]/.test(rest.charAt(0))) {
+    out.push('55' + ddd + '9' + rest);        // celular: adiciona o 9
+    out.push('55' + ddd + rest);              // como veio (sem o 9)
+  } else {
+    out.push('55' + d);                        // fixo ou já completo
   }
-  return '55' + d;
+  return [...new Set(out)];
+}
+
+// Envia texto via Z-API tentando os formatos de número em sequência.
+// Só re-tenta o próximo formato se o erro for "NOT_FOUND" (nada foi enviado),
+// evitando qualquer risco de mensagem duplicada.
+async function _zapiSendText(cfg, rawPhone, text) {
+  const cands = _zapiPhoneCandidates(rawPhone);
+  let lastErr = 'número inválido';
+  for (const phone of cands) {
+    try {
+      const res = await fetch(
+        `https://api.z-api.io/instances/${cfg.instanceId}/token/${cfg.token}/send-text`,
+        { method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Client-Token': cfg.clientToken || cfg.token },
+          body: JSON.stringify({ phone, message: text }) }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && (data.zaapId || data.messageId || data.id)) return { ok: true, phone };
+      lastErr = data.error || data.message ||
+        (data.value != null ? JSON.stringify(data.value) : '') || ('HTTP ' + res.status);
+      // Erro que NÃO é de número não encontrado (ex.: client-token) → não adianta trocar o formato
+      if (!/NOT_?FOUND|not.?found|exist|inv[aá]lid/i.test(lastErr)) break;
+    } catch(e) { lastErr = e.message; break; }
+  }
+  return { ok: false, error: lastErr };
 }
 
 // Envia 1 lembrete via Z-API
@@ -8894,18 +8928,7 @@ async function _enviarLembreteZapi(ag, mensagem) {
   if (!cfg.enabled || !cfg.instanceId || !cfg.token) return { error: 'Z-API não configurado' };
   const fone = (ag.whatsapp || '').replace(/\D/g, '');
   if (!fone || fone.length < 10) return { error: 'WhatsApp inválido' };
-  const phone = _zapiPhone(fone);
-  try {
-    const res = await fetch(
-      `https://api.z-api.io/instances/${cfg.instanceId}/token/${cfg.token}/send-text`,
-      { method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Client-Token': cfg.clientToken || cfg.token },
-        body: JSON.stringify({ phone, message: mensagem }) }
-    );
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && (data.zaapId || data.messageId || data.id)) return { ok: true };
-    return { error: data.error || data.message || ('Z-API status ' + res.status) };
-  } catch(e) { return { error: e.message }; }
+  return await _zapiSendText(cfg, fone, mensagem);
 }
 
 // Encontra agendamentos elegíveis (na janela de N horas, não realizados, não notificados)
@@ -10024,20 +10047,8 @@ async function sendChatMessage() {
   const pendingEl = _appendChatMessage({ remetente: 'consultorio', mensagem: text, created_at: new Date().toISOString() }, true);
 
   try {
-    const phone = _zapiPhone(_chatPhone);
-    const res = await fetch(
-      `https://api.z-api.io/instances/${cfg.instanceId}/token/${cfg.token}/send-text`,
-      { method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Client-Token': cfg.clientToken || cfg.token },
-        body: JSON.stringify({ phone, message: text }) }
-    );
-    const data = await res.json().catch(() => ({}));
-    const ok = res.ok && (data.zaapId || data.messageId || data.id);
-    if (!ok) {
-      const motivo = data.error || data.message ||
-        (data.value != null ? JSON.stringify(data.value) : '') || ('HTTP ' + res.status);
-      throw new Error(motivo);
-    }
+    const r = await _zapiSendText(cfg, _chatPhone, text);
+    if (!r.ok) throw new Error(r.error);
     // Confirmado: tira o estado "enviando…" e marca a hora real
     if (pendingEl) {
       pendingEl.style.opacity = '1';
@@ -10059,8 +10070,19 @@ async function sendChatMessage() {
       const ts = pendingEl.querySelector('.chat-ts');
       if (ts) { ts.textContent = '⚠ não enviada'; ts.style.color = '#dc2626'; }
     }
-    alert('⚠️ A mensagem NÃO foi enviada.\n\nMotivo informado pelo Z-API:\n' + e.message +
-          '\n\nVerifique:\n• O número está correto e tem WhatsApp?\n• Em Configurações, se o Z-API pedir, preencha o "Token de segurança da conta".');
+    const err = String(e.message || '');
+    let dica;
+    if (/NOT_?FOUND/i.test(err)) {
+      dica = 'Esse número não tem uma conta de WhatsApp — geralmente é um contato de teste/simulado.\n\n' +
+             'Para testar de verdade: mande uma mensagem de OUTRO celular para o WhatsApp do consultório, ' +
+             'espere o contato aparecer aqui no CRM e responda a esse.';
+    } else if (/token/i.test(err)) {
+      dica = 'Parece faltar o "Token de segurança da conta". Pegue no painel do Z-API (menu Segurança) ' +
+             'e cole em Configurações → WhatsApp → Token de segurança da conta.';
+    } else {
+      dica = 'Verifique o número e a conexão do Z-API em Configurações → WhatsApp.';
+    }
+    alert('⚠️ A mensagem NÃO foi enviada.\n\nMotivo do Z-API: ' + err + '\n\n' + dica);
   } finally {
     input.disabled = false;
     input.focus();
