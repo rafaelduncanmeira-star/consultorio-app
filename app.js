@@ -190,6 +190,7 @@ const _BLINDADAS = {
   pacientes:    { tabela: 'clinica_atendimentos', flag: 'consult_atend_migrado' },
   agendamentos: { tabela: 'clinica_agendamentos', flag: 'consult_ag_migrado' },
   crm:          { tabela: 'clinica_crm',          flag: 'consult_crm_migrado' },
+  inscricoes:   { tabela: 'clinica_inscricoes',   flag: 'consult_ins_migrado' },
 };
 
 function _rowBlindada(rec, owner) {
@@ -1041,6 +1042,13 @@ function _crmPorRef(crmId, crmIdx) {
   if (crmId) { const c = crm.find(x => x.id === crmId); if (c) return c; }
   return (crmIdx != null && crm[crmIdx]) ? crm[crmIdx] : null;
 }
+// Profissional "dono" de um paciente (pra etiquetar programas/inscrições):
+// pega o profissional de um atendimento dele; senão o profissional logado; senão null.
+function _profDoPaciente(nome) {
+  const chave = (nome || '').toLowerCase().trim();
+  const p = DB.get('pacientes').find(x => (x.nome || '').toLowerCase().trim() === chave && x.profissionalId);
+  return (p && p.profissionalId) || (typeof currentProfissionalId !== 'undefined' ? currentProfissionalId : null) || null;
+}
 
 // Migração idempotente: garante id em pacientes/crm e converte vínculos
 // por índice (pacIdx/crmIdx) em vínculos por id (pacId/crmId), mantendo os
@@ -1060,7 +1068,10 @@ function _migrarIds() {
     });
     if (ma) DB.set('agendamentos', ags);
     const ins = DB.get('inscricoes'); let mi = false;
-    ins.forEach(i => { if (i.pacId == null && i.pacIdx != null && pacs[i.pacIdx]) { i.pacId = pacs[i.pacIdx].id; mi = true; } });
+    ins.forEach(i => {
+      if (i.pacId == null && i.pacIdx != null && pacs[i.pacIdx]) { i.pacId = pacs[i.pacIdx].id; mi = true; }
+      if (i.profissionalId == null) { const pid = _profDoPaciente(i.pacienteNome); if (pid) { i.profissionalId = pid; mi = true; } }
+    });
     if (mi) DB.set('inscricoes', ins);
   } catch(e) { console.warn('_migrarIds:', e.message); }
 }
@@ -1781,10 +1792,12 @@ function inscreverEmPrograma(programaId, pacienteRef, dataInicio, horaPadrao = '
   const nome     = pacienteRef.nome;
   const whatsapp = pacienteRef.whatsapp || '';
   const pacIdx   = (pacienteRef.pacIdx != null) ? pacienteRef.pacIdx : null;
+  const profId   = _profDoPaciente(nome); // dono do programa (blindagem)
 
   const inscricao = {
     id: 'ins_' + Date.now() + '_' + Math.floor(Math.random()*1000),
     programaId, pacienteNome: nome, pacienteWhatsapp: whatsapp, pacIdx,
+    profissionalId: profId,
     dataInicio, status: 'Ativo',
     registros: [], obs: ''
   };
@@ -1809,6 +1822,7 @@ function inscreverEmPrograma(programaId, pacienteRef, dataInicio, horaPadrao = '
     // Lançamento financeiro
     const pacs = DB.get('pacientes');
     pacs.push({
+      id: _novoId('pac'), profissionalId: profId,
       nome, whatsapp, data: dataInicio,
       procedimento: prog.nome,
       tipoAtividade: 'Consultório',
@@ -1847,7 +1861,7 @@ function inscreverEmPrograma(programaId, pacienteRef, dataInicio, horaPadrao = '
     const agId = (typeof _agId === 'function') ? _agId() : ('ag_' + Date.now() + '_' + idx);
     const ag = {
       id: agId, data: dataPrev, hora: horaPadrao, duracao: m.duracao || 50,
-      pacienteNome: nome, whatsapp,
+      pacienteNome: nome, whatsapp, profissionalId: profId,
       procedimento: m.descricao, status: 'Confirmado',
       tipoAtividade: m.tipoAtividade || 'Consultório',
       obs: `[Programa: ${prog.nome}] marco ${idx+1}${prog.tipo==='Fixo'?'/'+marcos.length:''}`,
@@ -1890,6 +1904,7 @@ function inscreverEmPrograma(programaId, pacienteRef, dataInicio, horaPadrao = '
     inscricao.valorTotal     = valorTotal;
     const pacs = DB.get('pacientes');
     pacs.push({
+      id: _novoId('pac'), profissionalId: profId,
       nome, whatsapp, data: dataInicio,
       procedimento: prog.nome,
       tipoAtividade: 'Consultório',
@@ -2015,6 +2030,7 @@ function saveRenovacao(e) {
   // Novo lançamento financeiro
   const pacs = DB.get('pacientes');
   pacs.push({
+    id: _novoId('pac'), profissionalId: ins.profissionalId || null,
     nome: ins.pacienteNome, whatsapp: ins.pacienteWhatsapp || '',
     data: new Date().toISOString().substring(0, 10),
     procedimento: prog.nome + ' (Renovação)',
@@ -2069,7 +2085,7 @@ function registrarMarco(inscricaoId, marcoIdx, valoresClinicos = {}, obs = '') {
     const agId = (typeof _agId === 'function') ? _agId() : ('ag_' + Date.now() + '_' + novoIdx);
     ags.push({
       id: agId, data: dataNova, hora: '08:00', duracao: 50,
-      pacienteNome: ins.pacienteNome, whatsapp: ins.pacienteWhatsapp || '',
+      pacienteNome: ins.pacienteNome, whatsapp: ins.pacienteWhatsapp || '', profissionalId: ins.profissionalId || null,
       procedimento: prog.nome, status: 'Confirmado',
       tipoAtividade: 'Consultório',
       obs: `[Programa: ${prog.nome}] marco ${novoIdx+1}`,
@@ -8828,13 +8844,13 @@ function executeAIAction(action) {
   if (!tipo || !dados) return;
 
   if (tipo === 'criar_paciente') {
-    const arr = DB.get('pacientes'); arr.unshift(dados); DB.set('pacientes', arr);
+    const arr = DB.get('pacientes'); arr.unshift({ ...dados, id: _novoId('pac'), profissionalId: currentProfissionalId || null }); DB.set('pacientes', arr);
     appendChatMsg('system-ok', `✅ Atendimento de ${dados.nome} registrado — ${BRL(dados.valor)}`);
     if (document.getElementById('page-pacientes').classList.contains('active')) renderPacientes();
     renderDashboard();
 
   } else if (tipo === 'criar_crm') {
-    const arr = DB.get('crm'); arr.unshift(dados); DB.set('crm', arr);
+    const arr = DB.get('crm'); arr.unshift({ ...dados, id: _novoId('crm'), profissionalId: currentProfissionalId || null }); DB.set('crm', arr);
     appendChatMsg('system-ok', `✅ ${dados.nome} adicionado ao CRM`);
     if (document.getElementById('page-crm').classList.contains('active')) renderCrm();
 
@@ -8870,6 +8886,7 @@ function executeAIAction(action) {
       pacienteNome: (dados.pacienteNome || dados.nome || '').trim(),
       whatsapp: dados.whatsapp || '',
       procedimento: dados.procedimento || '',
+      profissionalId: currentProfissionalId || null,
       status: dados.status || 'Confirmado',
       obs: dados.obs || '',
       crmIdx: null, pacIdx: null,

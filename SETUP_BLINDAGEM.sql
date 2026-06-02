@@ -132,5 +132,44 @@ begin
   end if;
 end $$;
 
+-- ============================================================
+-- Fase 2.4 — Inscrições (programas) por linha (mesma estrutura + RLS)
+-- ============================================================
+create table if not exists clinica_inscricoes (
+  id              text primary key,
+  owner_id        uuid not null references auth.users(id) on delete cascade,
+  profissional_id text,
+  data            jsonb not null,
+  updated_at      timestamptz default now()
+);
+create index if not exists idx_clin_ins_owner on clinica_inscricoes(owner_id);
+create index if not exists idx_clin_ins_prof  on clinica_inscricoes(owner_id, profissional_id);
+
+alter table clinica_inscricoes enable row level security;
+drop policy if exists "acesso inscricoes clinica" on clinica_inscricoes;
+create policy "acesso inscricoes clinica" on clinica_inscricoes
+  for all to authenticated
+  using (
+    auth.uid() = owner_id
+    OR exists (select 1 from team_members tm
+      where tm.member_id = auth.uid() and tm.owner_id = clinica_inscricoes.owner_id
+        and (tm.role <> 'profissional' OR tm.profissional_id = clinica_inscricoes.profissional_id))
+  )
+  with check (
+    auth.uid() = owner_id
+    OR exists (select 1 from team_members tm
+      where tm.member_id = auth.uid() and tm.owner_id = clinica_inscricoes.owner_id
+        and (tm.role <> 'profissional' OR tm.profissional_id = clinica_inscricoes.profissional_id))
+  );
+
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'clinica_inscricoes') then
+    alter publication supabase_realtime add table clinica_inscricoes;
+  end if;
+end $$;
+
 -- Pronto. Rode o arquivo inteiro (é idempotente). O app passa a usar as tabelas
--- conforme as coleções entram no _BLINDADAS.
+-- conforme as coleções entram no _BLINDADAS. Blindagem completa: atendimentos,
+-- agendamentos, crm e inscrições — todas isoladas por profissional via RLS.
