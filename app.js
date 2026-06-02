@@ -189,6 +189,7 @@ async function cloudPull() {
 const _BLINDADAS = {
   pacientes:    { tabela: 'clinica_atendimentos', flag: 'consult_atend_migrado' },
   agendamentos: { tabela: 'clinica_agendamentos', flag: 'consult_ag_migrado' },
+  crm:          { tabela: 'clinica_crm',          flag: 'consult_crm_migrado' },
 };
 
 function _rowBlindada(rec, owner) {

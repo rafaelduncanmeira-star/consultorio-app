@@ -94,5 +94,43 @@ begin
   end if;
 end $$;
 
+-- ============================================================
+-- Fase 2.3 — CRM (contatos) por linha (mesma estrutura + RLS)
+-- ============================================================
+create table if not exists clinica_crm (
+  id              text primary key,
+  owner_id        uuid not null references auth.users(id) on delete cascade,
+  profissional_id text,
+  data            jsonb not null,
+  updated_at      timestamptz default now()
+);
+create index if not exists idx_clin_crm_owner on clinica_crm(owner_id);
+create index if not exists idx_clin_crm_prof  on clinica_crm(owner_id, profissional_id);
+
+alter table clinica_crm enable row level security;
+drop policy if exists "acesso crm clinica" on clinica_crm;
+create policy "acesso crm clinica" on clinica_crm
+  for all to authenticated
+  using (
+    auth.uid() = owner_id
+    OR exists (select 1 from team_members tm
+      where tm.member_id = auth.uid() and tm.owner_id = clinica_crm.owner_id
+        and (tm.role <> 'profissional' OR tm.profissional_id = clinica_crm.profissional_id))
+  )
+  with check (
+    auth.uid() = owner_id
+    OR exists (select 1 from team_members tm
+      where tm.member_id = auth.uid() and tm.owner_id = clinica_crm.owner_id
+        and (tm.role <> 'profissional' OR tm.profissional_id = clinica_crm.profissional_id))
+  );
+
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'clinica_crm') then
+    alter publication supabase_realtime add table clinica_crm;
+  end if;
+end $$;
+
 -- Pronto. Rode o arquivo inteiro (é idempotente). O app passa a usar as tabelas
 -- conforme as coleções entram no _BLINDADAS.
