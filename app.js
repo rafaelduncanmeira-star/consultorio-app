@@ -1088,6 +1088,7 @@ function openModal(id) {
   }
   if (id === 'modal-paciente') {
     popularProcedimentoSelect();
+    _popularProfissionalSelect(currentProfissionalId || _agFiltroProf || null, 'pac-profissional');
     // Reseta valor e atualiza hint
     const vEl = document.getElementById('pac-valor');
     if (vEl && !editState.idx && editState.crmIdx === null) vEl.value = '';
@@ -2872,6 +2873,7 @@ function editRow(col, idx) {
     form.tipo.value = r.tipo || '';
     form.nome.value = r.nome || '';
     if (form.whatsapp) form.whatsapp.value = r.whatsapp || '';
+    _popularProfissionalSelect(r.profissionalId, 'pac-profissional');
     form.valor.value = r.valor || '';
     form.pagamento.value = r.pagamento || '';
     form.statusPgto.value = r.statusPgto || '';
@@ -3501,6 +3503,7 @@ function convertCrmToAtendido(crmIdx) {
   form.data.value = today;
   form.nome.value = c.nome || '';
   if (form.whatsapp) form.whatsapp.value = c.whatsapp || '';
+  _popularProfissionalSelect(currentProfissionalId || null, 'pac-profissional');
   // Tenta usar o tipo do CRM se ele existir no catálogo; se não, deixa o primeiro
   const procs = getProcedimentos();
   form.tipo.value = procs.some(p => p.nome === c.tipo) ? c.tipo : (procs[0]?.nome || '');
@@ -3792,6 +3795,7 @@ function savePaciente(e) {
     data: dataConsulta,
     nome: fd.get('nome'),
     whatsapp: (fd.get('whatsapp') || '').trim(),
+    profissionalId: fd.get('profissionalId') || null,
     tipo: fd.get('tipo'),
     valor: valorTotal,
     pagamento,
@@ -4258,9 +4262,9 @@ function _inferirDuracao(nomeProc) {
   return null;
 }
 
-// Popula o <select> de profissional do modal de agendamento
-function _popularProfissionalSelect(selectedId) {
-  const sel = document.getElementById('ag-profissional');
+// Popula um <select> de profissional (default: o do modal de agendamento)
+function _popularProfissionalSelect(selectedId, elId) {
+  const sel = document.getElementById(elId || 'ag-profissional');
   if (!sel) return;
   const profs = getProfissionaisAtivos();
   sel.innerHTML = profs.length
@@ -4501,6 +4505,7 @@ function _registrarAtendimentoDeAgendamento(a) {
   form.data.value = a.data;
   form.nome.value = a.pacienteNome;
   if (form.whatsapp) form.whatsapp.value = a.whatsapp || '';
+  _popularProfissionalSelect(a.profissionalId || currentProfissionalId || null, 'pac-profissional');
   form.tipo.value = procs.some(p => p.nome === a.procedimento) ? a.procedimento : (procs[0]?.nome || '');
   form.valor.value = '';
   form.pagamento.value = 'PIX';
@@ -7469,6 +7474,22 @@ function renderRelatorio(mes) {
   });
   const procStats = Object.entries(procMap).map(([nome, v]) => ({ nome, ...v, ticket: v.qtd ? v.total / v.qtd : 0, pct: fat ? (v.total / fat) * 100 : 0 })).sort((a, b) => b.total - a.total);
 
+  // ===== Receita por profissional (Tijolo 3) =====
+  const _profsList = getProfissionais();
+  const profMap = {};
+  pacs.forEach(p => {
+    const k = p.profissionalId || '__sem__';
+    if (!profMap[k]) profMap[k] = { qtd: 0, total: 0 };
+    profMap[k].qtd++;
+    profMap[k].total += (p.valor || 0);
+  });
+  const profStats = Object.entries(profMap).map(([id, v]) => {
+    const prof = id === '__sem__' ? null : _profsList.find(x => x.id === id);
+    return { nome: prof ? prof.nome : 'Sem profissional', cor: prof ? prof.cor : '#94a3b8',
+             qtd: v.qtd, total: v.total, ticket: v.qtd ? v.total / v.qtd : 0, pct: fat ? (v.total / fat) * 100 : 0 };
+  }).sort((a, b) => b.total - a.total);
+  const mostrarProfSection = _profsList.length > 1 || pacs.some(p => p.profissionalId);
+
   // ===== Mix de pagamento + taxa estimada =====
   const formas = ['PIX', 'Cartão crédito', 'Cartão débito', 'Dinheiro', 'A receber'];
   const formasStats = formas.map(f => {
@@ -7640,6 +7661,32 @@ function renderRelatorio(mes) {
         </tbody>
       </table>` : '<p class="text-gray-400 text-sm">Nenhum atendimento neste mês.</p>'}
     </div>
+
+    ${mostrarProfSection ? `
+    <div class="chart-card">
+      <h3 class="font-bold text-gray-800 mb-4 text-base">👥 Receita por profissional</h3>
+      <table class="w-full text-sm">
+        <thead><tr class="border-b"><th class="text-left py-2 text-gray-600">Profissional</th><th class="text-right py-2 text-gray-600">Atend.</th><th class="text-right py-2 text-gray-600">Receita</th><th class="text-right py-2 text-gray-600">% do mês</th><th class="text-right py-2 text-gray-600">Ticket</th></tr></thead>
+        <tbody>
+          ${profStats.map(s => `
+            <tr class="border-b border-gray-50">
+              <td class="py-2 text-gray-700"><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${s.cor};margin-right:7px;vertical-align:middle;"></span>${_esc(s.nome)}</td>
+              <td class="py-2 text-right">${s.qtd}</td>
+              <td class="py-2 text-right font-semibold">${BRL(s.total)}</td>
+              <td class="py-2 text-right text-gray-600">${PCT(s.pct)}</td>
+              <td class="py-2 text-right text-gray-600">${BRL(s.ticket)}</td>
+            </tr>`).join('')}
+          <tr style="background:#f8fafc;border-top:2px solid #e2e8f0;">
+            <td class="py-2 font-bold text-gray-800">Total</td>
+            <td class="py-2 text-right font-bold">${pacs.length}</td>
+            <td class="py-2 text-right font-bold">${BRL(fat)}</td>
+            <td class="py-2 text-right">100%</td>
+            <td class="py-2 text-right font-bold">${BRL(ticket)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="margin-top:10px;font-size:11.5px;color:#94a3b8;">💡 No próximo passo (3B) entra o <strong>repasse</strong> de cada profissional e quanto a clínica fica.</div>
+    </div>` : ''}
 
     <div class="chart-card">
       <h3 class="font-bold text-gray-800 mb-4 text-base">4. Mix de pagamento e taxas</h3>

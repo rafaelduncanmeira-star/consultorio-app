@@ -2248,7 +2248,10 @@
           <span id="pac-parcelas-preview" style="font-size:12px;color:#3b82f6;font-weight:600;"></span>
         </div>
       </div>
-      <div style="margin-bottom:14px;"><label>Status Pagamento</label><select class="select" name="statusPgto"><option>Pago</option><option>Pendente</option><option>Isento</option></select></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+        <div><label>Profissional</label><select class="select" name="profissionalId" id="pac-profissional"></select></div>
+        <div><label>Status Pagamento</label><select class="select" name="statusPgto"><option>Pago</option><option>Pendente</option><option>Isento</option></select></div>
+      </div>
       <div style="margin-bottom:20px;"><label>Observações</label><textarea class="input" name="obs" rows="2"></textarea></div>
       <div style="display:flex;gap:10px;">
         <button type="submit" class="btn-primary" style="flex:1;justify-content:center;">Salvar Consulta</button>
