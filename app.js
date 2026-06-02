@@ -4026,9 +4026,9 @@ function _openWhatsAppForFu(idx) {
   const ins = DB.get('inscricoes').find(i => i.id === fu.programaInscricaoId);
   const wa = (fu.whatsapp || pac?.whatsapp || crm?.whatsapp || ins?.pacienteWhatsapp || '').replace(/\D/g, '');
   if (!wa) { alert('WhatsApp não cadastrado para ' + fu.nome + '.\n\nClique no ✏️ pra editar este follow-up e adicionar o número.'); return; }
-  const fone55 = wa.startsWith('55') ? wa : '55' + wa;
-  const msg = encodeURIComponent(`Olá ${fu.nome.split(' ')[0]}! ${fu.obs}`);
-  window.open(`https://wa.me/${fone55}?text=${msg}`, '_blank');
+  const msg = `Olá ${(fu.nome || '').split(' ')[0]}! ${fu.obs || ''}`.trim();
+  // Roteia pelo CRM (se automação ligada) ou WhatsApp externo (se desligada)
+  falarComPaciente(fu.nome, wa, msg);
 }
 
 // ====================== AGENDA ======================
@@ -8712,11 +8712,12 @@ function abrirPerfilPaciente(nomeEnc) {
   const whatsEl = document.getElementById('perfil-whats');
   if (whatsEl) {
     if (whats) {
-      const wa = whats.replace(/\D/g, '');
-      const fone = wa.startsWith('55') ? wa : '55' + wa;
+      const cfgW = getZapiConfig();
+      const zapiOk = cfgW.enabled && cfgW.instanceId && cfgW.token;
       whatsEl.innerHTML =
-        `<a href="https://wa.me/${fone}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;background:#dcfce7;color:#16a34a;border:none;border-radius:7px;padding:5px 12px;font-size:12.5px;font-weight:600;text-decoration:none;">💬 ${_esc(whats)}</a>` +
-        `<button onclick="_editarWhatsPerfil('${encodeURIComponent(nome)}')" style="background:none;border:none;color:#94a3b8;font-size:11.5px;cursor:pointer;margin-left:8px;">editar</button>`;
+        `<button onclick="falarComPacienteNome('${encodeURIComponent(nome)}')" style="display:inline-flex;align-items:center;gap:6px;background:#dcfce7;color:#16a34a;border:none;border-radius:7px;padding:5px 12px;font-size:12.5px;font-weight:600;cursor:pointer;">💬 ${_esc(whats)}</button>` +
+        `<button onclick="_editarWhatsPerfil('${encodeURIComponent(nome)}')" style="background:none;border:none;color:#94a3b8;font-size:11.5px;cursor:pointer;margin-left:8px;">editar</button>` +
+        `<div style="font-size:10.5px;color:#94a3b8;margin-top:3px;">${zapiOk ? '↪ responde pelo CRM' : '↪ abre o WhatsApp'}</div>`;
     } else {
       whatsEl.innerHTML =
         `<button onclick="_editarWhatsPerfil('${encodeURIComponent(nome)}')" style="background:#f0fdf4;border:1px dashed #86efac;color:#16a34a;border-radius:7px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;">➕ Adicionar WhatsApp</button>`;
@@ -10033,16 +10034,28 @@ let _chatIdx   = null;
 let _chatSub   = null;
 
 function openCrmChat(idx) {
-  const data = DB.get('crm');
-  const r    = data[idx];
+  const r = DB.get('crm')[idx];
   if (!r) return;
-  _chatPhone = (r.whatsapp || '').replace(/\D/g, '');
-  _chatIdx   = idx;
+  abrirChatPorTelefone(r.nome, r.whatsapp, idx);
+}
+
+// Abre o chat interno (CRM) por telefone — funciona pra contatos do CRM E
+// pra pacientes/follow-ups que não estão no funil.
+function abrirChatPorTelefone(nome, whatsapp, crmIdx) {
+  const wa = String(whatsapp || '').replace(/\D/g, '');
+  if (!wa) { alert('WhatsApp não cadastrado.'); return; }
+  // Se não veio um índice de CRM, tenta achar um contato com esse número
+  if (crmIdx === undefined || crmIdx === null) {
+    const i = DB.get('crm').findIndex(c => (c.whatsapp || '').replace(/\D/g, '') === wa);
+    crmIdx = i >= 0 ? i : null;
+  }
+  _chatPhone = wa;
+  _chatIdx   = crmIdx;
 
   const nameEl  = document.getElementById('chat-contact-name');
   const phoneEl = document.getElementById('chat-contact-phone');
-  if (nameEl)  nameEl.textContent  = r.nome || '—';
-  if (phoneEl) phoneEl.textContent = r.whatsapp || '—';
+  if (nameEl)  nameEl.textContent  = nome || '—';
+  if (phoneEl) phoneEl.textContent = whatsapp || wa;
 
   const cfg        = getZapiConfig();
   const zapiOk     = cfg.enabled && cfg.instanceId && cfg.token;
@@ -10061,6 +10074,35 @@ function openCrmChat(idx) {
 
   loadChatHistory(_chatPhone);
   _subscribeChatRealtime(_chatPhone);
+}
+
+// Roteia o contato pelo MELHOR canal:
+//  • Z-API (CRM) ligado  → abre o chat interno (responde pelo sistema, registra a conversa)
+//  • Z-API desligado     → cai pro WhatsApp externo (wa.me)
+function falarComPaciente(nome, whatsapp, mensagem) {
+  const wa = String(whatsapp || '').replace(/\D/g, '');
+  if (!wa) { alert('WhatsApp não cadastrado para ' + (nome || 'este paciente') + '.'); return; }
+  const cfg = getZapiConfig();
+  const zapiOk = cfg.enabled && cfg.instanceId && cfg.token;
+  if (zapiOk) {
+    abrirChatPorTelefone(nome, whatsapp);
+    if (mensagem) { const inp = document.getElementById('chat-input-text'); if (inp) { inp.value = mensagem; inp.focus(); } }
+  } else {
+    const fone = wa.startsWith('55') ? wa : '55' + wa;
+    const txt  = mensagem ? '?text=' + encodeURIComponent(mensagem) : '';
+    window.open(`https://wa.me/${fone}${txt}`, '_blank');
+  }
+}
+
+// Versão que descobre o WhatsApp do paciente pelo nome (usada no perfil)
+function falarComPacienteNome(nomeEnc) {
+  const nome  = decodeURIComponent(nomeEnc);
+  const chave = nome.toLowerCase().trim();
+  const wa = (DB.get('pacientes').find(p => (p.nome||'').toLowerCase().trim()===chave && p.whatsapp)?.whatsapp)
+          || (DB.get('crm').find(c => (c.nome||'').toLowerCase().trim()===chave && c.whatsapp)?.whatsapp)
+          || (getAgendamentos().find(a => (a.pacienteNome||'').toLowerCase().trim()===chave && a.whatsapp)?.whatsapp)
+          || (DB.get('followup').find(f => (f.nome||'').toLowerCase().trim()===chave && f.whatsapp)?.whatsapp) || '';
+  falarComPaciente(nome, wa);
 }
 
 function closeCrmChat() {
