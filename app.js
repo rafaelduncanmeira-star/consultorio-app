@@ -1312,6 +1312,66 @@ function excluirProfissional(id) {
   renderProfissionais();
 }
 
+// ====================== ONBOARDING DA CLÍNICA (Tijolo 5) ======================
+// Checklist guiado pra uma clínica nova começar sem se perder.
+function _irParaConfig(elId) {
+  const el = document.getElementById(elId);
+  if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); try { el.focus(); } catch(e) {} }
+}
+function _dismissOnboarding() {
+  localStorage.setItem('consult_onboard_dismiss', '1');
+  renderOnboardingClinica();
+}
+function _onboardingPassos() {
+  const clinica = getClinicaConfig();
+  const profs   = getProfissionaisAtivos();
+  return [
+    { ok: !!((clinica.nomeClinica || '').trim() || (clinica.nome || '').trim()),
+      label: 'Dê um nome à clínica', dica: 'Aparece nos relatórios e no topo.',
+      acao: "_irParaConfig('clinica-nome-clinica')", btn: 'Configurar' },
+    { ok: profs.length >= 2,
+      label: 'Cadastre seus profissionais', dica: `${profs.length} cadastrado(s) — clínica precisa de 2+.`,
+      acao: 'novoProfissional()', btn: '+ Profissional' },
+    { ok: profs.length > 0 && profs.every(p => p.repasse && p.repasse.valor != null),
+      label: 'Defina o repasse de cada profissional', dica: 'Quanto cada um leva / a clínica fica.',
+      acao: "_irParaConfig('config-profissionais-lista')", btn: 'Revisar' },
+    { ok: localStorage.getItem('consult_onboard_convidou') === '1',
+      label: 'Convide sua equipe', dica: 'Secretária e profissionais com login próprio.',
+      acao: 'openModalConvite()', btn: 'Convidar' },
+    { ok: getZapiConfig().enabled, opcional: true,
+      label: 'Conecte o WhatsApp', dica: 'Opcional — contatos caem sozinhos no CRM.',
+      acao: "_irParaConfig('zapi-enabled-toggle')", btn: 'Conectar' },
+  ];
+}
+function renderOnboardingClinica() {
+  const el = document.getElementById('onboarding-clinica');
+  if (!el) return;
+  if (localStorage.getItem('consult_onboard_dismiss') === '1') { el.innerHTML = ''; return; }
+  const passos = _onboardingPassos();
+  const obrig  = passos.filter(p => !p.opcional);
+  const feitos = obrig.filter(p => p.ok).length;
+  if (feitos === obrig.length) { el.innerHTML = ''; return; } // tudo pronto → some
+  const pct = Math.round((feitos / obrig.length) * 100);
+  el.innerHTML = `
+  <div class="chart-card" style="margin-bottom:20px;border:1px solid #bfdbfe;background:linear-gradient(180deg,#f0f7ff,#ffffff);">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;">
+      <div style="font-size:15px;font-weight:700;color:#0f172a;">🚀 Primeiros passos da clínica</div>
+      <button onclick="_dismissOnboarding()" style="background:none;border:none;color:#94a3b8;font-size:11.5px;cursor:pointer;">dispensar</button>
+    </div>
+    <div style="font-size:12.5px;color:#64748b;margin-bottom:8px;">${feitos} de ${obrig.length} concluídos</div>
+    <div style="height:6px;background:#e2e8f0;border-radius:999px;overflow:hidden;margin-bottom:14px;"><div style="height:100%;width:${pct}%;background:#3b82f6;transition:width .3s;"></div></div>
+    ${passos.map(p => `
+      <div style="display:flex;align-items:center;gap:11px;padding:8px 0;border-bottom:1px solid #eef2f7;">
+        <span style="font-size:16px;flex-shrink:0;">${p.ok ? '✅' : '⬜'}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:600;color:${p.ok ? '#94a3b8' : '#0f172a'};${p.ok ? 'text-decoration:line-through;' : ''}">${p.label}${p.opcional ? ' <span style="font-weight:400;color:#94a3b8;">(opcional)</span>' : ''}</div>
+          <div style="font-size:11px;color:#94a3b8;">${_esc(p.dica)}</div>
+        </div>
+        ${p.ok ? '' : `<button onclick="${p.acao}" class="btn-ghost" style="font-size:11.5px;padding:5px 11px;white-space:nowrap;">${p.btn}</button>`}
+      </div>`).join('')}
+  </div>`;
+}
+
 // ====================== PROGRAMAS DE ACOMPANHAMENTO ======================
 //
 // Modelo:
@@ -9963,7 +10023,8 @@ function _mesAtualLabel() {
 }
 
 function renderConfiguracoes() {
-  // Profissionais da clínica
+  // Onboarding guiado + profissionais da clínica
+  renderOnboardingClinica();
   renderProfissionais();
   // Clinica config
   const clinica = getClinicaConfig();
@@ -10164,6 +10225,7 @@ async function gerarConvite() {
   }
   const result = await criarConvite(email, role, profissionalId);
   if (result.error) { alert('Erro: ' + result.error + '\n\n(Se falar de "profissional_id", rode o SQL SETUP_EQUIPE_PROFISSIONAL.sql no Supabase primeiro.)'); return; }
+  localStorage.setItem('consult_onboard_convidou', '1'); // marca passo do onboarding
   // Mostra o link gerado
   document.getElementById('convite-form-wrap').style.display = 'none';
   document.getElementById('convite-link-wrap').style.display = '';
