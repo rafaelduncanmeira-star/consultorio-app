@@ -10352,6 +10352,11 @@ function renderConfiguracoes() {
   const llmCfg = getLlmConfig();
   const iaProv = document.getElementById('ia-llm-provider'); if (iaProv) iaProv.value = llmCfg.provider || 'groq';
   const iaCK   = document.getElementById('ia-claude-key');   if (iaCK) iaCK.value = llmCfg.claudeKey || '';
+  const iaORK  = document.getElementById('ia-openrouter-key');   if (iaORK) iaORK.value = llmCfg.openrouterKey || '';
+  const iaORM  = document.getElementById('ia-openrouter-model'); if (iaORM) iaORM.value = llmCfg.openrouterModel || '';
+  const iaCU   = document.getElementById('ia-custom-url');   if (iaCU) iaCU.value = llmCfg.customUrl || '';
+  const iaCK2  = document.getElementById('ia-custom-key');   if (iaCK2) iaCK2.value = llmCfg.customKey || '';
+  const iaCM   = document.getElementById('ia-custom-model'); if (iaCM) iaCM.value = llmCfg.customModel || '';
   _iaProviderChange(llmCfg.provider || 'groq');
   _applyIaUI(!!iaCfg.enabled);
 
@@ -10835,8 +10840,10 @@ function _applyIaUI(enabled) {
 }
 
 function _iaProviderChange(provider) {
-  const wrap = document.getElementById('ia-claude-key-wrap');
-  if (wrap) wrap.style.display = provider === 'claude' ? '' : 'none';
+  const mostrar = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+  mostrar('ia-claude-key-wrap', provider === 'claude');
+  mostrar('ia-openrouter-wrap', provider === 'openrouter');
+  mostrar('ia-custom-wrap',     provider === 'custom');
 }
 
 function saveIaConfig() {
@@ -10848,10 +10855,15 @@ function saveIaConfig() {
   cfg.agendar     = !!document.getElementById('ia-agendar')?.checked;
   cfg.agendarModo = document.getElementById('ia-agendar-modo')?.value || 'pendente';
   DB.setObj('ia_config', cfg);
-  // Motor de IA (Groq/Claude)
+  // Motor de IA (Groq / Claude / OpenRouter / personalizado)
   const llm = getLlmConfig();
-  llm.provider  = document.getElementById('ia-llm-provider')?.value || 'groq';
-  llm.claudeKey = (document.getElementById('ia-claude-key')?.value || '').trim();
+  llm.provider        = document.getElementById('ia-llm-provider')?.value || 'groq';
+  llm.claudeKey       = (document.getElementById('ia-claude-key')?.value || '').trim();
+  llm.openrouterKey   = (document.getElementById('ia-openrouter-key')?.value || '').trim();
+  llm.openrouterModel = (document.getElementById('ia-openrouter-model')?.value || '').trim() || 'anthropic/claude-3.5-haiku';
+  llm.customUrl       = (document.getElementById('ia-custom-url')?.value || '').trim();
+  llm.customKey       = (document.getElementById('ia-custom-key')?.value || '').trim();
+  llm.customModel     = (document.getElementById('ia-custom-model')?.value || '').trim();
   DB.setObj('llm_config', llm);
   const statusEl = document.getElementById('ia-status');
   if (statusEl) { statusEl.textContent = '✅ Salvo!'; statusEl.style.color = '#10b981'; setTimeout(() => { statusEl.textContent = ''; }, 4000); }
@@ -11142,14 +11154,21 @@ function getIaConfig() {
   return DB.getObj('ia_config', { enabled: false, tom: '', instrucoes: '', autoSugerir: true, autonomo: false, agendar: false, agendarModo: 'pendente' });
 }
 
-// ── Camada de LLM plugável (Groq ↔ Claude) — escolha quando quiser ──
-// Default 'groq' (gratuito, já configurado). 'claude' usa a API da Anthropic.
+// ── Camada de LLM plugável — use QUALQUER provedor ──
+// 'groq' (grátis, já configurado) · 'claude' (Anthropic) · 'openrouter'
+// (vários modelos numa chave só) · 'custom' (qualquer endpoint compatível
+// com OpenAI: você cola URL + chave + modelo). Default 'groq'.
 function getLlmConfig() {
   return DB.getObj('llm_config', {
     provider: 'groq',
     groqModel: 'llama-3.3-70b-versatile',
     claudeKey: '',
     claudeModel: 'claude-haiku-4-5-20251001',
+    openrouterKey: '',
+    openrouterModel: 'anthropic/claude-3.5-haiku',
+    customUrl: '',
+    customKey: '',
+    customModel: '',
   });
 }
 
@@ -11181,14 +11200,31 @@ async function _llmChat({ system, messages, temperature = 0.4, maxTokens = 400 }
       const texto = (json.content?.[0]?.text || '').trim();
       return texto ? { ok: true, texto } : { error: 'resposta vazia' };
     }
-    // Groq (default, formato OpenAI: system entra como 1ª mensagem)
-    const key = getGeminiKey();
+    // Provedores compatíveis com OpenAI: Groq, OpenRouter ou personalizado.
+    // (system entra como 1ª mensagem; só muda URL/chave/modelo/headers.)
+    let url, key, model, extraHeaders = {};
+    if (cfg.provider === 'openrouter') {
+      url = 'https://openrouter.ai/api/v1/chat/completions';
+      key = cfg.openrouterKey;
+      model = cfg.openrouterModel || 'anthropic/claude-3.5-haiku';
+      extraHeaders = { 'X-Title': 'Maestria de Consultorio' };
+    } else if (cfg.provider === 'custom') {
+      url = cfg.customUrl;
+      key = cfg.customKey;
+      model = cfg.customModel;
+      if (!url)   return { error: 'configure a URL do provedor' };
+      if (!model) return { error: 'configure o modelo' };
+    } else { // groq (default)
+      url = 'https://api.groq.com/openai/v1/chat/completions';
+      key = getGeminiKey();
+      model = cfg.groqModel || 'llama-3.3-70b-versatile';
+    }
     if (!key) return { error: 'no-key' };
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}`, ...extraHeaders },
       body: JSON.stringify({
-        model: cfg.groqModel || 'llama-3.3-70b-versatile',
+        model,
         messages: [{ role: 'system', content: system }, ...messages],
         temperature,
         max_tokens: maxTokens,
@@ -11292,8 +11328,7 @@ async function iaSugerirNoChat(auto) {
   if (btn) { btn.disabled = false; btn.textContent = '✨ Sugerir'; }
   if (r.error) {
     if (!auto) {
-      if (r.error === 'no-key') toast('Configure a chave do Groq em Configurações primeiro');
-      else if (r.error === 'no-key-claude') toast('Configure a chave do Claude em Configurações primeiro');
+      if (r.error === 'no-key' || r.error === 'no-key-claude') toast('Configure a chave do motor de IA em Configurações primeiro');
       else toast('IA: ' + r.error);
     }
     return;

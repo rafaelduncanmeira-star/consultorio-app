@@ -335,13 +335,31 @@ async function chamarLLMServer(llm: any, groqKey: string, system: string, messag
       const texto = (j.content?.[0]?.text || '').trim();
       return texto ? { ok: true, texto } : { error: 'resposta vazia' };
     }
-    if (!groqKey) return { error: 'sem chave Groq' };
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    // Provedores compatíveis com OpenAI: Groq, OpenRouter ou personalizado.
+    let url: string, key: string, model: string;
+    const extraHeaders: any = {};
+    if (llm && llm.provider === 'openrouter') {
+      url = 'https://openrouter.ai/api/v1/chat/completions';
+      key = llm.openrouterKey || '';
+      model = llm.openrouterModel || 'anthropic/claude-3.5-haiku';
+      extraHeaders['X-Title'] = 'Maestria de Consultorio';
+    } else if (llm && llm.provider === 'custom') {
+      url = llm.customUrl || '';
+      key = llm.customKey || '';
+      model = llm.customModel || '';
+      if (!url || !model) return { error: 'provedor personalizado incompleto' };
+    } else { // groq
+      url = 'https://api.groq.com/openai/v1/chat/completions';
+      key = groqKey;
+      model = (llm && llm.groqModel) || 'llama-3.3-70b-versatile';
+    }
+    if (!key) return { error: 'sem chave do motor de IA' };
+    const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + groqKey },
-      body: JSON.stringify({ model: (llm && llm.groqModel) || 'llama-3.3-70b-versatile', messages: [{ role: 'system', content: system }, ...messages], temperature: 0.4, max_tokens: 400 }),
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key, ...extraHeaders },
+      body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, ...messages], temperature: 0.4, max_tokens: 400 }),
     });
-    if (!res.ok) return { error: 'Groq ' + res.status + ': ' + (await res.text()).substring(0, 120) };
+    if (!res.ok) return { error: 'LLM ' + res.status + ': ' + (await res.text()).substring(0, 120) };
     const j = await res.json();
     const texto = (j.choices?.[0]?.message?.content || '').trim();
     return texto ? { ok: true, texto } : { error: 'resposta vazia' };

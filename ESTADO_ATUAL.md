@@ -143,9 +143,12 @@ use lendo/escrevendo a agenda); (3) trocar Groq→Claude se quiser mais qualidad
 Construído pronto-para-ligar, **desligado por padrão** (o usuário quer ter a opção,
 não usar ainda):
 
-1. **Motor de IA plugável (Groq ↔ Claude):** `getLlmConfig()` + `_llmChat({system,messages})`
-   no app.js (dispatcher). Copiloto já usa. UI no card da IA (seletor + chave do Claude).
-   Config em `llm_config` (sincronizada). Default Groq (grátis).
+1. **Motor de IA plugável (qualquer provedor):** `getLlmConfig()` + `_llmChat({system,messages})`
+   no app.js (dispatcher). Suporta **Groq** (grátis), **Claude** (Anthropic), **OpenRouter**
+   (vários modelos numa chave) e **Personalizado** (qualquer endpoint compatível com OpenAI:
+   URL+chave+modelo). Claude usa formato Anthropic; os demais, formato OpenAI Chat Completions.
+   Copiloto já usa; webhook (`chamarLLMServer`) espelha os 4. UI no card da IA. Config em
+   `llm_config` (sincronizada). Default Groq.
 2. **Modo autônomo (webhook):** `maybeAutoReply()` agora implementa de verdade — lê
    `ia_config`/conhecimento/`llm_config`/provedor de `app_data` por owner, monta prompt
    (`montarSystemPromptServer`), chama LLM (`chamarLLMServer`), envia
