@@ -10031,7 +10031,7 @@ const BACKUP_KEYS = [
   // Personalização do consultório
   'clinica_config',
   // Integrações
-  'zapi_config','wa_cloud_config','wa_provider','lembretes_config','ia_config',
+  'zapi_config','wa_cloud_config','wa_provider','lembretes_config','ia_config','llm_config',
   // Gamificação
   'maestria',
   // Auditoria
@@ -10345,6 +10345,14 @@ function renderConfiguracoes() {
   const iaTom = document.getElementById('ia-tom');           if (iaTom) iaTom.value = iaCfg.tom || '';
   const iaIns = document.getElementById('ia-instrucoes');    if (iaIns) iaIns.value = iaCfg.instrucoes || '';
   const iaAuto= document.getElementById('ia-auto-sugerir');  if (iaAuto) iaAuto.checked = iaCfg.autoSugerir !== false;
+  const iaAut = document.getElementById('ia-autonomo');      if (iaAut) iaAut.checked = !!iaCfg.autonomo;
+  const iaAg  = document.getElementById('ia-agendar');       if (iaAg)  iaAg.checked = !!iaCfg.agendar;
+  const iaAgM = document.getElementById('ia-agendar-modo');  if (iaAgM) iaAgM.value = iaCfg.agendarModo || 'pendente';
+  // Motor de IA
+  const llmCfg = getLlmConfig();
+  const iaProv = document.getElementById('ia-llm-provider'); if (iaProv) iaProv.value = llmCfg.provider || 'groq';
+  const iaCK   = document.getElementById('ia-claude-key');   if (iaCK) iaCK.value = llmCfg.claudeKey || '';
+  _iaProviderChange(llmCfg.provider || 'groq');
   _applyIaUI(!!iaCfg.enabled);
 
   // Galeria de conquistas
@@ -10826,12 +10834,25 @@ function _applyIaUI(enabled) {
   if (fields) fields.style.display = enabled ? '' : 'none';
 }
 
+function _iaProviderChange(provider) {
+  const wrap = document.getElementById('ia-claude-key-wrap');
+  if (wrap) wrap.style.display = provider === 'claude' ? '' : 'none';
+}
+
 function saveIaConfig() {
   const cfg = getIaConfig();
-  cfg.tom        = (document.getElementById('ia-tom')?.value || '').trim();
-  cfg.instrucoes = (document.getElementById('ia-instrucoes')?.value || '').trim();
+  cfg.tom         = (document.getElementById('ia-tom')?.value || '').trim();
+  cfg.instrucoes  = (document.getElementById('ia-instrucoes')?.value || '').trim();
   cfg.autoSugerir = !!document.getElementById('ia-auto-sugerir')?.checked;
+  cfg.autonomo    = !!document.getElementById('ia-autonomo')?.checked;
+  cfg.agendar     = !!document.getElementById('ia-agendar')?.checked;
+  cfg.agendarModo = document.getElementById('ia-agendar-modo')?.value || 'pendente';
   DB.setObj('ia_config', cfg);
+  // Motor de IA (Groq/Claude)
+  const llm = getLlmConfig();
+  llm.provider  = document.getElementById('ia-llm-provider')?.value || 'groq';
+  llm.claudeKey = (document.getElementById('ia-claude-key')?.value || '').trim();
+  DB.setObj('llm_config', llm);
   const statusEl = document.getElementById('ia-status');
   if (statusEl) { statusEl.textContent = '✅ Salvo!'; statusEl.style.color = '#10b981'; setTimeout(() => { statusEl.textContent = ''; }, 4000); }
 }
@@ -11118,7 +11139,66 @@ function _subscribeChatRealtime(phone) {
 // médico. O modo autônomo (responder sozinho) é uma evolução futura deste código.
 
 function getIaConfig() {
-  return DB.getObj('ia_config', { enabled: false, tom: '', instrucoes: '', autoSugerir: true });
+  return DB.getObj('ia_config', { enabled: false, tom: '', instrucoes: '', autoSugerir: true, autonomo: false, agendar: false, agendarModo: 'pendente' });
+}
+
+// ── Camada de LLM plugável (Groq ↔ Claude) — escolha quando quiser ──
+// Default 'groq' (gratuito, já configurado). 'claude' usa a API da Anthropic.
+function getLlmConfig() {
+  return DB.getObj('llm_config', {
+    provider: 'groq',
+    groqModel: 'llama-3.3-70b-versatile',
+    claudeKey: '',
+    claudeModel: 'claude-haiku-4-5-20251001',
+  });
+}
+
+// Chamada unificada de chat. Recebe { system, messages:[{role,content}] }.
+// Retorna { ok, texto } ou { error }. Abstrai as diferenças de Groq e Claude.
+async function _llmChat({ system, messages, temperature = 0.4, maxTokens = 400 }) {
+  const cfg = getLlmConfig();
+  try {
+    if (cfg.provider === 'claude') {
+      if (!cfg.claudeKey) return { error: 'no-key-claude' };
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': cfg.claudeKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: cfg.claudeModel || 'claude-haiku-4-5-20251001',
+          max_tokens: maxTokens,
+          temperature,
+          system,
+          messages,
+        }),
+      });
+      if (!res.ok) { const t = await res.text(); return { error: 'Claude ' + res.status + ': ' + t.substring(0, 120) }; }
+      const json = await res.json();
+      const texto = (json.content?.[0]?.text || '').trim();
+      return texto ? { ok: true, texto } : { error: 'resposta vazia' };
+    }
+    // Groq (default, formato OpenAI: system entra como 1ª mensagem)
+    const key = getGeminiKey();
+    if (!key) return { error: 'no-key' };
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify({
+        model: cfg.groqModel || 'llama-3.3-70b-versatile',
+        messages: [{ role: 'system', content: system }, ...messages],
+        temperature,
+        max_tokens: maxTokens,
+      }),
+    });
+    if (!res.ok) { const t = await res.text(); return { error: 'API ' + res.status + ': ' + t.substring(0, 120) }; }
+    const json = await res.json();
+    const texto = (json.choices?.[0]?.message?.content || '').trim();
+    return texto ? { ok: true, texto } : { error: 'resposta vazia' };
+  } catch (e) { return { error: e.message }; }
 }
 
 // Monta o "cérebro" da IA a partir dos dados que já existem no app.
@@ -11176,8 +11256,6 @@ function _iaHistoricoToMessages(hist) {
 
 // Gera uma resposta sugerida com base no histórico recente da conversa atual.
 async function _iaSugerirResposta() {
-  const key = getGeminiKey();
-  if (!key) return { error: 'no-key' };
   if (!_chatPhone || !_supa) return { error: 'sem conversa' };
   const owner = currentDataOwner || (currentUser && currentUser.id);
   let hist = [];
@@ -11191,18 +11269,12 @@ async function _iaSugerirResposta() {
   } catch(e) { return { error: e.message }; }
   if (!hist.length) return { error: 'sem histórico' };
 
-  const messages = [{ role: 'system', content: _iaMontarSystemPrompt() }, ..._iaHistoricoToMessages(hist)];
-  try {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-      body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages, temperature: 0.4, max_tokens: 300 })
-    });
-    if (!res.ok) { const t = await res.text(); return { error: 'API ' + res.status + ': ' + t.substring(0, 100) }; }
-    const json = await res.json();
-    const texto = (json.choices?.[0]?.message?.content || '').trim();
-    return texto ? { ok: true, texto } : { error: 'resposta vazia' };
-  } catch(e) { return { error: e.message }; }
+  return await _llmChat({
+    system: _iaMontarSystemPrompt(),
+    messages: _iaHistoricoToMessages(hist),
+    temperature: 0.4,
+    maxTokens: 300,
+  });
 }
 
 // Botão "✨ Sugerir": preenche o input com a sugestão p/ a secretária revisar.
@@ -11220,7 +11292,8 @@ async function iaSugerirNoChat(auto) {
   if (btn) { btn.disabled = false; btn.textContent = '✨ Sugerir'; }
   if (r.error) {
     if (!auto) {
-      if (r.error === 'no-key') toast('Configure a chave de IA (Groq) em Configurações primeiro');
+      if (r.error === 'no-key') toast('Configure a chave do Groq em Configurações primeiro');
+      else if (r.error === 'no-key-claude') toast('Configure a chave do Claude em Configurações primeiro');
       else toast('IA: ' + r.error);
     }
     return;

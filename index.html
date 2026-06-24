@@ -2219,6 +2219,19 @@
             <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Instruções extras <span style="font-weight:400;color:#94a3b8;">(opcional)</span></label>
             <textarea id="ia-instrucoes" rows="3" class="input" style="resize:vertical;" placeholder="Ex: Atendemos só particular (sem convênio). Primeira consulta tem retorno em 15 dias incluso. Estacionamento gratuito no prédio."></textarea>
           </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+            <div>
+              <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Motor de IA</label>
+              <select id="ia-llm-provider" class="select" style="font-size:13px;" onchange="_iaProviderChange(this.value)">
+                <option value="groq">Groq — grátis (padrão)</option>
+                <option value="claude">Claude (Anthropic)</option>
+              </select>
+            </div>
+            <div id="ia-claude-key-wrap" style="display:none;">
+              <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Chave do Claude</label>
+              <input type="password" id="ia-claude-key" class="input" placeholder="sk-ant-…" />
+            </div>
+          </div>
           <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#374151;cursor:pointer;margin-bottom:14px;">
             <input type="checkbox" id="ia-auto-sugerir" />
             Sugerir automaticamente quando chegar mensagem do paciente
@@ -2228,7 +2241,30 @@
             <span id="ia-status" style="font-size:12.5px;color:#94a3b8;"></span>
           </div>
           <div style="margin-top:12px;padding:10px 13px;background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;font-size:11.5px;color:#6d28d9;line-height:1.5;">
-            💡 A IA usa a chave do Groq já configurada no app. Os preços e horários vêm de <b>Procedimentos</b> e <b>Configurar horários</b> — mantenha-os atualizados. No modo copiloto, nada é enviado sem você clicar.
+            💡 A IA usa a chave do Groq já configurada no app (ou a do Claude, se escolher). Os preços e horários vêm de <b>Procedimentos</b> e <b>Configurar horários</b> — mantenha-os atualizados. No modo copiloto, nada é enviado sem você clicar.
+          </div>
+
+          <!-- Avançado: modos que respondem/ agem sozinhos (desligados por padrão) -->
+          <div style="margin-top:18px;padding-top:16px;border-top:1px dashed #e9d5ff;">
+            <div style="font-size:12.5px;font-weight:700;color:#7c3aed;margin-bottom:4px;">⚙️ Avançado — automação (ligue só quando confiar)</div>
+            <div style="padding:10px 13px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:11px;color:#9a3412;line-height:1.5;margin-bottom:12px;">
+              ⚠️ Aqui a IA passa a agir <b>sem você revisar cada mensagem</b>. Teste bastante no modo copiloto antes. Requer o webhook implantado no Supabase.
+            </div>
+            <label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#374151;cursor:pointer;margin-bottom:12px;">
+              <input type="checkbox" id="ia-autonomo" style="margin-top:2px;" />
+              <span><b>Modo autônomo</b> — a IA responde o paciente sozinha (24/7), sem aprovação humana. A secretária continua vendo tudo no CRM.</span>
+            </label>
+            <label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#374151;cursor:pointer;margin-bottom:12px;">
+              <input type="checkbox" id="ia-agendar" style="margin-top:2px;" />
+              <span><b>Agendar de verdade</b> — a IA consulta a agenda e marca a consulta. <span style="color:#9a3412;font-weight:600;">(experimental — valide antes de usar em produção)</span></span>
+            </label>
+            <div style="margin-left:26px;">
+              <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Ao agendar:</label>
+              <select id="ia-agendar-modo" class="select" style="font-size:12.5px;max-width:320px;">
+                <option value="pendente">Criar como PENDENTE (humano confirma) — recomendado</option>
+                <option value="direto">Marcar direto na agenda</option>
+              </select>
+            </div>
           </div>
         </div>
       </div>

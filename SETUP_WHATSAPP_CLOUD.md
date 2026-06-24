@@ -79,13 +79,25 @@ mensagem que cuidamos do seu horário.
 
 ---
 
-## 🤖 Gancho da secretária por IA (Fase 2 — já preparado)
+## 🤖 Secretária por IA — modos (tudo desligado por padrão)
 
-A Edge Function `wa-webhook` já chama `maybeAutoReply(...)` após gravar cada
-mensagem recebida. Hoje é **inerte** (só roda se `WA_AI_ENABLED=1`). Na Fase 2,
-é dentro dessa função que a IA vai: ler o histórico em `crm_messages`, montar o
-contexto (procedimentos/preços/agenda), chamar o modelo e responder pelo
-provedor ativo — sem mexer no resto do fluxo.
+O app tem 3 níveis, todos com interruptor próprio em **Configurações → Secretária por IA**:
+
+1. **Copiloto** (padrão, já usável): a IA sugere a resposta no chat do CRM; o humano
+   envia. Roda no navegador.
+2. **Modo autônomo** (`ia_config.autonomo`): a IA responde o paciente **sozinha**. Roda
+   no webhook `wa-webhook` (`maybeAutoReply`), que lê conhecimento/LLM/provedor de
+   `app_data` por owner, gera, envia e registra no CRM. **Requer o webhook implantado.**
+3. **Agendar** (`ia_config.agendar`): a IA consulta horários livres reais e marca via
+   marcador `[[AGENDAR: data hora | proc]]`. Modo padrão **PENDENTE** (humano confirma
+   na agenda); opção "direto" cria já Confirmado. Cria linha em `clinica_agendamentos`.
+
+**Motor de IA plugável:** Groq (grátis, padrão) ou Claude (Anthropic) — escolhido no
+mesmo card (`llm_config`). Sem env nova: os toggles controlam tudo.
+
+> ⚠️ Os modos 2 e 3 ainda **não foram validados em execução real** (webhook + LLM ao
+> vivo). Teste em uma conversa de teste antes de usar com pacientes. O padrão PENDENTE
+> do agendamento é a rede de segurança: mesmo ligado, um humano confirma cada marcação.
 
 ---
 

@@ -138,6 +138,32 @@ use lendo/escrevendo a agenda); (3) trocar Groq→Claude se quiser mais qualidad
 
 ---
 
+## 🧩 Sessão "ship dark" — IA plugável + autônomo + agendar (tudo OFF)
+
+Construído pronto-para-ligar, **desligado por padrão** (o usuário quer ter a opção,
+não usar ainda):
+
+1. **Motor de IA plugável (Groq ↔ Claude):** `getLlmConfig()` + `_llmChat({system,messages})`
+   no app.js (dispatcher). Copiloto já usa. UI no card da IA (seletor + chave do Claude).
+   Config em `llm_config` (sincronizada). Default Groq (grátis).
+2. **Modo autônomo (webhook):** `maybeAutoReply()` agora implementa de verdade — lê
+   `ia_config`/conhecimento/`llm_config`/provedor de `app_data` por owner, monta prompt
+   (`montarSystemPromptServer`), chama LLM (`chamarLLMServer`), envia
+   (`enviarWhatsAppServer`) e grava no CRM. Gated por `ia_config.autonomo`.
+3. **Agendar (webhook):** via marcador `[[AGENDAR: data hora | proc]]`. `montarDisponibilidade`
+   calcula horários livres reais; `criarAgendamentoPendente` insere em `clinica_agendamentos`
+   (status **Pendente** por padrão; "direto" = Confirmado). Gated por `ia_config.agendar`.
+   UI com modo pendente/direto.
+
+⚠️ **Não validado ao vivo** (sem Deno/LLM aqui). Modos 2 e 3 precisam de 1 teste real
+antes de usar com paciente. Rede de segurança: agendar default = PENDENTE (humano confirma).
+`node --check` OK; `node --test` 11/11 (cobre prompt+guardrail+histórico do lado app).
+
+**Próximo passo da IA:** teste ao vivo do autônomo (webhook redeployado) numa conversa
+de teste; depois validar o agendar-pendente; e migrar envio da Cloud API p/ server-side.
+
+---
+
 ## 🔜 PRÓXIMO PASSO (é aqui que paramos)
 
 **Provar o isolamento com um teste limpo.** O teste anterior não valeu porque o "Dr. Jovino"
