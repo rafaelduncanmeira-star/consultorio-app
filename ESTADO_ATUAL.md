@@ -89,6 +89,29 @@ de formulários (WhatsApp/e-mail), e — só com testes mais amplos antes — mo
 
 ---
 
+## 📲 Sessão WhatsApp plugável (Z-API ↔ Cloud API oficial)
+
+Para parar de pagar mensalidade do Z-API, o WhatsApp virou **plugável**: a clínica
+escolhe o provedor em **Configurações → WhatsApp**. Só um ativo por vez.
+
+- **Camada de provedor (app.js):** `getWaProvider`/`setWaProvider`, `getCloudConfig`,
+  `_waConnected`. Envio unificado por `_waSendText` (sessão) e `_cloudSendText`/
+  `_cloudSendTemplate` (Cloud API). `_enviarLembreteZapi` agora roteia por provedor.
+  Todos os gates de UI ("responde pelo CRM") passaram a usar `_waConnected()`.
+- **UI (index.html):** novo card "WhatsApp oficial (Meta)" com toggle/campos/teste,
+  espelhando o do Z-API. Ligar um desliga o outro (exclusão mútua).
+- **Webhook (wa-webhook/index.ts):** `normalizarEntrada()` cobre os dois formatos
+  (Z-API plano + Cloud aninhado), GET trata o `hub.challenge` da Meta. **Gancho da
+  IA já preparado** em `maybeAutoReply()` (inerte até `WA_AI_ENABLED=1`).
+- **Setup:** ver `SETUP_WHATSAPP_CLOUD.md` (passo a passo Meta + os 2 templates
+  prontos: lembrete=utility, reativação=marketing).
+
+**Próximo passo do WhatsApp:** o usuário criar a conta Meta/credenciais e testar;
+depois, mover o envio da Cloud API pro servidor (token fora do navegador) e então
+ligar a **secretária por IA** (Fase 2) dentro do gancho já pronto.
+
+---
+
 ## 🔜 PRÓXIMO PASSO (é aqui que paramos)
 
 **Provar o isolamento com um teste limpo.** O teste anterior não valeu porque o "Dr. Jovino"

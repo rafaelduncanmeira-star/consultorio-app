@@ -2083,6 +2083,53 @@
         </div>
       </div>
 
+      <!-- WhatsApp Cloud API (oficial Meta) — recomendado, grátis para atender -->
+      <div class="chart-card" style="margin-bottom:20px;">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div class="card-icon-lg" style="background:#dcfce7;color:#16a34a;"><i data-lucide="badge-check"></i></div>
+          <div style="flex:1;">
+            <div style="font-size:15px;font-weight:700;color:#0f172a;">WhatsApp oficial (Meta) <span style="font-size:11px;font-weight:600;color:#166534;background:#dcfce7;padding:2px 8px;border-radius:999px;margin-left:4px;">recomendado · grátis p/ atender</span></div>
+            <div style="font-size:12.5px;color:#64748b;margin-top:3px;">Cloud API da Meta: receber e responder é grátis; só lembrete proativo custa centavos. Sem risco de banimento.</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:12px;color:#64748b;" id="cloud-toggle-label">Desativado</span>
+            <label class="zapi-toggle-wrap">
+              <input type="checkbox" id="cloud-enabled-toggle" onchange="_cloudToggleChange(this.checked)">
+              <div class="zapi-track" id="cloud-track"></div>
+              <div class="zapi-thumb" id="cloud-thumb"></div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Campos — aparecem quando ativado -->
+        <div id="cloud-fields" style="display:none;margin-top:20px;padding-top:20px;border-top:1px solid #f1f5f9;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+            <div>
+              <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Phone Number ID</label>
+              <input type="text" id="cloud-phone-id" class="input" placeholder="Ex: 123456789012345" />
+            </div>
+            <div>
+              <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Access Token</label>
+              <input type="password" id="cloud-token" class="input" placeholder="Token do app da Meta…" />
+            </div>
+          </div>
+          <div style="margin-bottom:14px;">
+            <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Template de lembrete <span style="font-weight:400;color:#94a3b8;">(opcional)</span></label>
+            <input type="text" id="cloud-template" class="input" placeholder="Nome do template aprovado (ex: lembrete_consulta)" />
+            <div style="font-size:11px;color:#94a3b8;margin-top:5px;line-height:1.5;">Necessário só para lembretes <b>fora</b> da janela de 24h. Responder o paciente no chat funciona sem isso.</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <button onclick="saveCloudConfig()" class="btn-primary">Salvar</button>
+            <button onclick="testCloudConnection()" class="btn-ghost">Testar conexão</button>
+            <span id="cloud-status" style="font-size:12.5px;color:#94a3b8;"></span>
+          </div>
+          <div style="margin-top:12px;font-size:11px;color:#94a3b8;line-height:1.6;">
+            Webhook (cole no painel da Meta em <b>Callback URL</b>): <code id="cloud-webhook-url" style="color:#475569;">—</code><br>
+            Verify token: use o valor da variável <code>WA_VERIFY_TOKEN</code> da sua Edge Function.
+          </div>
+        </div>
+      </div>
+
       <!-- Z-API Card (automação avançada, opcional) -->
       <div class="chart-card" style="margin-bottom:20px;opacity:0.96;">
         <div style="display:flex;align-items:center;gap:14px;">

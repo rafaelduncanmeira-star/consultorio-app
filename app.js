@@ -1500,7 +1500,7 @@ function _onboardingPassos() {
     { ok: localStorage.getItem('consult_onboard_convidou') === '1',
       label: 'Convide sua equipe', dica: 'Secretária e profissionais com login próprio.',
       acao: 'openModalConvite()', btn: 'Convidar' },
-    { ok: getZapiConfig().enabled, opcional: true,
+    { ok: _waConnected(), opcional: true,
       label: 'Conecte o WhatsApp', dica: 'Opcional — contatos caem sozinhos no CRM.',
       acao: "_irParaConfig('zapi-enabled-toggle')", btn: 'Conectar' },
   ];
@@ -3270,7 +3270,7 @@ function renderCrm() {
       <tr data-search="${_esc(r.nome)} ${_esc(r.canal||'')} ${_esc(r.status||'')} ${_esc(r.tipo||'')}" data-status="${_esc(r.status)}">
         <td>${formatDate(r.data)}</td>
         <td style="font-weight:600;color:#0f172a;">${_esc(r.nome)}</td>
-        <td>${r.whatsapp ? (getZapiConfig().enabled
+        <td>${r.whatsapp ? (_waConnected()
           ? `<button onclick="openCrmChat(${i})" style="background:none;border:none;cursor:pointer;color:#10b981;font-weight:600;font-size:13px;padding:0;font-family:'Inter',sans-serif;">💬 ${_esc(r.whatsapp)}</button>`
           : `<a href="https://wa.me/55${r.whatsapp.replace(/\D/g,'')}" target="_blank" style="color:#10b981;font-weight:600;text-decoration:none;">💬 ${_esc(r.whatsapp)}</a>`) : '—'}</td>
         <td style="color:#475569;">${_esc(r.canal||'—')}</td>
@@ -3565,7 +3565,7 @@ function _kanbanCardHtml(r, col) {
   const nextCol  = KANBAN_COLUNAS[colIdx + 1];
   const badge    = _canalBadge(r.canal);
   const dias     = _diasDesde(r.data);
-  const _zapiOn = getZapiConfig().enabled;
+  const _zapiOn = _waConnected();
   const _prof   = r.profissionalId ? getProfissional(r.profissionalId) : null;
   const whatsBtn = r.whatsapp
     ? (_zapiOn
@@ -9344,8 +9344,7 @@ function abrirPerfilPaciente(nomeEnc) {
   const whatsEl = document.getElementById('perfil-whats');
   if (whatsEl) {
     if (whats) {
-      const cfgW = getZapiConfig();
-      const zapiOk = cfgW.enabled && cfgW.instanceId && cfgW.token;
+      const zapiOk = _waConnected();
       whatsEl.innerHTML =
         `<button onclick="falarComPacienteNome('${encodeURIComponent(nome)}')" style="display:inline-flex;align-items:center;gap:6px;background:#dcfce7;color:#16a34a;border:none;border-radius:7px;padding:5px 12px;font-size:12.5px;font-weight:600;cursor:pointer;">💬 ${_esc(whats)}</button>` +
         `<button onclick="_editarWhatsPerfil('${encodeURIComponent(nome)}')" style="background:none;border:none;color:#94a3b8;font-size:11.5px;cursor:pointer;margin-left:8px;">editar</button>` +
@@ -9643,13 +9642,68 @@ async function _zapiSendText(cfg, rawPhone, text) {
   return { ok: false, error: lastErr };
 }
 
-// Envia 1 lembrete via Z-API
+// ====================== WHATSAPP CLOUD API (Meta, oficial) ======================
+// Envia mensagem de SESSÃO (texto livre). Só é entregue dentro da janela de 24h
+// após o paciente escrever; fora dela a Meta exige template (ver _cloudSendTemplate).
+async function _cloudSendText(cfg, rawPhone, text) {
+  const phone = String(rawPhone || '').replace(/\D/g, '');
+  if (!phone) return { ok: false, error: 'número inválido' };
+  const to = phone.startsWith('55') ? phone : '55' + phone;  // Cloud API quer DDI
+  try {
+    const res = await fetch(`https://graph.facebook.com/v21.0/${cfg.phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.accessToken },
+      body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { preview_url: false, body: text } }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.messages && data.messages[0]) return { ok: true, phone: to };
+    return { ok: false, error: (data.error && (data.error.message || data.error.type)) || ('HTTP ' + res.status) };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+// Envia TEMPLATE aprovado (mensagem proativa fora da janela de 24h).
+// bodyParams preenche as variáveis {{1}}, {{2}}… do corpo, em ordem.
+async function _cloudSendTemplate(cfg, rawPhone, templateName, langCode, bodyParams) {
+  const phone = String(rawPhone || '').replace(/\D/g, '');
+  if (!phone) return { ok: false, error: 'número inválido' };
+  const to = phone.startsWith('55') ? phone : '55' + phone;
+  const components = (bodyParams && bodyParams.length)
+    ? [{ type: 'body', parameters: bodyParams.map(v => ({ type: 'text', text: String(v) })) }]
+    : [];
+  try {
+    const res = await fetch(`https://graph.facebook.com/v21.0/${cfg.phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.accessToken },
+      body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'template',
+        template: { name: templateName, language: { code: langCode || 'pt_BR' }, components } }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.messages && data.messages[0]) return { ok: true, phone: to };
+    return { ok: false, error: (data.error && (data.error.message || data.error.type)) || ('HTTP ' + res.status) };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+// ── Dispatcher único de SESSÃO (chat do CRM): roteia pro provedor ativo. ──
+// Todos os pontos de envio do app passam por aqui — trocar de provedor não
+// exige mexer em cada call site.
+async function _waSendText(rawPhone, text) {
+  if (getWaProvider() === 'cloud') return await _cloudSendText(getCloudConfig(), rawPhone, text);
+  return await _zapiSendText(getZapiConfig(), rawPhone, text);
+}
+
+// Envia 1 lembrete (proativo) pelo provedor ativo.
+// Cloud API: usa template aprovado se configurado; senão tenta texto (só entrega
+// dentro da janela de 24h). Z-API: texto livre, como antes.
 async function _enviarLembreteZapi(ag, mensagem) {
-  const cfg = getZapiConfig();
-  if (!cfg.enabled || !cfg.instanceId || !cfg.token) return { error: 'Z-API não configurado' };
+  if (!_waConnected()) return { error: 'WhatsApp não configurado' };
   const fone = (ag.whatsapp || '').replace(/\D/g, '');
   if (!fone || fone.length < 10) return { error: 'WhatsApp inválido' };
-  return await _zapiSendText(cfg, fone, mensagem);
+  if (getWaProvider() === 'cloud') {
+    const c = getCloudConfig();
+    if (c.templateLembrete) return await _cloudSendTemplate(c, fone, c.templateLembrete, c.templateLang, [mensagem]);
+    return await _cloudSendText(c, fone, mensagem);
+  }
+  return await _zapiSendText(getZapiConfig(), fone, mensagem);
 }
 
 // Encontra agendamentos elegíveis (na janela de N horas, não realizados, não notificados)
@@ -9977,7 +10031,7 @@ const BACKUP_KEYS = [
   // Personalização do consultório
   'clinica_config',
   // Integrações
-  'zapi_config','lembretes_config',
+  'zapi_config','wa_cloud_config','wa_provider','lembretes_config',
   // Gamificação
   'maestria',
   // Auditoria
@@ -9990,6 +10044,32 @@ const BACKUP_KEYS = [
 
 function getZapiConfig() {
   return DB.getObj('zapi_config', { enabled: false, instanceId: '', token: '', clientToken: '' });
+}
+
+// ====================== WHATSAPP — SELEÇÃO DE PROVEDOR ======================
+// O app não fica preso a um provedor: 'zapi' (gateway pago) ou 'cloud'
+// (WhatsApp Cloud API oficial da Meta — atendimento grátis, sem risco de ban).
+// Default 'zapi' p/ não mexer em quem já está conectado. Só um fica ativo.
+function getWaProvider() {
+  const p = DB.getObj('wa_provider', 'zapi');
+  return p === 'cloud' ? 'cloud' : 'zapi';
+}
+function setWaProvider(p) { DB.setObj('wa_provider', p === 'cloud' ? 'cloud' : 'zapi'); }
+
+// Config da Cloud API (Meta). phoneNumberId + accessToken vêm do painel da Meta.
+// templateLembrete/templateLang: template aprovado p/ lembrete proativo (fora 24h).
+function getCloudConfig() {
+  return DB.getObj('wa_cloud_config', { enabled: false, phoneNumberId: '', accessToken: '', templateLembrete: '', templateLang: 'pt_BR' });
+}
+
+// True quando o provedor ATIVO está totalmente configurado (vale p/ os dois).
+function _waConnected() {
+  if (getWaProvider() === 'cloud') {
+    const c = getCloudConfig();
+    return !!(c.enabled && c.phoneNumberId && c.accessToken);
+  }
+  const z = getZapiConfig();
+  return !!(z.enabled && z.instanceId && z.token);
 }
 
 // ====================== 🎼 SISTEMA DE MAESTRIA (GAMIFICAÇÃO) ======================
@@ -10242,6 +10322,21 @@ function renderConfiguracoes() {
       : '— (entre na sua conta para gerar)';
   }
   _montarWebhookProfUI(); // número por profissional (clínica)
+
+  // WhatsApp Cloud API (Meta) — carrega campos e estado do toggle
+  const cloudCfg = getCloudConfig();
+  const cloudTog = document.getElementById('cloud-enabled-toggle');
+  const cloudOn  = getWaProvider() === 'cloud' && cloudCfg.enabled;
+  if (cloudTog) cloudTog.checked = cloudOn;
+  const cpid = document.getElementById('cloud-phone-id'); if (cpid) cpid.value = cloudCfg.phoneNumberId    || '';
+  const ctok = document.getElementById('cloud-token');    if (ctok) ctok.value = cloudCfg.accessToken      || '';
+  const ctpl = document.getElementById('cloud-template'); if (ctpl) ctpl.value = cloudCfg.templateLembrete || '';
+  _applyCloudUI(cloudOn, !!(cloudCfg.phoneNumberId && cloudCfg.accessToken));
+  const cwh = document.getElementById('cloud-webhook-url');
+  if (cwh) {
+    const ownerC = currentDataOwner || (currentUser && currentUser.id);
+    cwh.textContent = ownerC ? `${SUPA_URL}/functions/v1/wa-webhook?owner=${ownerC}` : '—';
+  }
 
   // Galeria de conquistas
   renderConquistas();
@@ -10619,7 +10714,88 @@ function _zapiToggleChange(enabled) {
   const cfg = getZapiConfig();
   cfg.enabled = enabled;
   DB.setObj('zapi_config', cfg);
+  if (enabled) {
+    setWaProvider('zapi');
+    // Provedor único ativo: desliga a Cloud API se estava ligada.
+    const c = getCloudConfig();
+    if (c.enabled) { c.enabled = false; DB.setObj('wa_cloud_config', c); }
+    const ct = document.getElementById('cloud-enabled-toggle'); if (ct) ct.checked = false;
+    _applyCloudUI(false, !!(c.phoneNumberId && c.accessToken));
+  }
   _applyZapiUI(enabled, !!(cfg.instanceId && cfg.token));
+}
+
+// ── Handlers da WhatsApp Cloud API (Meta) — espelham os do Z-API ──
+function _cloudToggleChange(enabled) {
+  const cfg = getCloudConfig();
+  cfg.enabled = enabled;
+  DB.setObj('wa_cloud_config', cfg);
+  if (enabled) {
+    setWaProvider('cloud');
+    // Provedor único ativo: desliga o Z-API se estava ligado.
+    const z = getZapiConfig();
+    if (z.enabled) { z.enabled = false; DB.setObj('zapi_config', z); }
+    const zt = document.getElementById('zapi-enabled-toggle'); if (zt) zt.checked = false;
+    _applyZapiUI(false, !!(z.instanceId && z.token));
+  } else {
+    setWaProvider('zapi');
+  }
+  _applyCloudUI(enabled, !!(cfg.phoneNumberId && cfg.accessToken));
+}
+
+function _applyCloudUI(enabled, hasCredentials) {
+  const label  = document.getElementById('cloud-toggle-label');
+  const track  = document.getElementById('cloud-track');
+  const thumb  = document.getElementById('cloud-thumb');
+  const fields = document.getElementById('cloud-fields');
+  if (label)  label.textContent = enabled ? 'Ativado' : 'Desativado';
+  if (track)  track.classList.toggle('on', enabled);
+  if (thumb)  thumb.classList.toggle('on', enabled);
+  if (fields) fields.style.display = enabled ? '' : 'none';
+}
+
+function saveCloudConfig() {
+  const phoneId  = (document.getElementById('cloud-phone-id')?.value || '').trim();
+  const token    = (document.getElementById('cloud-token')?.value    || '').trim();
+  const template = (document.getElementById('cloud-template')?.value  || '').trim();
+  const statusEl = document.getElementById('cloud-status');
+  if (!phoneId || !token) {
+    if (statusEl) { statusEl.textContent = '⚠️ Preencha Phone Number ID e Access Token'; statusEl.style.color = '#f59e0b'; }
+    return;
+  }
+  const cfg = getCloudConfig();
+  cfg.phoneNumberId    = phoneId;
+  cfg.accessToken      = token;
+  cfg.templateLembrete = template;
+  DB.setObj('wa_cloud_config', cfg);
+  if (statusEl) { statusEl.textContent = '✅ Salvo!'; statusEl.style.color = '#10b981'; }
+  _applyCloudUI(cfg.enabled, true);
+  setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 4000);
+}
+
+async function testCloudConnection() {
+  const cfg = getCloudConfig();
+  const statusEl = document.getElementById('cloud-status');
+  if (!cfg.phoneNumberId || !cfg.accessToken) {
+    if (statusEl) { statusEl.textContent = '⚠️ Salve as credenciais primeiro'; statusEl.style.color = '#f59e0b'; }
+    return;
+  }
+  if (statusEl) { statusEl.textContent = '⏳ Testando…'; statusEl.style.color = '#64748b'; }
+  try {
+    // GET no número: valida o token e retorna o número verificado.
+    const res = await fetch(`https://graph.facebook.com/v21.0/${cfg.phoneNumberId}?fields=display_phone_number,verified_name`, {
+      headers: { 'Authorization': 'Bearer ' + cfg.accessToken }
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.id) {
+      if (statusEl) { statusEl.textContent = '✅ Conectado! ' + (data.display_phone_number || ''); statusEl.style.color = '#10b981'; }
+    } else {
+      const err = (data.error && data.error.message) || ('HTTP ' + res.status);
+      if (statusEl) { statusEl.textContent = '❌ ' + err; statusEl.style.color = '#dc2626'; }
+    }
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = '❌ ' + (e.message || 'falha de rede/CORS'); statusEl.style.color = '#dc2626'; }
+  }
 }
 
 function _applyZapiUI(enabled, hasCredentials) {
@@ -10897,8 +11073,7 @@ async function sendChatMessage() {
   const input  = document.getElementById('chat-input-text');
   const text   = (input?.value || '').trim();
   if (!text || !_chatPhone) return;
-  const cfg = getZapiConfig();
-  if (!cfg.enabled || !cfg.instanceId || !cfg.token) return;
+  if (!_waConnected()) return;
 
   input.value    = '';
   input.disabled = true;
@@ -10907,7 +11082,7 @@ async function sendChatMessage() {
   const pendingEl = _appendChatMessage({ remetente: 'consultorio', mensagem: text, created_at: new Date().toISOString() }, true);
 
   try {
-    const r = await _zapiSendText(cfg, _chatPhone, text);
+    const r = await _waSendText(_chatPhone, text);
     if (!r.ok) throw new Error(r.error);
     // Confirmado: tira o estado "enviando…" e marca a hora real
     if (pendingEl) {
