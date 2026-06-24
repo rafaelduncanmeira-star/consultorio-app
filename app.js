@@ -10031,7 +10031,7 @@ const BACKUP_KEYS = [
   // Personalização do consultório
   'clinica_config',
   // Integrações
-  'zapi_config','wa_cloud_config','wa_provider','lembretes_config',
+  'zapi_config','wa_cloud_config','wa_provider','lembretes_config','ia_config',
   // Gamificação
   'maestria',
   // Auditoria
@@ -10337,6 +10337,15 @@ function renderConfiguracoes() {
     const ownerC = currentDataOwner || (currentUser && currentUser.id);
     cwh.textContent = ownerC ? `${SUPA_URL}/functions/v1/wa-webhook?owner=${ownerC}` : '—';
   }
+
+  // Secretária por IA — carrega campos e estado
+  const iaCfg = getIaConfig();
+  const iaTog = document.getElementById('ia-enabled-toggle');
+  if (iaTog) iaTog.checked = !!iaCfg.enabled;
+  const iaTom = document.getElementById('ia-tom');           if (iaTom) iaTom.value = iaCfg.tom || '';
+  const iaIns = document.getElementById('ia-instrucoes');    if (iaIns) iaIns.value = iaCfg.instrucoes || '';
+  const iaAuto= document.getElementById('ia-auto-sugerir');  if (iaAuto) iaAuto.checked = iaCfg.autoSugerir !== false;
+  _applyIaUI(!!iaCfg.enabled);
 
   // Galeria de conquistas
   renderConquistas();
@@ -10798,6 +10807,35 @@ async function testCloudConnection() {
   }
 }
 
+// ── Handlers da config da Secretária por IA (Configurações) ──
+function _iaToggleChange(enabled) {
+  const cfg = getIaConfig();
+  cfg.enabled = enabled;
+  DB.setObj('ia_config', cfg);
+  _applyIaUI(enabled);
+}
+
+function _applyIaUI(enabled) {
+  const label  = document.getElementById('ia-toggle-label');
+  const track  = document.getElementById('ia-track');
+  const thumb  = document.getElementById('ia-thumb');
+  const fields = document.getElementById('ia-fields');
+  if (label)  label.textContent = enabled ? 'Ativado' : 'Desativado';
+  if (track)  track.classList.toggle('on', enabled);
+  if (thumb)  thumb.classList.toggle('on', enabled);
+  if (fields) fields.style.display = enabled ? '' : 'none';
+}
+
+function saveIaConfig() {
+  const cfg = getIaConfig();
+  cfg.tom        = (document.getElementById('ia-tom')?.value || '').trim();
+  cfg.instrucoes = (document.getElementById('ia-instrucoes')?.value || '').trim();
+  cfg.autoSugerir = !!document.getElementById('ia-auto-sugerir')?.checked;
+  DB.setObj('ia_config', cfg);
+  const statusEl = document.getElementById('ia-status');
+  if (statusEl) { statusEl.textContent = '✅ Salvo!'; statusEl.style.color = '#10b981'; setTimeout(() => { statusEl.textContent = ''; }, 4000); }
+}
+
 function _applyZapiUI(enabled, hasCredentials) {
   const label  = document.getElementById('zapi-toggle-label');
   const track  = document.getElementById('zapi-track');
@@ -10925,12 +10963,13 @@ function abrirChatPorTelefone(nome, whatsapp, crmIdx) {
   if (nameEl)  nameEl.textContent  = nome || '—';
   if (phoneEl) phoneEl.textContent = whatsapp || wa;
 
-  const cfg        = getZapiConfig();
-  const zapiOk     = cfg.enabled && cfg.instanceId && cfg.token;
+  const zapiOk     = _waConnected();
   const inputArea  = document.getElementById('chat-input-area');
   const noZapiMsg  = document.getElementById('chat-no-zapi');
   const statusEl   = document.getElementById('chat-wa-status');
   if (inputArea) inputArea.style.display = zapiOk ? 'flex' : 'none';
+  const iaBtn = document.getElementById('chat-ia-btn');
+  if (iaBtn) iaBtn.style.display = getIaConfig().enabled ? '' : 'none';
   if (noZapiMsg) noZapiMsg.style.display = zapiOk ? 'none' : '';
   if (statusEl)  {
     statusEl.textContent = zapiOk ? '● WhatsApp' : 'sem integração';
@@ -10950,8 +10989,7 @@ function abrirChatPorTelefone(nome, whatsapp, crmIdx) {
 function falarComPaciente(nome, whatsapp, mensagem) {
   const wa = String(whatsapp || '').replace(/\D/g, '');
   if (!wa) { alert('WhatsApp não cadastrado para ' + (nome || 'este paciente') + '.'); return; }
-  const cfg = getZapiConfig();
-  const zapiOk = cfg.enabled && cfg.instanceId && cfg.token;
+  const zapiOk = _waConnected();
   if (zapiOk) {
     abrirChatPorTelefone(nome, whatsapp);
     if (mensagem) { const inp = document.getElementById('chat-input-text'); if (inp) { inp.value = mensagem; inp.focus(); } }
@@ -11064,9 +11102,132 @@ function _subscribeChatRealtime(phone) {
       // (evita duplicar a própria mensagem ao confirmar o envio).
       if (_chatPhone === phone && payload.new && payload.new.remetente !== 'consultorio') {
         _appendChatMessage(payload.new);
+        // Copiloto: ao chegar mensagem do paciente, já prepara uma sugestão.
+        const _ia = getIaConfig();
+        if (_ia.enabled && _ia.autoSugerir) iaSugerirNoChat(true);
       }
     })
     .subscribe();
+}
+
+// ====================== 🤖 SECRETÁRIA POR IA (copiloto) ======================
+// Modo COPILOTO: a IA SUGERE a resposta; a secretária revisa e envia (nunca
+// envia sozinha). Roda no navegador, reusando o Groq já configurado
+// (getGeminiKey). O conhecimento vem automaticamente do app: procedimentos/
+// preços, programas, horários e nome da clínica. Guardrail: nada de conselho
+// médico. O modo autônomo (responder sozinho) é uma evolução futura deste código.
+
+function getIaConfig() {
+  return DB.getObj('ia_config', { enabled: false, tom: '', instrucoes: '', autoSugerir: true });
+}
+
+// Monta o "cérebro" da IA a partir dos dados que já existem no app.
+function _iaMontarSystemPrompt() {
+  const clin = DB.getObj('clinica_config', {});
+  const nomeClin = clin.nome || 'a clínica';
+  const cfg = getIaConfig();
+
+  const procs = getProcedimentos()
+    .filter(p => (p.valorPix || p.valorCartao))
+    .map(p => {
+      const partes = [];
+      if (p.valorPix)    partes.push(`PIX/dinheiro ${BRL(p.valorPix)}`);
+      if (p.valorCartao) partes.push(`cartão ${BRL(p.valorCartao)}`);
+      return `- ${p.nome}: ${partes.join(' · ') || 'sob consulta'}${p.obs ? ' (' + p.obs + ')' : ''}`;
+    }).join('\n') || '- (nenhum procedimento com valor cadastrado)';
+
+  const progs = (typeof getProgramas === 'function' ? getProgramas() : [])
+    .filter(p => p.ativo !== false)
+    .map(p => `- ${p.nome} (${p.tipo})${p.precoAVista ? ' — à vista ' + BRL(p.precoAVista) : ''}`)
+    .join('\n');
+
+  const ag = DB.getObj('agenda_config', { horaInicio: '08:00', horaFim: '18:00', diasUteis: [1,2,3,4,5] });
+  const diasNomes = ['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
+  const dias = (ag.diasUteis || []).map(d => diasNomes[d]).filter(Boolean).join(', ') || 'dias úteis';
+
+  const linhas = [
+    `Você é a secretária virtual de ${nomeClin}, atendendo pacientes pelo WhatsApp.`,
+    `Seu papel é APENAS: tirar dúvidas sobre valores, horários e informações de atendimento, e ajudar a marcar/remarcar consultas.`,
+    ``,
+    `REGRAS INEGOCIÁVEIS:`,
+    `- NUNCA dê conselho, diagnóstico ou orientação médica/clínica. Se perguntarem sobre sintomas, exames, tratamento ou "o que eu tenho", responda com cordialidade que isso o profissional avalia na consulta e ofereça agendar.`,
+    `- NUNCA invente preços, horários ou informações que não estejam listados abaixo. Se não souber, diga que vai confirmar com a equipe.`,
+    `- Seja breve e natural (é WhatsApp): 1 a 3 frases, sem textão, tom humano.`,
+    `- NÃO confirme o agendamento como feito — quem fecha na agenda é a secretária. Você pode propor horários e perguntar a preferência.`,
+    `- Se o paciente pedir para falar com humano, estiver irritado, ou for assunto delicado/fora do escopo, sugira gentilmente que a equipe assume.`,
+    ``,
+    `PROCEDIMENTOS E VALORES:`,
+    procs,
+  ];
+  if (progs) { linhas.push(``, `PLANOS/PROGRAMAS:`, progs); }
+  linhas.push(``, `HORÁRIO DE ATENDIMENTO: ${dias}, das ${ag.horaInicio} às ${ag.horaFim}.`);
+  if (cfg.tom)        linhas.push(``, `TOM DE VOZ: ${cfg.tom}`);
+  if (cfg.instrucoes) linhas.push(``, `INSTRUÇÕES EXTRAS DA CLÍNICA: ${cfg.instrucoes}`);
+  return linhas.join('\n');
+}
+
+// Converte o histórico do chat em mensagens no formato do LLM.
+function _iaHistoricoToMessages(hist) {
+  return (hist || []).map(m => ({
+    role: m.remetente === 'consultorio' ? 'assistant' : 'user',
+    content: m.mensagem || ''
+  }));
+}
+
+// Gera uma resposta sugerida com base no histórico recente da conversa atual.
+async function _iaSugerirResposta() {
+  const key = getGeminiKey();
+  if (!key) return { error: 'no-key' };
+  if (!_chatPhone || !_supa) return { error: 'sem conversa' };
+  const owner = currentDataOwner || (currentUser && currentUser.id);
+  let hist = [];
+  try {
+    const { data, error } = await _supa.from('crm_messages')
+      .select('remetente,mensagem,created_at')
+      .eq('user_id', owner).eq('whatsapp', _chatPhone)
+      .order('created_at', { ascending: false }).limit(16);
+    if (error) throw error;
+    hist = (data || []).reverse();
+  } catch(e) { return { error: e.message }; }
+  if (!hist.length) return { error: 'sem histórico' };
+
+  const messages = [{ role: 'system', content: _iaMontarSystemPrompt() }, ..._iaHistoricoToMessages(hist)];
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages, temperature: 0.4, max_tokens: 300 })
+    });
+    if (!res.ok) { const t = await res.text(); return { error: 'API ' + res.status + ': ' + t.substring(0, 100) }; }
+    const json = await res.json();
+    const texto = (json.choices?.[0]?.message?.content || '').trim();
+    return texto ? { ok: true, texto } : { error: 'resposta vazia' };
+  } catch(e) { return { error: e.message }; }
+}
+
+// Botão "✨ Sugerir": preenche o input com a sugestão p/ a secretária revisar.
+// auto=true → chamada automática ao chegar mensagem (não atropela texto digitado).
+async function iaSugerirNoChat(auto) {
+  const cfg = getIaConfig();
+  if (!cfg.enabled) { if (!auto) toast('Ative a secretária por IA em Configurações'); return; }
+  const input = document.getElementById('chat-input-text');
+  const btn   = document.getElementById('chat-ia-btn');
+  const hint  = document.getElementById('chat-ia-hint');
+  if (!input) return;
+  if (auto && input.value.trim()) return; // já há algo digitado: não sobrescreve
+  if (btn) { btn.disabled = true; btn.textContent = '✨…'; }
+  const r = await _iaSugerirResposta();
+  if (btn) { btn.disabled = false; btn.textContent = '✨ Sugerir'; }
+  if (r.error) {
+    if (!auto) {
+      if (r.error === 'no-key') toast('Configure a chave de IA (Groq) em Configurações primeiro');
+      else toast('IA: ' + r.error);
+    }
+    return;
+  }
+  input.value = r.texto;
+  input.focus();
+  if (hint) hint.style.display = '';
 }
 
 async function sendChatMessage() {
@@ -11074,6 +11235,7 @@ async function sendChatMessage() {
   const text   = (input?.value || '').trim();
   if (!text || !_chatPhone) return;
   if (!_waConnected()) return;
+  const _iaHint = document.getElementById('chat-ia-hint'); if (_iaHint) _iaHint.style.display = 'none';
 
   input.value    = '';
   input.disabled = true;

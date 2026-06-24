@@ -112,6 +112,32 @@ ligar a **secretária por IA** (Fase 2) dentro do gancho já pronto.
 
 ---
 
+## 🤖 Sessão Secretária por IA (copiloto) — Fase 1
+
+A secretária por IA foi ligada em **modo copiloto**: no chat do CRM, a IA **sugere**
+a resposta ao paciente; a secretária **revisa e envia** (nunca envia sozinha).
+Roda **no navegador**, reusando o Groq já configurado — **sem chave nova no servidor
+e sem depender da Meta** (funciona com o Z-API atual).
+
+- **Conhecimento automático:** `_iaMontarSystemPrompt()` monta o "cérebro" a partir
+  de procedimentos/preços (`getProcedimentos`), programas (`getProgramas`), horários
+  (`agenda_config`) e nome da clínica (`clinica_config`). Guardrails no prompt:
+  **nada de conselho médico**, não inventar preço/horário, não fechar agenda sozinha,
+  escalar pra humano quando fugir do escopo.
+- **Geração:** `_iaSugerirResposta()` busca as últimas 16 msgs da conversa e chama
+  o Groq (`llama-3.3-70b-versatile`). `iaSugerirNoChat()` preenche o input pra revisão.
+- **UI:** botão "✨ Sugerir" no chat + aviso "revise antes de enviar"; auto-sugestão
+  opcional ao chegar mensagem. Card de config em Configurações (toggle, tom,
+  instruções extras, auto-sugerir). Config em `ia_config` (sincronizada).
+- **Testes:** `tests/ia.test.js` (prompt traz dados certos + guardrail sempre presente
+  + mapeamento de histórico). 11/11 no `node --test`.
+
+**Próximos passos da IA:** (1) modo **autônomo** (responder sozinho) — mover a geração
+pro webhook `maybeAutoReply()` e enviar server-side; (2) **agendar de verdade** (tool
+use lendo/escrevendo a agenda); (3) trocar Groq→Claude se quiser mais qualidade.
+
+---
+
 ## 🔜 PRÓXIMO PASSO (é aqui que paramos)
 
 **Provar o isolamento com um teste limpo.** O teste anterior não valeu porque o "Dr. Jovino"

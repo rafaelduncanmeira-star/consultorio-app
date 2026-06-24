@@ -2192,6 +2192,47 @@
         </div>
       </div>
 
+      <!-- Secretária por IA (copiloto) -->
+      <div class="chart-card" style="margin-bottom:20px;">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div class="card-icon-lg" style="background:#f3e8ff;color:#7c3aed;"><i data-lucide="sparkles"></i></div>
+          <div style="flex:1;">
+            <div style="font-size:15px;font-weight:700;color:#0f172a;">Secretária por IA <span style="font-size:11px;font-weight:600;color:#6d28d9;background:#f3e8ff;padding:2px 8px;border-radius:999px;margin-left:4px;">copiloto</span></div>
+            <div style="font-size:12.5px;color:#64748b;margin-top:3px;">No chat do CRM, a IA sugere a resposta ao paciente. Você revisa e envia. Ela usa seus procedimentos, preços e horários — e nunca dá conselho médico.</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:12px;color:#64748b;" id="ia-toggle-label">Desativado</span>
+            <label class="zapi-toggle-wrap">
+              <input type="checkbox" id="ia-enabled-toggle" onchange="_iaToggleChange(this.checked)">
+              <div class="zapi-track" id="ia-track"></div>
+              <div class="zapi-thumb" id="ia-thumb"></div>
+            </label>
+          </div>
+        </div>
+
+        <div id="ia-fields" style="display:none;margin-top:20px;padding-top:20px;border-top:1px solid #f1f5f9;">
+          <div style="margin-bottom:14px;">
+            <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Tom de voz <span style="font-weight:400;color:#94a3b8;">(opcional)</span></label>
+            <input type="text" id="ia-tom" class="input" placeholder="Ex: cordial e objetivo, trata o paciente por 'você'" />
+          </div>
+          <div style="margin-bottom:14px;">
+            <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Instruções extras <span style="font-weight:400;color:#94a3b8;">(opcional)</span></label>
+            <textarea id="ia-instrucoes" rows="3" class="input" style="resize:vertical;" placeholder="Ex: Atendemos só particular (sem convênio). Primeira consulta tem retorno em 15 dias incluso. Estacionamento gratuito no prédio."></textarea>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#374151;cursor:pointer;margin-bottom:14px;">
+            <input type="checkbox" id="ia-auto-sugerir" />
+            Sugerir automaticamente quando chegar mensagem do paciente
+          </label>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <button onclick="saveIaConfig()" class="btn-primary">Salvar</button>
+            <span id="ia-status" style="font-size:12.5px;color:#94a3b8;"></span>
+          </div>
+          <div style="margin-top:12px;padding:10px 13px;background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;font-size:11.5px;color:#6d28d9;line-height:1.5;">
+            💡 A IA usa a chave do Groq já configurada no app. Os preços e horários vêm de <b>Procedimentos</b> e <b>Configurar horários</b> — mantenha-os atualizados. No modo copiloto, nada é enviado sem você clicar.
+          </div>
+        </div>
+      </div>
+
       <!-- Tutorial expandido Z-API -->
       <div class="chart-card" style="margin-bottom:20px;">
         <div onclick="document.getElementById('zapi-tutorial-body').style.display = document.getElementById('zapi-tutorial-body').style.display === 'none' ? 'block' : 'none'; this.querySelector('.arrow').textContent = document.getElementById('zapi-tutorial-body').style.display === 'none' ? '▶' : '▼';"
@@ -2622,9 +2663,13 @@
     <div id="chat-no-zapi" style="text-align:center;font-size:12px;color:#94a3b8;padding:6px 0;">
       Configure a integração em <a href="#" onclick="showPage('configuracoes');closeCrmChat();return false;" style="color:#3b82f6;font-weight:600;">Configurações</a> para responder
     </div>
-    <div id="chat-input-area" style="display:none;gap:8px;align-items:flex-end;">
-      <textarea id="chat-input-text" rows="2" class="input" style="flex:1;resize:none;font-size:13px;line-height:1.4;" placeholder="Digite uma mensagem…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea>
-      <button onclick="sendChatMessage()" class="btn-primary" style="padding:8px 14px;height:fit-content;flex-shrink:0;">➤</button>
+    <div id="chat-input-area" style="display:none;flex-direction:column;gap:6px;">
+      <div id="chat-ia-hint" style="display:none;font-size:11px;color:#7c3aed;font-weight:600;">✨ Sugestão da IA — revise antes de enviar</div>
+      <div style="display:flex;gap:8px;align-items:flex-end;">
+        <textarea id="chat-input-text" rows="2" class="input" style="flex:1;resize:none;font-size:13px;line-height:1.4;" placeholder="Digite uma mensagem…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea>
+        <button id="chat-ia-btn" onclick="iaSugerirNoChat(false)" class="btn-ghost" style="padding:8px 10px;height:fit-content;flex-shrink:0;font-size:12px;white-space:nowrap;" title="Sugerir resposta com IA">✨ Sugerir</button>
+        <button onclick="sendChatMessage()" class="btn-primary" style="padding:8px 14px;height:fit-content;flex-shrink:0;">➤</button>
+      </div>
     </div>
   </div>
 </div>
