@@ -64,6 +64,31 @@ transformando em **produto para vender a clínicas** (multi-profissional).
 
 ---
 
+## 🛡️ Sessão de hardening (segurança + testes + LGPD)
+
+Passada de qualidade sobre a base, sem tocar em regras de negócio:
+
+1. **XSS blindado — 17 pontos corrigidos.** Auditoria cruzou as ~174 atribuições a
+   `innerHTML` com interpolações de dados externos (nome/obs/canal/tipo de paciente,
+   CRM e WhatsApp). 10 gaps de risco alto + 7 baixo foram envolvidos com `_esc(...)`.
+   Casos notáveis: card do "marcar atendimento" (CRM→Kanban), view **mensal** da agenda
+   (a semanal já escapava), alerta de follow-ups, abas do perfil do paciente, e
+   agregações dos relatórios. `toast()`/`confirm()` são texto puro → não eram XSS.
+2. **Testes automatizados (novos).** Pasta `tests/` com harness **sem dependências**
+   (`node:test` + `node:vm`) que recorta funções do `app.js` real e roda em sandbox.
+   Cobre `_esc`, `_limparSensiveisProfissional` (blindagem do financeiro) e
+   `_profDoPaciente` (isolamento). Rodar com **`node --test`**. 7/7 passando.
+   ⚠️ Não criar `package.json` na raiz (Vercel é estático — quebraria o deploy).
+3. **LGPD.** `privacidade.html` (política-modelo com placeholders pra preencher CNPJ/
+   razão social/DPO) + link em Configurações.
+
+**Ainda em aberto (próximas passadas de qualidade):** feature de exportar/excluir dados
+de um paciente sob demanda (direito LGPD), acessibilidade (zero `aria-` hoje), validação
+de formulários (WhatsApp/e-mail), e — só com testes mais amplos antes — modularizar o
+`app.js` (11.8k linhas num arquivo só).
+
+---
+
 ## 🔜 PRÓXIMO PASSO (é aqui que paramos)
 
 **Provar o isolamento com um teste limpo.** O teste anterior não valeu porque o "Dr. Jovino"

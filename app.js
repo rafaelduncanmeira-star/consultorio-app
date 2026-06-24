@@ -2263,11 +2263,11 @@ function renderProgramas() {
           let detalhes = '';
           if (p.tipo === 'Fixo') detalhes = `${(p.marcos||[]).length} marco(s)`;
           else if (p.tipo === 'Contínuo') detalhes = `A cada ${p.intervaloDias} dias`;
-          else if (p.tipo === 'Assinatura') detalhes = `${p.vigencia} · ${BRL(p.precoAVista||0)} à vista`;
+          else if (p.tipo === 'Assinatura') detalhes = `${_esc(p.vigencia)} · ${BRL(p.precoAVista||0)} à vista`;
           return `<div class="chart-card" style="padding:18px;">
             <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px;">
               <div style="font-size:14px;font-weight:700;color:#0f172a;">${_esc(p.nome)}</div>
-              <span style="font-size:10px;font-weight:700;color:${tipoCor};background:${tipoBg};padding:2px 7px;border-radius:999px;">${p.tipo}</span>
+              <span style="font-size:10px;font-weight:700;color:${tipoCor};background:${tipoBg};padding:2px 7px;border-radius:999px;">${_esc(p.tipo)}</span>
             </div>
             <div style="font-size:12px;color:#64748b;margin-bottom:10px;min-height:32px;">${_esc(p.descricao || '—')}</div>
             <div style="font-size:11.5px;color:#475569;margin-bottom:10px;">
@@ -3776,8 +3776,8 @@ function renderCrmPendentesAtendidos() {
         ${pendentes.map(c => `
           <div style="display:flex;align-items:center;justify-content:space-between;background:#fff;border-radius:8px;padding:10px 14px;border:1px solid #d1fae5;">
             <div>
-              <span style="font-weight:600;color:#0f172a;">${c.nome}</span>
-              <span style="color:#64748b;font-size:12px;margin-left:10px;">${c.tipo || ''} · ${c.canal || ''} · ${formatDate(c.data)}</span>
+              <span style="font-weight:600;color:#0f172a;">${_esc(c.nome)}</span>
+              <span style="color:#64748b;font-size:12px;margin-left:10px;">${_esc(c.tipo || '')} · ${_esc(c.canal || '')} · ${formatDate(c.data)}</span>
             </div>
             <button onclick="convertCrmToAtendido(${c._idx})" style="background:#10b981;color:#fff;border:none;border-radius:7px;padding:7px 16px;font-weight:600;font-size:13px;cursor:pointer;">
               ✓ Registrar Atendimento
@@ -4337,7 +4337,7 @@ function renderFollowup() {
         <span class="text-2xl">⚠️</span>
         <div>
           <div class="font-semibold text-orange-800">${vencidos.length} follow-up(s) ${labelAba} pendente(s) hoje</div>
-          <div class="text-sm text-orange-700 mt-1">${vencidos.map(r => r.nome).join(', ')}</div>
+          <div class="text-sm text-orange-700 mt-1">${vencidos.map(r => _esc(r.nome)).join(', ')}</div>
         </div>
       </div>`;
   } else {
@@ -5130,8 +5130,8 @@ function _viewMes() {
     const events = ags.filter(a => a.data === ds).sort((a, b) => a.hora.localeCompare(b.hora));
     const evtHtml = events.slice(0, 3).map(a => {
       const cls = (a.status || 'confirmado').toLowerCase().replace('no-show', 'noshow');
-      const lbl = `${a.hora} ${a.pacienteNome}`;
-      return `<div class="cal-evt ${cls}" onclick="event.stopPropagation();editAgendamento('${a.id}')" title="${a.pacienteNome} — ${a.procedimento || ''}">${lbl}</div>`;
+      const lbl = `${_esc(a.hora)} ${_esc(a.pacienteNome)}`;
+      return `<div class="cal-evt ${cls}" onclick="event.stopPropagation();editAgendamento('${a.id}')" title="${_esc(a.pacienteNome)} — ${_esc(a.procedimento || '')}">${lbl}</div>`;
     }).join('');
     const more = events.length > 3 ? `<div class="cal-more">+${events.length - 3} mais</div>` : '';
     const classes = ['cal-day', outside && 'outside', today && 'today', bloqDay && 'has-blockage'].filter(Boolean).join(' ');
@@ -5526,7 +5526,7 @@ function renderReceita() {
       return `
         <div style="margin-bottom:10px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-            <div style="font-size:12.5px;font-weight:600;color:#0f172a;">${s.nome} <span style="color:#94a3b8;font-weight:400;font-size:11.5px;">(${s.qtd})</span></div>
+            <div style="font-size:12.5px;font-weight:600;color:#0f172a;">${_esc(s.nome)} <span style="color:#94a3b8;font-weight:400;font-size:11.5px;">(${s.qtd})</span></div>
             <div style="font-size:12.5px;font-weight:700;color:#0f172a;">${BRL(s.total)} <span style="font-size:10.5px;color:#94a3b8;font-weight:500;">· ${BRL(ticketProc)}</span></div>
           </div>
           <div style="height:6px;background:#f1f5f9;border-radius:999px;overflow:hidden;">
@@ -6212,7 +6212,7 @@ function renderMarketing(mesAtual) {
       const pctBar = (s.receita / maxReceita) * 100;
       return `
         <tr>
-          <td style="font-weight:600;color:#0f172a;">${s.canal}</td>
+          <td style="font-weight:600;color:#0f172a;">${_esc(s.canal)}</td>
           <td style="text-align:center;color:#475569;">${s.contatos}</td>
           <td style="text-align:center;color:#475569;">${s.atendeu}</td>
           <td style="text-align:center;"><span style="color:${corConv};font-weight:700;">${PCT(s.conv)}</span></td>
@@ -6438,7 +6438,7 @@ function renderFinanceiro(mes) {
       return `
         <div style="margin-bottom:12px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
-            <div style="font-size:12.5px;font-weight:600;color:#0f172a;">${s.tipo} <span style="color:#94a3b8;font-weight:400;font-size:11.5px;">(${s.qtd})</span></div>
+            <div style="font-size:12.5px;font-weight:600;color:#0f172a;">${_esc(s.tipo)} <span style="color:#94a3b8;font-weight:400;font-size:11.5px;">(${s.qtd})</span></div>
             <div style="font-size:12.5px;font-weight:700;color:#0f172a;">${BRL(s.total)} <span style="font-size:10.5px;color:#94a3b8;font-weight:500;">· ticket ${BRL(s.ticket)}</span></div>
           </div>
           <div style="height:6px;background:#f1f5f9;border-radius:999px;overflow:hidden;">
@@ -8117,7 +8117,7 @@ function renderRelatorio(mes) {
         <tbody>
           ${tipoStats.map(t => `
             <tr class="border-b border-gray-50">
-              <td class="py-2 text-gray-700">${t.icon} ${t.tipo}</td>
+              <td class="py-2 text-gray-700">${t.icon} ${_esc(t.tipo)}</td>
               <td class="py-2 text-right font-semibold">${t.total}</td>
               <td class="py-2 text-right text-green-600">${t.compareceu}</td>
               <td class="py-2 text-right text-red-500">${t.noshow || '—'}</td>
@@ -8201,7 +8201,7 @@ function renderRelatorio(mes) {
           ${aderPorPrograma.map(p => `
             <tr class="border-b border-gray-50">
               <td class="py-2 text-gray-700">${_esc(p.nome)}</td>
-              <td class="py-2 text-right text-gray-500">${p.tipo}</td>
+              <td class="py-2 text-right text-gray-500">${_esc(p.tipo)}</td>
               <td class="py-2 text-right">${p.ativos}</td>
               <td class="py-2 text-right font-semibold text-blue-700">${p.mrrProg > 0 ? BRL(Math.round(p.mrrProg)) : '—'}</td>
               <td class="py-2 text-right font-semibold text-green-700">${p.recMes > 0 ? BRL(p.recMes) : '—'}</td>
@@ -9383,9 +9383,9 @@ function abrirPerfilPaciente(nomeEnc) {
             ${pacs.map(p => `
               <tr style="border-bottom:1px solid #f8fafc;">
                 <td style="padding:9px 0;color:#374151;">${formatDate(p.data)}</td>
-                <td style="padding:9px 0;"><span style="background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;">${p.tipo}</span></td>
+                <td style="padding:9px 0;"><span style="background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;">${_esc(p.tipo)}</span></td>
                 <td style="padding:9px 0;text-align:right;font-weight:700;color:#0f172a;">${BRL(p.valor)}</td>
-                <td style="padding:9px 0;color:#64748b;font-size:12px;">${p.pagamento}</td>
+                <td style="padding:9px 0;color:#64748b;font-size:12px;">${_esc(p.pagamento)}</td>
                 <td style="padding:9px 0;text-align:center;">${statusBadge(p.statusPgto)}</td>
               </tr>`).join('')}
           </tbody>
@@ -9418,8 +9418,8 @@ function abrirPerfilPaciente(nomeEnc) {
             ${followups.map(f => `
               <tr style="border-bottom:1px solid #f8fafc;">
                 <td style="padding:9px 0;color:#374151;">${formatDate(f.dataContato)}</td>
-                <td style="padding:9px 0;color:#64748b;">${f.tipoContato || '—'}</td>
-                <td style="padding:9px 0;color:#64748b;font-size:12px;">${f.obs || '—'}</td>
+                <td style="padding:9px 0;color:#64748b;">${_esc(f.tipoContato || '—')}</td>
+                <td style="padding:9px 0;color:#64748b;font-size:12px;">${_esc(f.obs || '—')}</td>
                 <td style="padding:9px 0;text-align:center;">${statusBadge(f.feito ? 'Feito' : 'Pendente')}</td>
               </tr>`).join('')}
           </tbody>
@@ -9468,7 +9468,7 @@ function abrirPerfilPaciente(nomeEnc) {
             ${agenda.map(a => `
               <tr style="border-bottom:1px solid #f8fafc;${a.data >= today ? 'background:#f0fdf4;' : ''}">
                 <td style="padding:9px 0;color:#374151;font-weight:${a.data >= today ? '600' : '400'};">${formatDate(a.data)} ${a.hora}</td>
-                <td style="padding:9px 0;color:#64748b;">${a.procedimento || '—'}</td>
+                <td style="padding:9px 0;color:#64748b;">${_esc(a.procedimento || '—')}</td>
                 <td style="padding:9px 0;text-align:center;">${statusBadge(a.status || 'Confirmado')}</td>
               </tr>`).join('')}
           </tbody>
@@ -10473,7 +10473,7 @@ async function renderEquipeCard() {
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;">
       ${membros.map(m => `
         <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
-          <div style="width:32px;height:32px;background:#dbeafe;color:#1d4ed8;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;">${(m.nome[0] || '?').toUpperCase()}</div>
+          <div style="width:32px;height:32px;background:#dbeafe;color:#1d4ed8;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;">${_esc((m.nome[0] || '?').toUpperCase())}</div>
           <div style="flex:1;min-width:0;">
             <div style="font-size:13px;font-weight:600;color:#0f172a;">${_esc(m.nome)}</div>
             <div style="font-size:11.5px;color:#64748b;">${m.role === 'medico' ? '🩺 Médico(a)' : '📋 Secretária'} · desde ${new Date(m.created_at).toLocaleDateString('pt-BR')}</div>
