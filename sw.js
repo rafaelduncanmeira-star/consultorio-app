@@ -2,12 +2,16 @@
 // Estratégia: network-first com fallback para cache (para um app que muda muito,
 // é melhor sempre tentar a rede primeiro e só cair no cache se estiver offline).
 
-const CACHE_NAME = 'consultorio-v1';
+const CACHE_NAME = 'consultorio-v2';
 const ASSETS = [
   './',
   './index.html',
   './app.js',
   './manifest.json',
+  './icon-192.png',
+  './icon-512.png',
+  './maskable-512.png',
+  './apple-touch-icon.png',
 ];
 
 // Install — pré-cacheia o shell do app
