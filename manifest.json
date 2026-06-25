@@ -1,6 +1,6 @@
 {
-  "name": "Consultório App",
-  "short_name": "Consultório",
+  "name": "Maestria de Consultório",
+  "short_name": "Maestria",
   "description": "Sistema completo de gestão de consultório médico — CRM, agenda, programas de acompanhamento e relatórios.",
   "start_url": "./index.html",
   "scope": "./",
