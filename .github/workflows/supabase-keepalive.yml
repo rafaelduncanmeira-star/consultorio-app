@@ -1,0 +1,37 @@
+name: Supabase keep-alive
+
+# Mantém o projeto Supabase do plano gratuito ATIVO.
+# O plano grátis pausa sozinho após ~7 dias sem atividade — e aí o login do
+# app falha ("Load failed") até alguém acordar o banco. Este workflow faz uma
+# requisicao leve ao banco todo dia, registrando atividade e evitando a pausa.
+#
+# A chave abaixo e a "publishable key" (anon) — a MESMA que ja esta publica no
+# app.js (codigo do cliente). Nao e segredo: serve so para leitura sob RLS.
+#
+# ⚠️ Cron so dispara quando o arquivo esta na branch padrao (main).
+
+on:
+  schedule:
+    - cron: '23 8 * * *'   # todo dia ~08:23 UTC (~05:23 BRT)
+  workflow_dispatch:        # permite rodar na mão pelo botao "Run workflow"
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cutucar o banco (mantem o projeto ativo)
+        env:
+          SUPA_URL: https://ipvztcqlawwslnkzmzzl.supabase.co
+          SUPA_KEY: sb_publishable_-AffRgArhzjeJioFgyzgng_bnSo2F4K
+        run: |
+          echo "Pingando Supabase para evitar a pausa do plano gratuito..."
+          code=$(curl -sS -o /dev/null -w "%{http_code}" \
+            "$SUPA_URL/rest/v1/app_data?select=key&limit=1" \
+            -H "apikey: $SUPA_KEY" \
+            -H "Authorization: Bearer $SUPA_KEY")
+          echo "Resposta do banco: HTTP $code"
+          # 200 (ok) ou 401/404 ainda contam como atividade no projeto.
+          if [ -z "$code" ] || [ "$code" = "000" ]; then
+            echo "Falha de conexao com o Supabase"; exit 1
+          fi
+          echo "OK — projeto recebeu atividade, pausa adiada por mais ~7 dias."
