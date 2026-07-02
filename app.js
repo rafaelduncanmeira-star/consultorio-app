@@ -72,6 +72,23 @@ function _atualizarBotoesTema(dark) {
   }
 })();
 
+// ====================== RESILIÊNCIA A CDN FORA DO AR ======================
+// O app carrega Chart.js/Tailwind/etc de CDNs. Se um CDN falhar (rede
+// corporativa, queda do jsdelivr, offline), o Dashboard INTEIRO quebrava com
+// "Chart is not defined". Stub inofensivo: os gráficos ficam em branco, mas
+// todas as páginas continuam funcionando.
+// (checagem imediata: os <script src> dos CDNs são síncronos e vêm antes
+// do app.js — se Chart não existe agora, o CDN falhou de vez.)
+if (typeof window.Chart === 'undefined') {
+  console.warn('Chart.js não carregou (CDN indisponível) — gráficos desativados nesta sessão.');
+  window.Chart = class ChartStub {
+    constructor() {}
+    destroy() {}
+    update() {}
+    resize() {}
+  };
+}
+
 // ====================== PWA (Service Worker + Install Prompt) ======================
 let _deferredInstallPrompt = null;
 
@@ -154,10 +171,11 @@ async function cloudPush(key) {
   const raw = localStorage.getItem('consult_' + key);
   if (raw === null) return;
   try {
-    await _supa.from('app_data').upsert(
+    const { error } = await _supa.from('app_data').upsert(
       { user_id: owner, key, value: JSON.parse(raw) },
       { onConflict: 'user_id,key' }
     );
+    if (error) console.warn('cloudPush rejeitado', key, error.message);
   } catch(e) { console.warn('cloudPush error', key, e.message); }
 }
 
@@ -213,10 +231,19 @@ async function _pushBlindada(tabela, oldArr, newArr) {
   const owner = currentDataOwner || currentUser.id;
   try {
     const comId = (newArr || []).filter(r => r && r.id);
-    if (comId.length) await _supa.from(tabela).upsert(comId.map(r => _rowBlindada(r, owner)), { onConflict: 'id' });
+    if (comId.length) {
+      // supabase-js NÃO lança em erro de banco (RLS, constraint...) — retorna {error}.
+      // Sem esta checagem, uma gravação rejeitada passava por "sucesso" e a
+      // migração apagava o blob => perda total da coleção. Checar SEMPRE.
+      const { error } = await _supa.from(tabela).upsert(comId.map(r => _rowBlindada(r, owner)), { onConflict: 'id' });
+      if (error) { console.warn('_pushBlindada upsert', tabela, error.message); return false; }
+    }
     const novos = new Set(comId.map(r => r.id));
     const removidos = (oldArr || []).filter(r => r && r.id && !novos.has(r.id)).map(r => r.id);
-    if (removidos.length) await _supa.from(tabela).delete().in('id', removidos);
+    if (removidos.length) {
+      const { error } = await _supa.from(tabela).delete().in('id', removidos);
+      if (error) { console.warn('_pushBlindada delete', tabela, error.message); return false; }
+    }
     return true;
   } catch(e) { console.warn('_pushBlindada', tabela, e.message); return false; }
 }
@@ -230,9 +257,21 @@ async function _pullBlindada(key, cfg) {
     if (error) { console.warn('_pullBlindada', cfg.tabela, error.message); return; }
     const arr = (data || []).map(row => row.data).filter(Boolean)
       .sort((a, b) => (b.data || '').localeCompare(a.data || ''));
-    // Anti-zeramento: tabela vazia + já há dados locais + migração do dono pendente → não sobrescreve.
     const atual = JSON.parse(localStorage.getItem('consult_' + key) || '[]');
-    if (arr.length === 0 && atual.length > 0 && localStorage.getItem(cfg.flag) !== '1') return;
+    // Anti-zeramento: nunca troca dados locais por um pull VAZIO quando quem
+    // olha é o DONO (dono com local não-vazio deveria sempre ter linhas na
+    // tabela — vazio indica migração perdida/RLS quebrado, não "apagou tudo").
+    // Pro membro (profissional), vazio pode ser legítimo (nada atribuído a ele),
+    // mas só confiamos nisso depois da migração do dono concluída.
+    if (arr.length === 0 && atual.length > 0) {
+      const souDono = (currentDataOwner || currentUser.id) === currentUser.id;
+      if (souDono) {
+        console.warn('_pullBlindada: pull vazio com dados locais (' + key + ') — mantendo local e re-marcando migração');
+        localStorage.removeItem(cfg.flag); // força re-migração no próximo ciclo (auto-cura)
+        return;
+      }
+      if (localStorage.getItem(cfg.flag) !== '1') return;
+    }
     localStorage.setItem('consult_' + key, JSON.stringify(arr));
   } catch(e) { console.warn('_pullBlindada', cfg.tabela, e.message); }
 }
@@ -1011,6 +1050,23 @@ function _esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// Normaliza telefone BR para a forma local (sem DDI 55) — a MESMA usada pelo
+// webhook como chave do chat. Sem isso, contato salvo com "+55" ganhava chave
+// diferente e duplicava lead / abria chat vazio.
+// Cuidado: DDD 55 existe (região de Santa Maria-RS) — só removemos o 55
+// inicial quando o número tem 12+ dígitos (DDI + DDD + número).
+function _normPhone(raw) {
+  let d = String(raw || '').replace(/\D/g, '');
+  if (d.length >= 12 && d.startsWith('55')) d = d.slice(2);
+  return d;
+}
+
+// Link wa.me correto (evita 5555... quando o cadastro já tinha o DDI).
+function _waMeLink(raw, texto) {
+  const n = _normPhone(raw);
+  return `https://wa.me/55${n}${texto ? '?text=' + encodeURIComponent(texto) : ''}`;
+}
+
 // Gemini key — agora isolada por user_id via Supabase (sai do localStorage exposto)
 function getGeminiKey() {
   // Tenta DB (vai pro Supabase via app_data) e, se não tiver, faz fallback temporário pra localStorage antigo
@@ -1202,7 +1258,16 @@ function showPage(page) {
   if (page === 'crm') renderCrm();
   if (page === 'pacientes') renderPacientes();
   if (page === 'followup') renderFollowup();
-  if (page === 'agenda') { setAgendaView(agView); }
+  if (page === 'agenda') {
+    setAgendaView(agView);
+    // Agendamentos criados pela IA (server-side) só existiam localmente após
+    // relogar. Ao abrir a Agenda, puxa a coleção em background e re-renderiza.
+    if (_supa && currentUser && typeof _pullBlindada === 'function') {
+      _pullBlindada('agendamentos', _BLINDADAS.agendamentos)
+        .then(() => { if (document.getElementById('page-agenda')?.classList.contains('active')) renderAgenda(); })
+        .catch(() => {});
+    }
+  }
   if (page === 'receita') renderReceita();
   if (page === 'despesas') renderDespesas();
   if (page === 'precos') renderPrecos();
@@ -1763,7 +1828,7 @@ function getInscricoes() { return DB.get('inscricoes'); }
 function _addDaysIso(isoDate, dias) {
   const d = new Date(isoDate + 'T12:00:00');
   d.setDate(d.getDate() + dias);
-  return d.toISOString().substring(0, 10);
+  return _ymd(d);
 }
 
 // Cria inscrição + agendamentos + follow-ups automaticamente
@@ -2057,7 +2122,7 @@ function saveRenovacao(e) {
   const fusManter = fusOriginal.filter(f =>
     f.programaInscricaoId !== ins.id || f.feito
   );
-  const hoje = new Date().toISOString().substring(0, 10);
+  const hoje = _ymd(new Date());
   const novosFus = _gerarCronogramaFollowups(ins, prog, hoje, novaDataFim);
   DB.set('followup', [...fusManter, ...novosFus]);
 
@@ -2066,7 +2131,7 @@ function saveRenovacao(e) {
   pacs.push({
     id: _novoId('pac'), profissionalId: ins.profissionalId || null,
     nome: ins.pacienteNome, whatsapp: ins.pacienteWhatsapp || '',
-    data: new Date().toISOString().substring(0, 10),
+    data: _ymd(new Date()),
     procedimento: prog.nome + ' (Renovação)',
     tipoAtividade: 'Consultório',
     valor: valorTotal,
@@ -2093,7 +2158,7 @@ function registrarMarco(inscricaoId, marcoIdx, valoresClinicos = {}, obs = '') {
   if (!ins) return;
   const reg = ins.registros[marcoIdx];
   if (!reg) return;
-  reg.dataReal = new Date().toISOString().substring(0, 10);
+  reg.dataReal = _ymd(new Date());
   reg.valoresClinicos = valoresClinicos || {};
   reg.obs = obs || '';
 
@@ -2158,7 +2223,7 @@ function _proximoMarco(ins) {
 
 // Retorna a aderência de uma inscrição (registros realizados até hoje / esperados até hoje)
 function _aderenciaInscricao(ins) {
-  const hoje = new Date().toISOString().substring(0, 10);
+  const hoje = _ymd(new Date());
   const esperados = ins.registros.filter(r => r.dataPrevista <= hoje).length;
   const realizados = ins.registros.filter(r => r.dataReal).length;
   return esperados ? (realizados / esperados) * 100 : 100;
@@ -2185,7 +2250,7 @@ function renderProgramas() {
   const progs = getProgramas();
   const inscricoes = getInscricoes();
   const ativas = inscricoes.filter(i => i.status === 'Ativo');
-  const hoje = new Date().toISOString().substring(0, 10);
+  const hoje = _ymd(new Date());
 
   // KPIs
   const totalAtivos = ativas.length;
@@ -2371,7 +2436,7 @@ function openModalInscrever(programaPreId) {
   const sel = document.getElementById('ins-programa');
   sel.innerHTML = progs.map(p => `<option value="${_esc(p.id)}">${_esc(p.nome)} (${p.tipo})</option>`).join('');
   if (programaPreId) sel.value = programaPreId;
-  document.getElementById('ins-data-inicio').value = new Date().toISOString().substring(0, 10);
+  document.getElementById('ins-data-inicio').value = _ymd(new Date());
   document.getElementById('ins-paciente-nome').value = '';
   document.getElementById('ins-paciente-whats').value = '';
   // datalist com pacientes
@@ -2952,9 +3017,11 @@ function _aplicarEfeitosMudancaStatusCrm(idx, oldStatus, newStatus) {
 
   // "Marcou" → propõe criar agendamento, SE não tem agendamento futuro vinculado
   if (newStatus === 'Marcou') {
-    const today = new Date().toISOString().substring(0,10);
+    const today = _ymd(new Date());
+    // Vínculo por ID estável primeiro; o índice congelado (crmIdx) apodrece
+    // quando a lista é reordenada/apagada e apontava pro contato ERRADO.
     const jaTemAg = DB.get('agendamentos').some(a =>
-      a.crmIdx === idx ||
+      (c.id && a.crmId === c.id) ||
       ((a.pacienteNome || '').toLowerCase().trim() === (c.nome || '').toLowerCase().trim() &&
        (a.data || '') >= today && a.status !== 'Cancelado')
     );
@@ -2985,9 +3052,11 @@ function _aplicarEfeitosMudancaStatusCrm(idx, oldStatus, newStatus) {
   // "Não marcou" → marca agendamentos futuros vinculados como Cancelado (se existirem)
   if (newStatus === 'Não marcou') {
     const ags = DB.get('agendamentos');
-    const today = new Date().toISOString().substring(0,10);
+    const today = _ymd(new Date());
+    // Cancela SÓ o que é comprovadamente deste contato: id estável ou nome.
+    // (a.crmIdx congelado já cancelou agendamento de paciente errado.)
     const idsCancelar = ags.filter(a =>
-      (a.crmIdx === idx || (a.pacienteNome || '').toLowerCase().trim() === (c.nome || '').toLowerCase().trim()) &&
+      ((c.id && a.crmId === c.id) || (a.pacienteNome || '').toLowerCase().trim() === (c.nome || '').toLowerCase().trim()) &&
       (a.data || '') >= today &&
       a.status !== 'Compareceu' && a.status !== 'Cancelado'
     );
@@ -3079,7 +3148,7 @@ function _detectarVinculos(col, item) {
     const fus = DB.get('followup').filter(f => (f.nome || '').toLowerCase().trim() === nome);
     if (fus.length) vinculos.push(`${fus.length} follow-up(s) ativo(s)`);
     // Agendamentos futuros
-    const today = new Date().toISOString().substring(0,10);
+    const today = _ymd(new Date());
     const ags = DB.get('agendamentos').filter(a =>
       (a.pacienteNome || '').toLowerCase().trim() === nome &&
       (a.data || '') >= today && a.status !== 'Compareceu' && a.status !== 'Faltou'
@@ -3217,11 +3286,11 @@ function saveCrm(e) {
   const fd = new FormData(e.target);
   const item = { data: fd.get('data'), hora: fd.get('hora'), nome: fd.get('nome'), whatsapp: fd.get('whatsapp'), idade: fd.get('idade'), canal: fd.get('canal'), tipo: fd.get('tipo'), status: fd.get('status'), obs: fd.get('obs'), profissionalId: fd.get('profissionalId') || null };
   const data = DB.get('crm');
-  // Bloqueia duplicata por WhatsApp (compara só dígitos)
-  const cleanPhone = (item.whatsapp || '').replace(/\D/g, '');
+  // Bloqueia duplicata por WhatsApp (normalizado — com ou sem DDI 55)
+  const cleanPhone = _normPhone(item.whatsapp);
   const editIdx = (editState.col === 'crm' && editState.idx !== null) ? editState.idx : -1;
   if (cleanPhone) {
-    const dupIdx = data.findIndex((c, i) => i !== editIdx && c.whatsapp && c.whatsapp.replace(/\D/g, '') === cleanPhone);
+    const dupIdx = data.findIndex((c, i) => i !== editIdx && c.whatsapp && _normPhone(c.whatsapp) === cleanPhone);
     if (dupIdx >= 0) {
       const dupNome = data[dupIdx].nome || '(sem nome)';
       if (!confirm(`Já existe um contato com este WhatsApp: "${dupNome}".\n\nDeseja criar mesmo assim?`)) return;
@@ -3272,7 +3341,7 @@ function renderCrm() {
         <td style="font-weight:600;color:#0f172a;">${_esc(r.nome)}</td>
         <td>${r.whatsapp ? (_waConnected()
           ? `<button onclick="openCrmChat(${i})" style="background:none;border:none;cursor:pointer;color:#10b981;font-weight:600;font-size:13px;padding:0;font-family:'Inter',sans-serif;">💬 ${_esc(r.whatsapp)}</button>`
-          : `<a href="https://wa.me/55${r.whatsapp.replace(/\D/g,'')}" target="_blank" style="color:#10b981;font-weight:600;text-decoration:none;">💬 ${_esc(r.whatsapp)}</a>`) : '—'}</td>
+          : `<a href="https://wa.me/55${_normPhone(r.whatsapp)}" target="_blank" style="color:#10b981;font-weight:600;text-decoration:none;">💬 ${_esc(r.whatsapp)}</a>`) : '—'}</td>
         <td style="color:#475569;">${_esc(r.canal||'—')}</td>
         <td style="color:#475569;">${_esc(r.tipo||'—')}</td>
         <td>${statusSelect(r.status, i)}</td>
@@ -3575,7 +3644,7 @@ function _kanbanCardHtml(r, col) {
                      cursor:pointer;margin-bottom:9px;font-family:'Inter',sans-serif;">
               💬 ${_esc(r.whatsapp)}
            </button>`
-        : `<a href="https://wa.me/55${r.whatsapp.replace(/\D/g,'')}" target="_blank"
+        : `<a href="https://wa.me/55${_normPhone(r.whatsapp)}" target="_blank"
               style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#10b981;font-weight:600;
                      background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:4px 9px;
                      text-decoration:none;margin-bottom:9px;">
@@ -3794,7 +3863,7 @@ function convertCrmToAtendido(crmIdx) {
   editState = { col: null, idx: null, crmIdx };
   const modal = document.getElementById('modal-paciente');
   const form = modal.querySelector('form');
-  const today = new Date().toISOString().split('T')[0];
+  const today = _ymd(new Date());
   popularProcedimentoSelect();
   form.data.value = today;
   form.nome.value = c.nome || '';
@@ -3887,7 +3956,7 @@ async function processarImportWA() {
   document.getElementById('wa-step-paste').style.display = 'none';
   document.getElementById('wa-step-loading').style.display = 'block';
 
-  const hoje = new Date().toISOString().split('T')[0];
+  const hoje = _ymd(new Date());
   const promptBase = `Você é assistente de uma clínica de geriatria. Analise a conversa do WhatsApp ${temImagem ? '(imagem em anexo, possivelmente um print)' : 'abaixo'} e extraia os dados do contato.
 
 ${temImagem ? '' : `Conversa:\n"""\n${texto}\n"""\n`}${temImagem && texto ? `Contexto adicional do usuário: "${texto}"\n` : ''}
@@ -4008,7 +4077,7 @@ function renderAtendidosSemFollowup() {
     if (!ultFupPorNome[key] || d > ultFupPorNome[key]) ultFupPorNome[key] = d;
   });
   const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 60);
-  const cutoffStr = cutoff.toISOString().split('T')[0];
+  const cutoffStr = _ymd(cutoff);
   const semFollowup = pacs.map((p, i) => ({ ...p, _idx: i })).filter(p => {
     if (p.data < cutoffStr) return false;            // consulta antiga demais
     if (p.followupCreated) return false;             // já criamos via banner
@@ -4055,7 +4124,7 @@ function convertAtendidoToFollowup(pacIdx) {
   const ajustado = proximoDiaUtil(nextWeek);
   form.nome.value = p.nome || '';
   form.ultConsulta.value = p.data || '';
-  form.dataContato.value = ajustado.toISOString().split('T')[0];
+  form.dataContato.value = _ymd(ajustado);
   form.tipoContato.value = 'WhatsApp';
   form.dataReav.value = '';
   form.obs.value = '';
@@ -4072,7 +4141,7 @@ function savePaciente(e) {
   if (valorTotal < 0) { alert('Valor não pode ser negativo.'); return; }
   const pagamento  = fd.get('pagamento');
   const parcelas   = pagamento === 'Cartão crédito' ? (parseInt(fd.get('parcelas')) || 1) : 1;
-  const dataConsulta = fd.get('data') || new Date().toISOString().split('T')[0];
+  const dataConsulta = fd.get('data') || _ymd(new Date());
 
   // Gera recebimentos futuros se parcelado
   let recebimentos = null;
@@ -4082,7 +4151,7 @@ function savePaciente(e) {
     const [ano, mes, dia] = dataConsulta.split('-').map(Number);
     for (let i = 0; i < parcelas; i++) {
       const d = new Date(ano, mes - 1 + i, 1);
-      const mesStr = d.toISOString().substring(0, 7);
+      const mesStr = _ymd(d).substring(0, 7);
       recebimentos.push({ numero: i + 1, mes: mesStr, valor: Math.round(valorParcela * 100) / 100, recebido: i === 0 });
     }
   }
@@ -4279,7 +4348,7 @@ function renderFollowup() {
   else { const b = document.getElementById('atendidos-sem-followup'); if (b) b.innerHTML = ''; }
 
   const all = DB.get('followup');
-  const today = new Date().toISOString().split('T')[0];
+  const today = _ymd(new Date());
   const tbody = document.getElementById('followup-tbody');
   const alertas = document.getElementById('alertas-container');
 
@@ -4481,7 +4550,7 @@ function _isBloqueado(dataStr, horaInicio, duracaoMin) {
 }
 
 // Verifica conflito com outro agendamento (mesmo paciente/horário ou sobreposição)
-function _temConflito(dataStr, hora, duracao, ignorarId = null) {
+function _temConflito(dataStr, hora, duracao, ignorarId = null, profissionalId = undefined) {
   const ags = getAgendamentos();
   const ini = _toMin(hora);
   const fim = ini + duracao;
@@ -4489,6 +4558,10 @@ function _temConflito(dataStr, hora, duracao, ignorarId = null) {
     if (a.id === ignorarId) return false;
     if (a.data !== dataStr) return false;
     if (a.status === 'Cancelado') return false;
+    // Clínica multi-profissional: horários de profissionais DIFERENTES podem
+    // coexistir (salas separadas). Só é conflito quando é o mesmo profissional
+    // ou quando algum dos dois não tem profissional definido (conservador).
+    if (profissionalId && a.profissionalId && a.profissionalId !== profissionalId) return false;
     const aIni = _toMin(a.hora);
     const aFim = aIni + (a.duracao || 60);
     return ini < aFim && fim > aIni;
@@ -4662,8 +4735,8 @@ function saveAgendamento(e) {
     pacId: (editState.pacIdx != null && DB.get('pacientes')[editState.pacIdx]) ? DB.get('pacientes')[editState.pacIdx].id : null,
   };
 
-  // Verifica conflito
-  const conflito = _temConflito(item.data, item.hora, item.duracao, editState.agId);
+  // Verifica conflito (ciente do profissional — Dr. A e Dr. B podem atender em paralelo)
+  const conflito = _temConflito(item.data, item.hora, item.duracao, editState.agId, item.profissionalId || undefined);
   if (conflito && item.status !== 'Cancelado') {
     const aviso = document.getElementById('ag-conflito-aviso');
     aviso.style.display = 'block';
@@ -4680,7 +4753,9 @@ function saveAgendamento(e) {
 
   const ags = getAgendamentos();
   const idx = ags.findIndex(x => x.id === id);
-  if (idx >= 0) ags[idx] = item; else ags.push(item);
+  // Preserva campos de sistema do registro antigo (flag de lembrete enviado,
+  // vínculo com programa, marca da IA...) — editar não pode apagá-los.
+  if (idx >= 0) ags[idx] = { ...ags[idx], ...item }; else ags.push(item);
   DB.set('agendamentos', ags);
 
   // Marca CRM como convertido se veio de lá (por id; fallback índice — Fase 1b)
@@ -4998,6 +5073,13 @@ function _agDrop(e, ds, hora) {
   if (idx === -1) { _agDragId = null; return; }
   // Só re-renderiza se realmente mudou algo
   if (ags[idx].data === ds && ags[idx].hora === hora) { _agDragId = null; return; }
+  // Mesmas validações do modal: arrastar não pode furar conflito nem bloqueio.
+  const dur = ags[idx].duracao || 60;
+  const conflito = _temConflito(ds, hora, dur, ags[idx].id, ags[idx].profissionalId || undefined);
+  if (conflito) { toast(`⚠️ Conflito com ${conflito.pacienteNome} às ${conflito.hora}`); _agDragId = null; return; }
+  if (typeof _isBloqueado === 'function' && _isBloqueado(ds, hora, dur)) {
+    toast('⚠️ Esse horário está bloqueado na agenda'); _agDragId = null; return;
+  }
   ags[idx].data = ds;
   ags[idx].hora = hora;
   DB.set('agendamentos', ags);
@@ -5017,6 +5099,13 @@ function _agDropProf(e, ds, hora, profId) {
   if (idx === -1) { _agDragId = null; return; }
   const novoProf = profId || null;
   if (ags[idx].data === ds && ags[idx].hora === hora && (ags[idx].profissionalId || null) === novoProf) { _agDragId = null; return; }
+  // Mesmas validações do modal (considerando o NOVO profissional da coluna).
+  const durP = ags[idx].duracao || 60;
+  const conflitoP = _temConflito(ds, hora, durP, ags[idx].id, novoProf || undefined);
+  if (conflitoP) { toast(`⚠️ Conflito com ${conflitoP.pacienteNome} às ${conflitoP.hora}`); _agDragId = null; return; }
+  if (typeof _isBloqueado === 'function' && _isBloqueado(ds, hora, durP)) {
+    toast('⚠️ Esse horário está bloqueado na agenda'); _agDragId = null; return;
+  }
   ags[idx].data = ds;
   ags[idx].hora = hora;
   ags[idx].profissionalId = novoProf;
@@ -5038,6 +5127,25 @@ function renderAgenda() {
 
   const cont = document.getElementById('ag-container');
   if (!cont) return;
+
+  // Banner de reservas da IA aguardando confirmação (status Pendente).
+  // Sem isso, a IA marcava e o dono nunca via — pior que não marcar.
+  let bannerIa = document.getElementById('ag-pendentes-ia');
+  const pendentesIa = DB.get('agendamentos').filter(a => a.status === 'Pendente');
+  if (pendentesIa.length) {
+    if (!bannerIa) {
+      bannerIa = document.createElement('div');
+      bannerIa.id = 'ag-pendentes-ia';
+      cont.parentNode.insertBefore(bannerIa, cont);
+    }
+    bannerIa.innerHTML = `<div style="background:#fef3c7;border:1.5px solid #f59e0b;border-radius:12px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span style="font-size:18px;">🤖</span>
+      <span style="font-size:13px;color:#92400e;font-weight:600;">${pendentesIa.length} horário(s) reservado(s) pela secretária IA aguardando sua confirmação</span>
+      <span style="font-size:12px;color:#b45309;">— ${pendentesIa.slice(0, 3).map(a => `${_esc(a.pacienteNome || '?')} ${formatDate(a.data)} ${_esc(a.hora)}`).join(' · ')}${pendentesIa.length > 3 ? '…' : ''}. Clique no evento amarelo para confirmar ou cancelar.</span>
+    </div>`;
+  } else if (bannerIa) {
+    bannerIa.remove();
+  }
 
   if (agView === 'mes') cont.innerHTML = _viewMes();
   else if (agView === 'semana') cont.innerHTML = _viewSemana();
@@ -5424,13 +5532,13 @@ function _populateMesSelect(id, { includeTodos = false, selected = null } = {}) 
   const opts = [];
   for (let i = 0; i < 24; i++) {
     const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
-    const key = d.toISOString().substring(0, 7);
+    const key = _ymd(d).substring(0, 7);
     const label = `${_MESES_FULL[d.getMonth()]} ${d.getFullYear()}`;
     opts.push(`<option value="${key}">${label}</option>`);
   }
   if (includeTodos) opts.push('<option value="todos">Todos</option>');
   el.innerHTML = opts.join('');
-  el.value = prevVal && Array.from(el.options).some(o => o.value === prevVal) ? prevVal : hoje.toISOString().substring(0, 7);
+  el.value = prevVal && Array.from(el.options).some(o => o.value === prevVal) ? prevVal : _ymd(hoje).substring(0, 7);
 }
 
 function _populateRecMesFilter() { _populateMesSelect('rec-mes-filter', { includeTodos: true }); }
@@ -5586,7 +5694,7 @@ function renderReceita() {
   }
 
   // Renderiza fluxo de caixa
-  renderFluxoCaixa(mes === 'todos' ? new Date().toISOString().substring(0,7) : mes);
+  renderFluxoCaixa(mes === 'todos' ? _ymd(new Date()).substring(0, 7) : mes);
 }
 
 function renderDespesas() {
@@ -5747,7 +5855,7 @@ function renderGraficos(mes) {
   for (let i = 11; i >= 0; i--) {
     const d = new Date(ano, mesIdx - i, 1);
     meses12.push({
-      key: d.toISOString().substring(0, 7),
+      key: _ymd(d).substring(0, 7),
       label: `${MESES[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`
     });
   }
@@ -6048,9 +6156,9 @@ function renderRetencao() {
 
   // ===== Taxa de retorno em 90 dias =====
   // De quem teve a 1ª consulta há mais de 90 dias, quantos voltaram dentro de 90 dias?
-  const hojeStr = new Date().toISOString().split('T')[0];
+  const hojeStr = _ymd(new Date());
   const noventaDiasAtras = new Date(); noventaDiasAtras.setDate(noventaDiasAtras.getDate() - 90);
-  const noventaStr = noventaDiasAtras.toISOString().split('T')[0];
+  const noventaStr = _ymd(noventaDiasAtras);
 
   const elegiveis = pacientesUnicos.filter(p => p.consultas[0].data <= noventaStr);
   const retornaram = elegiveis.filter(p => {
@@ -6072,7 +6180,7 @@ function renderRetencao() {
 
   // ===== Pacientes ativos (últimos 6 meses) =====
   const seisMeses = new Date(); seisMeses.setMonth(seisMeses.getMonth() - 6);
-  const seisStr = seisMeses.toISOString().split('T')[0];
+  const seisStr = _ymd(seisMeses);
   const ativos = pacientesUnicos.filter(p => p.consultas[p.consultas.length - 1].data >= seisStr);
   const pctAtivos = pacientesUnicos.length ? (ativos.length / pacientesUnicos.length) * 100 : 0;
   setText('ret-ativos', ativos.length);
@@ -6278,7 +6386,7 @@ function criarFollowupReativacao(nomeEnc, ultData) {
   // Calcula próximo dia útil
   const amanha = new Date(); amanha.setDate(amanha.getDate() + 1);
   const ajustado = proximoDiaUtil(amanha);
-  const dataContato = ajustado.toISOString().split('T')[0];
+  const dataContato = _ymd(ajustado);
 
   // Cria o follow-up direto
   const item = {
@@ -6336,7 +6444,7 @@ function renderFinanceiro(mes) {
   const mesIdx = parseInt(mesStr, 10) - 1;
 
   const hoje = new Date();
-  const hojeMes = hoje.toISOString().substring(0, 7);
+  const hojeMes = _ymd(hoje).substring(0, 7);
   const ehMesAtual = mes === hojeMes;
 
   // ===== Projeção do mês =====
@@ -6612,7 +6720,7 @@ function renderDashboardMRR(mes) {
 
   const inscricoes = getInscricoes();
   const programas  = getProgramas();
-  const today = new Date().toISOString().substring(0, 10);
+  const today = _ymd(new Date());
 
   // Considera ativas: status Ativo + vencimento futuro (ou sem vencimento, p/ não-Assinatura — ignoradas)
   let mrr = 0;
@@ -6730,7 +6838,7 @@ function renderRenovacoesBanner(ativasAssinatura, today) {
           const ehUrgente   = diasRestantes <= 7;
           const corDias     = diasRestantes <= 0 ? '#dc2626' : diasRestantes <= 7 ? '#ef4444' : diasRestantes <= 15 ? '#f59e0b' : '#3b82f6';
           const labelDias   = diasRestantes <= 0 ? `Vencido há ${Math.abs(diasRestantes)}d` : diasRestantes === 1 ? 'Vence amanhã' : `${diasRestantes} dias`;
-          const waLink      = ins.pacienteWhatsapp ? `https://wa.me/55${(ins.pacienteWhatsapp || '').replace(/\D/g, '')}?text=${encodeURIComponent('Olá ' + ins.pacienteNome.split(' ')[0] + '! Seu programa ' + prog.nome + ' vence em ' + formatDate(venc) + '. Gostaria de renovar?')}` : '';
+          const waLink      = ins.pacienteWhatsapp ? _waMeLink(ins.pacienteWhatsapp, 'Olá ' + ins.pacienteNome.split(' ')[0] + '! Seu programa ' + prog.nome + ' vence em ' + formatDate(venc) + '. Gostaria de renovar?') : '';
           return `
             <div style="display:flex;align-items:center;gap:12px;padding:9px 12px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;">
               <div style="flex:1;min-width:0;">
@@ -6750,7 +6858,7 @@ function renderRenovacoesBanner(ativasAssinatura, today) {
 
 function renderDashboard(mes) {
   _populateMesSelect('dash-mes-filter', { selected: mes });
-  mes = document.getElementById('dash-mes-filter')?.value || new Date().toISOString().substring(0, 7);
+  mes = document.getElementById('dash-mes-filter')?.value || _ymd(new Date()).substring(0, 7);
   const pacs  = DB.get('pacientes').filter(p => getMes(p.data) === mes);
   const desps = DB.get('despesas').filter(d => getMes(d.data) === mes);
   const crm   = DB.get('crm').filter(c => getMes(c.data) === mes);
@@ -6771,7 +6879,7 @@ function renderDashboard(mes) {
   // ===== Comparativo mês anterior =====
   const [anoN, mesN] = mes.split('-').map(Number);
   const prevDate  = new Date(anoN, mesN - 2, 1);
-  const prevMes   = prevDate.toISOString().substring(0, 7);
+  const prevMes   = _ymd(prevDate).substring(0, 7);
   const prevLabel = MESES[prevDate.getMonth()];
   const prevPacs   = DB.get('pacientes').filter(p => getMes(p.data) === prevMes);
   const prevDesps  = DB.get('despesas').filter(d => getMes(d.data) === prevMes);
@@ -7375,7 +7483,7 @@ function gerarPDF(mes) {
   ${(() => {
     const inscricoes = getInscricoes();
     const programas  = getProgramas();
-    const today = new Date().toISOString().substring(0,10);
+    const today = _ymd(new Date());
 
     // Assinaturas ativas no mês
     const ativas = inscricoes.filter(i => {
@@ -7746,7 +7854,7 @@ function gerarRelatorioAnual() {
 
 function renderRelatorio(mes) {
   _populateMesSelect('relatorio-mes-sel', { selected: mes });
-  mes = document.getElementById('relatorio-mes-sel')?.value || new Date().toISOString().substring(0, 7);
+  mes = document.getElementById('relatorio-mes-sel')?.value || _ymd(new Date()).substring(0, 7);
   const pacs = DB.get('pacientes').filter(p => getMes(p.data) === mes);
   const desps = DB.get('despesas').filter(d => getMes(d.data) === mes);
   const crm = DB.get('crm').filter(c => getMes(c.data) === mes);
@@ -8361,7 +8469,7 @@ function renderMetasProc() {
 
   const mp = DB.getObj('metas_proc', {});
   const allPacs = DB.get('pacientes');
-  const mesAtual = new Date().toISOString().substring(0, 7);
+  const mesAtual = _ymd(new Date()).substring(0, 7);
 
   const corPorTipo = {
     '1ª vez':      { bg:'#dbeafe', cor:'#1d4ed8', icon:'🆕' },
@@ -8481,7 +8589,7 @@ function renderFluxoCaixa(mesAtual) {
   if (!el) return;
 
   const pacs = DB.get('pacientes');
-  const hoje = mesAtual || new Date().toISOString().substring(0, 7);
+  const hoje = mesAtual || _ymd(new Date()).substring(0, 7);
   const [anoH, mesH] = hoje.split('-').map(Number);
 
   // Monta mapa de recebimentos por mês (parcelas + à vista)
@@ -8512,7 +8620,7 @@ function renderFluxoCaixa(mesAtual) {
   const linhas = [];
   for (let i = -1; i <= 5; i++) {
     const d = new Date(anoH, mesH - 1 + i, 1);
-    const key = d.toISOString().substring(0, 7);
+    const key = _ymd(d).substring(0, 7);
     const nome = `${mesesNomes[d.getMonth()]}/${d.getFullYear()}`;
     const dados = mapaRecebimentos[key] || { previsto: 0, competencia: 0 };
     const diff = dados.previsto - dados.competencia;
@@ -8596,7 +8704,7 @@ function buildContext() {
   const metas  = DB.getObj('metas', {});
   const ags    = getAgendamentos();
   const procs  = getProcedimentos();
-  const today  = new Date().toISOString().split('T')[0];
+  const today  = _ymd(new Date());
   const mesAtual = today.substring(0, 7);
 
   const pacMes  = pacs.filter(p => getMes(p.data) === mesAtual);
@@ -8614,7 +8722,7 @@ function buildContext() {
   const agSemana = ags.filter(a => a.data > today && a.data <= proxDate && a.status !== 'Cancelado').sort((a,b) => a.data.localeCompare(b.data) || a.hora.localeCompare(b.hora));
 
   // Financeiro: mês anterior para comparação
-  const mesAnt   = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1).toISOString().substring(0,7);
+  const mesAnt   = _ymd(new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1)).substring(0, 7);
   const pacAnt   = pacs.filter(p => getMes(p.data) === mesAnt);
   const fatAnt   = pacAnt.reduce((s, p) => s + p.valor, 0);
 
@@ -8919,7 +9027,7 @@ function executeAIAction(action) {
     const id = _agId();
     const item = {
       id,
-      data: dados.data || new Date().toISOString().split('T')[0],
+      data: dados.data || _ymd(new Date()),
       hora: dados.hora || '08:00',
       duracao: parseInt(dados.duracao) || getAgConfig().slotDuracao || 60,
       pacienteNome: (dados.pacienteNome || dados.nome || '').trim(),
@@ -9455,7 +9563,7 @@ function abrirPerfilPaciente(nomeEnc) {
     if (!agenda.length) {
       tabAg.innerHTML = '<div style="text-align:center;color:#94a3b8;padding:32px;font-size:13px;">Nenhum agendamento encontrado.</div>';
     } else {
-      const today = new Date().toISOString().split('T')[0];
+      const today = _ymd(new Date());
       tabAg.innerHTML = `
         <table style="width:100%;border-collapse:collapse;font-size:13px;">
           <thead><tr style="border-bottom:2px solid #f1f5f9;">
@@ -9710,7 +9818,7 @@ async function _enviarLembreteZapi(ag, mensagem) {
 function _agendamentosParaLembrar(horasAntes) {
   const agora = new Date();
   const alvo = new Date(agora.getTime() + horasAntes * 3600000);
-  const alvoData = alvo.toISOString().substring(0, 10);
+  const alvoData = _ymd(alvo);
   // Janela: tudo no dia "alvoData" que ainda não foi notificado
   return DB.get('agendamentos').filter(ag =>
     ag.data === alvoData &&
@@ -9728,7 +9836,7 @@ async function rodarCicloLembretes(forcado = false) {
   if (!cfg.ativo && !forcado) return { skipped: 'desativado' };
 
   // Já rodou hoje? Pula (a menos que forçado)
-  const hoje = new Date().toISOString().substring(0, 10);
+  const hoje = _ymd(new Date());
   if (!forcado && cfg.ultimoEnvio === hoje) return { skipped: 'já rodou hoje' };
 
   const ags = _agendamentosParaLembrar(cfg.horasAntes);
@@ -9738,9 +9846,10 @@ async function rodarCicloLembretes(forcado = false) {
     return { enviados: 0, msg: 'nenhum agendamento elegível' };
   }
 
-  const zapiCfg = getZapiConfig();
-  if (!zapiCfg.enabled || !zapiCfg.instanceId || !zapiCfg.token) {
-    return { error: 'Z-API não está conectado. Configure em Configurações para enviar lembretes automáticos.' };
+  // Vale pra QUALQUER provedor ativo (Z-API ou Cloud API) — o envio em
+  // _enviarLembreteZapi já roteia pelo provedor certo.
+  if (!_waConnected()) {
+    return { error: 'WhatsApp não está conectado. Configure em Configurações para enviar lembretes automáticos.' };
   }
 
   let sucesso = 0, erro = 0;
@@ -9929,7 +10038,7 @@ const MAX_SNAPSHOTS = 7;          // mantém 1 semana de backups
 const SNAPSHOT_PREFIX = '_snapshot_';  // chave: consult__snapshot_YYYY-MM-DD
 
 async function criarSnapshotDiario() {
-  const hoje = new Date().toISOString().substring(0, 10);
+  const hoje = _ymd(new Date());
   const chave = SNAPSHOT_PREFIX + hoje;
 
   // Já existe snapshot de hoje? Pula.
@@ -10342,8 +10451,14 @@ function renderConfiguracoes() {
   const iaCfg = getIaConfig();
   const iaTog = document.getElementById('ia-enabled-toggle');
   if (iaTog) iaTog.checked = !!iaCfg.enabled;
+  const iaNome= document.getElementById('ia-nome');          if (iaNome) iaNome.value = iaCfg.nomeAssistente || '';
+  const iaApr = document.getElementById('ia-apresentar');    if (iaApr) iaApr.checked = iaCfg.apresentarComoIA !== false;
   const iaTom = document.getElementById('ia-tom');           if (iaTom) iaTom.value = iaCfg.tom || '';
+  const iaEnd = document.getElementById('ia-endereco');      if (iaEnd) iaEnd.value = iaCfg.endereco || '';
+  const iaConv= document.getElementById('ia-convenios');     if (iaConv) iaConv.value = iaCfg.convenios || '';
+  const iaPag = document.getElementById('ia-pagamentos');    if (iaPag) iaPag.value = iaCfg.pagamentos || '';
   const iaIns = document.getElementById('ia-instrucoes');    if (iaIns) iaIns.value = iaCfg.instrucoes || '';
+  const iaNao = document.getElementById('ia-nao-responder'); if (iaNao) iaNao.value = iaCfg.naoResponder || '';
   const iaAuto= document.getElementById('ia-auto-sugerir');  if (iaAuto) iaAuto.checked = iaCfg.autoSugerir !== false;
   const iaAut = document.getElementById('ia-autonomo');      if (iaAut) iaAut.checked = !!iaCfg.autonomo;
   const iaAg  = document.getElementById('ia-agendar');       if (iaAg)  iaAg.checked = !!iaCfg.agendar;
@@ -10846,10 +10961,25 @@ function _iaProviderChange(provider) {
   mostrar('ia-custom-wrap',     provider === 'custom');
 }
 
+// Lê os campos do formulário da IA num objeto ia_config (sem salvar).
+// Usado pelo Playground e pelo "ver cérebro" pra refletir edições ao vivo.
+function _iaFormOverrides() {
+  const g = id => (document.getElementById(id)?.value || '').trim();
+  const ck = id => !!document.getElementById(id)?.checked;
+  return {
+    nomeAssistente: g('ia-nome'),
+    apresentarComoIA: ck('ia-apresentar'),
+    tom: g('ia-tom'),
+    endereco: g('ia-endereco'),
+    convenios: g('ia-convenios'),
+    pagamentos: g('ia-pagamentos'),
+    instrucoes: g('ia-instrucoes'),
+    naoResponder: g('ia-nao-responder'),
+  };
+}
+
 function saveIaConfig() {
-  const cfg = getIaConfig();
-  cfg.tom         = (document.getElementById('ia-tom')?.value || '').trim();
-  cfg.instrucoes  = (document.getElementById('ia-instrucoes')?.value || '').trim();
+  const cfg = Object.assign(getIaConfig(), _iaFormOverrides());
   cfg.autoSugerir = !!document.getElementById('ia-auto-sugerir')?.checked;
   cfg.autonomo    = !!document.getElementById('ia-autonomo')?.checked;
   cfg.agendar     = !!document.getElementById('ia-agendar')?.checked;
@@ -10981,11 +11111,14 @@ function openCrmChat(idx) {
 // Abre o chat interno (CRM) por telefone — funciona pra contatos do CRM E
 // pra pacientes/follow-ups que não estão no funil.
 function abrirChatPorTelefone(nome, whatsapp, crmIdx) {
-  const wa = String(whatsapp || '').replace(/\D/g, '');
+  // Normaliza pra forma local (sem DDI) — a MESMA chave que o webhook grava em
+  // crm_messages. Contato salvo com +55 abria um chat vazio e as respostas do
+  // paciente nunca apareciam.
+  const wa = _normPhone(whatsapp);
   if (!wa) { alert('WhatsApp não cadastrado.'); return; }
   // Se não veio um índice de CRM, tenta achar um contato com esse número
   if (crmIdx === undefined || crmIdx === null) {
-    const i = DB.get('crm').findIndex(c => (c.whatsapp || '').replace(/\D/g, '') === wa);
+    const i = DB.get('crm').findIndex(c => _normPhone(c.whatsapp) === wa);
     crmIdx = i >= 0 ? i : null;
   }
   _chatPhone = wa;
@@ -11122,6 +11255,9 @@ function _appendChatMessage(m, pending) {
   return el;
 }
 
+// Textos que ESTE navegador acabou de enviar (pra não duplicar o eco do realtime).
+const _chatEnviadasLocal = new Set();
+
 function _subscribeChatRealtime(phone) {
   if (!_supa) return;
   if (_chatSub) { _supa.removeChannel(_chatSub); }
@@ -11131,13 +11267,18 @@ function _subscribeChatRealtime(phone) {
       event: 'INSERT', schema: 'public', table: 'crm_messages',
       filter: `whatsapp=eq.${phone}`
     }, payload => {
-      // Só renderiza mensagens RECEBIDAS aqui; as enviadas já aparecem otimista
-      // (evita duplicar a própria mensagem ao confirmar o envio).
-      if (_chatPhone === phone && payload.new && payload.new.remetente !== 'consultorio') {
-        _appendChatMessage(payload.new);
+      if (_chatPhone !== phone || !payload.new) return;
+      const m = payload.new;
+      if (m.remetente !== 'consultorio') {
+        _appendChatMessage(m);
         // Copiloto: ao chegar mensagem do paciente, já prepara uma sugestão.
         const _ia = getIaConfig();
         if (_ia.enabled && _ia.autoSugerir) iaSugerirNoChat(true);
+      } else if (!_chatEnviadasLocal.has(m.mensagem)) {
+        // Resposta 'consultorio' vinda do SERVIDOR (secretária IA autônoma ou
+        // outro aparelho) — precisa aparecer aqui, senão a secretária responde
+        // em cima sem saber que o paciente já foi atendido.
+        _appendChatMessage(m);
       }
     })
     .subscribe();
@@ -11151,7 +11292,18 @@ function _subscribeChatRealtime(phone) {
 // médico. O modo autônomo (responder sozinho) é uma evolução futura deste código.
 
 function getIaConfig() {
-  return DB.getObj('ia_config', { enabled: false, tom: '', instrucoes: '', autoSugerir: true, autonomo: false, agendar: false, agendarModo: 'pendente' });
+  return DB.getObj('ia_config', {
+    enabled: false, autoSugerir: true, autonomo: false, agendar: false, agendarModo: 'pendente',
+    // Personalização (tudo opcional):
+    nomeAssistente: '',      // ex.: "Sofia" — a IA se apresenta com esse nome
+    apresentarComoIA: true,  // assume que é assistente virtual (recomendado/ético)
+    tom: '',                 // tom de voz
+    instrucoes: '',          // instruções livres
+    endereco: '',            // endereço da clínica
+    convenios: '',           // convênios aceitos (ou "só particular")
+    pagamentos: '',          // formas de pagamento
+    naoResponder: '',        // temas que a IA deve recusar e passar pra humano
+  });
 }
 
 // ── Camada de LLM plugável — use QUALQUER provedor ──
@@ -11238,10 +11390,12 @@ async function _llmChat({ system, messages, temperature = 0.4, maxTokens = 400 }
 }
 
 // Monta o "cérebro" da IA a partir dos dados que já existem no app.
-function _iaMontarSystemPrompt() {
+// `overrides` permite o Playground testar valores do formulário AO VIVO,
+// sem precisar salvar (passa o ia_config em edição).
+function _iaMontarSystemPrompt(overrides) {
   const clin = DB.getObj('clinica_config', {});
   const nomeClin = clin.nome || 'a clínica';
-  const cfg = getIaConfig();
+  const cfg = Object.assign({}, getIaConfig(), overrides || {});
 
   const procs = getProcedimentos()
     .filter(p => (p.valorPix || p.valorCartao))
@@ -11257,26 +11411,40 @@ function _iaMontarSystemPrompt() {
     .map(p => `- ${p.nome} (${p.tipo})${p.precoAVista ? ' — à vista ' + BRL(p.precoAVista) : ''}`)
     .join('\n');
 
-  const ag = DB.getObj('agenda_config', { horaInicio: '08:00', horaFim: '18:00', diasUteis: [1,2,3,4,5] });
+  const ag = getAgConfig();
   const diasNomes = ['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
   const dias = (ag.diasUteis || []).map(d => diasNomes[d]).filter(Boolean).join(', ') || 'dias úteis';
+  const hoje = new Date();
+  const hojeStr = _ymd(hoje);
+  const diaSemana = diasNomes[hoje.getDay()];
+
+  const quemSou = cfg.nomeAssistente
+    ? `Você se chama ${cfg.nomeAssistente} e é a assistente virtual de ${nomeClin}`
+    : `Você é a assistente virtual de ${nomeClin}`;
 
   const linhas = [
-    `Você é a secretária virtual de ${nomeClin}, atendendo pacientes pelo WhatsApp.`,
+    `${quemSou}, atendendo pacientes pelo WhatsApp. Hoje é ${diaSemana}, ${hojeStr}.`,
     `Seu papel é APENAS: tirar dúvidas sobre valores, horários e informações de atendimento, e ajudar a marcar/remarcar consultas.`,
     ``,
     `REGRAS INEGOCIÁVEIS:`,
     `- NUNCA dê conselho, diagnóstico ou orientação médica/clínica. Se perguntarem sobre sintomas, exames, tratamento ou "o que eu tenho", responda com cordialidade que isso o profissional avalia na consulta e ofereça agendar.`,
     `- NUNCA invente preços, horários ou informações que não estejam listados abaixo. Se não souber, diga que vai confirmar com a equipe.`,
     `- Seja breve e natural (é WhatsApp): 1 a 3 frases, sem textão, tom humano.`,
-    `- NÃO confirme o agendamento como feito — quem fecha na agenda é a secretária. Você pode propor horários e perguntar a preferência.`,
+    `- NÃO confirme o agendamento como feito — quem fecha na agenda é a equipe. Você pode propor horários e perguntar a preferência.`,
     `- Se o paciente pedir para falar com humano, estiver irritado, ou for assunto delicado/fora do escopo, sugira gentilmente que a equipe assume.`,
-    ``,
-    `PROCEDIMENTOS E VALORES:`,
-    procs,
   ];
+  if (cfg.apresentarComoIA !== false) {
+    linhas.push(`- Se perguntarem se você é um robô/IA, confirme com naturalidade e simpatia — nunca finja ser humana.`);
+  }
+  if (cfg.naoResponder) {
+    linhas.push(`- NUNCA responda sobre: ${cfg.naoResponder}. Nesses casos, diga que a equipe vai assumir.`);
+  }
+  linhas.push(``, `PROCEDIMENTOS E VALORES:`, procs);
   if (progs) { linhas.push(``, `PLANOS/PROGRAMAS:`, progs); }
   linhas.push(``, `HORÁRIO DE ATENDIMENTO: ${dias}, das ${ag.horaInicio} às ${ag.horaFim}.`);
+  if (cfg.endereco)   linhas.push(``, `ENDEREÇO: ${cfg.endereco}`);
+  if (cfg.convenios)  linhas.push(``, `CONVÊNIOS: ${cfg.convenios}`);
+  if (cfg.pagamentos) linhas.push(``, `FORMAS DE PAGAMENTO: ${cfg.pagamentos}`);
   if (cfg.tom)        linhas.push(``, `TOM DE VOZ: ${cfg.tom}`);
   if (cfg.instrucoes) linhas.push(``, `INSTRUÇÕES EXTRAS DA CLÍNICA: ${cfg.instrucoes}`);
   return linhas.join('\n');
@@ -11311,6 +11479,77 @@ async function _iaSugerirResposta() {
     temperature: 0.4,
     maxTokens: 300,
   });
+}
+
+// ====================== 🧪 PLAYGROUND DA IA (testar sem WhatsApp) ======================
+// Conversa de simulação: usa os campos do FORMULÁRIO (mesmo sem salvar), não
+// grava nada, não envia WhatsApp. Serve pra você calibrar a personalidade e
+// ver como a IA responde ANTES de liberar pra valer.
+let _iaPgHist = []; // [{role:'user'|'assistant', content}]
+
+function _iaPlaygroundReset() {
+  _iaPgHist = [];
+  const box = document.getElementById('ia-pg-msgs');
+  if (box) box.innerHTML = '<div style="color:#94a3b8;text-align:center;font-size:12px;padding:8px;">Escreva como se fosse o paciente e veja a IA responder — usando os campos acima (mesmo sem salvar).</div>';
+}
+
+function _iaPgBubble(role, texto, cinza) {
+  const box = document.getElementById('ia-pg-msgs');
+  if (!box) return null;
+  if (box.querySelector('div[style*="text-align:center"]')) box.innerHTML = '';
+  const paciente = role === 'user';
+  const el = document.createElement('div');
+  el.style.cssText = `max-width:82%;align-self:${paciente ? 'flex-end' : 'flex-start'};background:${paciente ? '#dcfce7' : '#f3e8ff'};color:${cinza ? '#94a3b8' : '#0f172a'};padding:8px 11px;border-radius:12px;line-height:1.4;white-space:pre-wrap;`;
+  el.textContent = texto;
+  box.appendChild(el);
+  box.scrollTop = box.scrollHeight;
+  return el;
+}
+
+async function _iaPlaygroundSend() {
+  const input = document.getElementById('ia-pg-input');
+  const texto = (input?.value || '').trim();
+  if (!texto) return;
+  input.value = '';
+  _iaPgBubble('user', texto);
+  _iaPgHist.push({ role: 'user', content: texto });
+  const carregando = _iaPgBubble('assistant', '…', true);
+  // Monta o prompt com os valores do formulário AO VIVO (overrides sem salvar).
+  const r = await _llmChat({
+    system: _iaMontarSystemPrompt(_iaFormOverrides()),
+    messages: _iaPgHist.slice(-16),
+    temperature: 0.5,
+    maxTokens: 300,
+  });
+  if (r.ok) {
+    if (carregando) carregando.textContent = r.texto;
+    else _iaPgBubble('assistant', r.texto);
+    _iaPgHist.push({ role: 'assistant', content: r.texto });
+  } else {
+    const msg = (r.error === 'no-key' || r.error === 'no-key-claude')
+      ? '⚠️ Configure a chave do motor de IA acima e salve.'
+      : '⚠️ Erro: ' + r.error;
+    if (carregando) { carregando.textContent = msg; carregando.style.color = '#dc2626'; }
+  }
+}
+
+// Mostra num alerta legível TUDO que a IA "sabe" (o prompt de sistema montado
+// com os campos atuais). Tira o medo de "o que ela vai falar?".
+function _iaVerCerebro() {
+  const prompt = _iaMontarSystemPrompt(_iaFormOverrides());
+  const ov = document.createElement('div');
+  ov.className = 'modal-overlay';
+  ov.style.display = 'flex';
+  ov.innerHTML = `<div class="modal" style="max-width:640px;">
+    <div style="padding:20px 22px 12px;display:flex;align-items:center;justify-content:space-between;">
+      <div style="font-size:16px;font-weight:700;">🧠 O que a IA sabe</div>
+      <button onclick="this.closest('.modal-overlay').remove()" style="background:#f1f5f9;border:none;border-radius:8px;width:30px;height:30px;cursor:pointer;font-size:16px;">✕</button>
+    </div>
+    <div style="padding:0 22px 8px;font-size:12px;color:#64748b;">Isto é exatamente a "cabeça" que a IA recebe. Nada além disso é inventado — se algo estiver errado aqui, ajuste os campos ou o cadastro de procedimentos/horários.</div>
+    <pre style="margin:12px 22px 22px;padding:14px;background:#0f172a;color:#e2e8f0;border-radius:10px;font-size:11.5px;line-height:1.55;white-space:pre-wrap;max-height:60vh;overflow:auto;">${_esc(prompt)}</pre>
+  </div>`;
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
 }
 
 // Botão "✨ Sugerir": preenche o input com a sugestão p/ a secretária revisar.
@@ -11350,6 +11589,9 @@ async function sendChatMessage() {
 
   // Otimista: mostra na tela como "enviando…" (cinza) até o Z-API confirmar
   const pendingEl = _appendChatMessage({ remetente: 'consultorio', mensagem: text, created_at: new Date().toISOString() }, true);
+  // Marca como envio local pra não duplicar quando o eco do realtime voltar.
+  _chatEnviadasLocal.add(text);
+  setTimeout(() => _chatEnviadasLocal.delete(text), 30000);
 
   try {
     const r = await _waSendText(_chatPhone, text);
@@ -11435,16 +11677,18 @@ async function syncLeadsFromSupabase() {
     let novos = 0;
 
     data.forEach(lead => {
-      const cleanPhone = (lead.whatsapp || '').replace(/\D/g, '');
-      const existe = crm.some(c => c.whatsapp && c.whatsapp.replace(/\D/g, '') === cleanPhone);
+      // Webhook grava o lead COM DDI 55; contatos manuais ficam sem — sem
+      // normalizar os dois lados, o mesmo paciente virava card duplicado.
+      const cleanPhone = _normPhone(lead.whatsapp);
+      const existe = crm.some(c => c.whatsapp && _normPhone(c.whatsapp) === cleanPhone);
       if (!existe) {
         const d = new Date(lead.created_at);
         crm.unshift({
-          data:      d.toISOString().substring(0, 10),
+          data:      _ymd(d),
           id:        _novoId('crm'),                       // id estável (Fase 1)
           hora:      `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`,
           nome:      lead.nome || 'Contato WhatsApp',
-          whatsapp:  cleanPhone.replace(/^55/, ''),
+          whatsapp:  cleanPhone, // já normalizado (sem DDI) pelo _normPhone
           canal:     'WhatsApp',
           tipo:      '',
           status:    'Contato feito',
@@ -11494,7 +11738,7 @@ function renderBackup() {
         Ainda não há backups automáticos. Será criado automaticamente após o próximo login.
       </div>`;
     } else {
-      const hoje = new Date().toISOString().substring(0,10);
+      const hoje = _ymd(new Date());
       snapList.innerHTML = snapshots.map(s => {
         const ehHoje = s.data === hoje;
         const dataLabel = new Date(s.data + 'T12:00:00').toLocaleDateString('pt-BR', { weekday:'short', day:'2-digit', month:'short' });
@@ -11535,7 +11779,7 @@ function exportarJSON() {
   const blob = new Blob([JSON.stringify(dados, null, 2)], { type: 'application/json' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
-  const hoje = new Date().toISOString().split('T')[0];
+  const hoje = _ymd(new Date());
   a.href = url; a.download = `consultorio-backup-${hoje}.json`;
   a.click(); URL.revokeObjectURL(url);
   toast('✅ Backup exportado com sucesso!', 2500);
@@ -11559,7 +11803,7 @@ function exportarCSV(chave) {
   const blob = new Blob([bom + linhas.join('\n')], { type: 'text/csv;charset=utf-8;' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
-  const hoje = new Date().toISOString().split('T')[0];
+  const hoje = _ymd(new Date());
   a.href = url; a.download = `${chave}-${hoje}.csv`;
   a.click(); URL.revokeObjectURL(url);
   toast(`✅ ${dados.length} registros exportados!`, 2500);
@@ -12205,7 +12449,7 @@ function renderChartOcupacao() {
 async function saudacaoDiaria() {
   const key = getGeminiKey();
   if (!key) return;
-  const hoje = new Date().toISOString().split('T')[0];
+  const hoje = _ymd(new Date());
   const ultimaSaudacao = localStorage.getItem('consult_saudacao_dia');
   if (ultimaSaudacao === hoje) return; // já saudou hoje
 

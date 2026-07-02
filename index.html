@@ -21,6 +21,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <script>
+    // Se o CDN do Tailwind falhar (rede corporativa/offline), não derruba o boot.
+    window.tailwind = window.tailwind || {};
     tailwind.config = {
       theme: {
         extend: {
@@ -170,6 +172,7 @@
     .cal-day.has-blockage { background-image: repeating-linear-gradient(45deg, transparent, transparent 8px, #fff7f7 8px, #fff7f7 12px); }
     .cal-day-num { font-size:11.5px; font-weight:600; color:#111827; }
     .cal-evt { font-size:10px; padding:2px 6px; border-radius:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; line-height:1.4; }
+    .cal-evt.pendente   { background:#fef3c7; color:#92400e; border:1px dashed #f59e0b; }
     .cal-evt.confirmado { background:#eff6ff; color:#1d4ed8; }
     .cal-evt.compareceu { background:#f0fdf4; color:#15803d; }
     .cal-evt.noshow     { background:#fff1f2; color:#be123c; text-decoration:line-through; }
@@ -194,6 +197,7 @@
     .week-slot-micro.fora { pointer-events:none; }
     .week-evt { font-size:10.5px; padding:3px 7px; border-radius:4px; cursor:grab; line-height:1.35; margin-bottom:2px; transition:opacity 0.15s; }
     .week-evt:active { cursor:grabbing; }
+    .week-evt.pendente   { background:#fef3c7; color:#92400e; border-left:2px dashed #f59e0b; }
     .week-evt.confirmado { background:#eff6ff; color:#1d4ed8; border-left:2px solid #3b82f6; }
     .week-evt.compareceu { background:#f0fdf4; color:#15803d; border-left:2px solid #10b981; }
     .week-evt.noshow     { background:#fff1f2; color:#be123c; border-left:2px solid #f43f5e; }
@@ -2211,13 +2215,42 @@
         </div>
 
         <div id="ia-fields" style="display:none;margin-top:20px;padding-top:20px;border-top:1px solid #f1f5f9;">
+          <div style="font-size:12px;font-weight:700;color:#7c3aed;margin-bottom:12px;">🪪 Identidade e personalização</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+            <div>
+              <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Nome da assistente <span style="font-weight:400;color:#94a3b8;">(opcional)</span></label>
+              <input type="text" id="ia-nome" class="input" placeholder="Ex: Sofia" />
+            </div>
+            <div>
+              <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Tom de voz <span style="font-weight:400;color:#94a3b8;">(opcional)</span></label>
+              <input type="text" id="ia-tom" class="input" placeholder="Ex: cordial, calorosa, trata por 'você'" />
+            </div>
+          </div>
+          <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:#374151;cursor:pointer;margin-bottom:14px;">
+            <input type="checkbox" id="ia-apresentar" style="margin-top:2px;" checked />
+            <span>Assumir que é assistente <b>virtual</b> se o paciente perguntar (recomendado — evita a IA fingir ser humana, o que é antiético e arriscado).</span>
+          </label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+            <div>
+              <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Endereço <span style="font-weight:400;color:#94a3b8;">(opcional)</span></label>
+              <input type="text" id="ia-endereco" class="input" placeholder="Rua, nº, bairro — referência" />
+            </div>
+            <div>
+              <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Convênios <span style="font-weight:400;color:#94a3b8;">(opcional)</span></label>
+              <input type="text" id="ia-convenios" class="input" placeholder="Ex: Só particular / Unimed, Bradesco" />
+            </div>
+          </div>
           <div style="margin-bottom:14px;">
-            <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Tom de voz <span style="font-weight:400;color:#94a3b8;">(opcional)</span></label>
-            <input type="text" id="ia-tom" class="input" placeholder="Ex: cordial e objetivo, trata o paciente por 'você'" />
+            <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Formas de pagamento <span style="font-weight:400;color:#94a3b8;">(opcional)</span></label>
+            <input type="text" id="ia-pagamentos" class="input" placeholder="Ex: PIX, dinheiro, cartão em até 3x" />
           </div>
           <div style="margin-bottom:14px;">
             <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Instruções extras <span style="font-weight:400;color:#94a3b8;">(opcional)</span></label>
-            <textarea id="ia-instrucoes" rows="3" class="input" style="resize:vertical;" placeholder="Ex: Atendemos só particular (sem convênio). Primeira consulta tem retorno em 15 dias incluso. Estacionamento gratuito no prédio."></textarea>
+            <textarea id="ia-instrucoes" rows="3" class="input" style="resize:vertical;" placeholder="Ex: Primeira consulta tem retorno em 15 dias incluso. Estacionamento gratuito no prédio. Chegar 10 min antes."></textarea>
+          </div>
+          <div style="margin-bottom:14px;">
+            <label style="font-size:11.5px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">Nunca responder sobre <span style="font-weight:400;color:#94a3b8;">(passa pra humano)</span></label>
+            <input type="text" id="ia-nao-responder" class="input" placeholder="Ex: resultados de exame, reclamações, emergências" />
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
             <div>
@@ -2270,12 +2303,29 @@
             <input type="checkbox" id="ia-auto-sugerir" />
             Sugerir automaticamente quando chegar mensagem do paciente
           </label>
-          <div style="display:flex;align-items:center;gap:10px;">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <button onclick="saveIaConfig()" class="btn-primary">Salvar</button>
+            <button onclick="_iaVerCerebro()" class="btn-ghost" style="font-size:12.5px;">🧠 Ver o que a IA sabe</button>
             <span id="ia-status" style="font-size:12.5px;color:#94a3b8;"></span>
           </div>
+
+          <!-- PLAYGROUND: testar a IA sem WhatsApp, sem gravar nada -->
+          <div style="margin-top:16px;border:1px solid #e9d5ff;border-radius:12px;overflow:hidden;">
+            <div style="background:#faf5ff;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+              <div style="font-size:12.5px;font-weight:700;color:#6d28d9;">🧪 Testar a assistente (simulação — nada é enviado)</div>
+              <button onclick="_iaPlaygroundReset()" class="btn-ghost" style="font-size:11px;padding:4px 8px;">limpar</button>
+            </div>
+            <div id="ia-pg-msgs" style="padding:12px 14px;max-height:280px;overflow-y:auto;background:#fff;display:flex;flex-direction:column;gap:8px;font-size:13px;">
+              <div style="color:#94a3b8;text-align:center;font-size:12px;padding:8px;">Escreva como se fosse o paciente e veja a IA responder — usando os campos acima (mesmo sem salvar).</div>
+            </div>
+            <div style="display:flex;gap:8px;padding:10px 12px;border-top:1px solid #f1f5f9;background:#fff;">
+              <input type="text" id="ia-pg-input" class="input" placeholder="Ex: Oi, quanto custa a consulta?" style="flex:1;font-size:13px;" onkeydown="if(event.key==='Enter'){event.preventDefault();_iaPlaygroundSend();}" />
+              <button onclick="_iaPlaygroundSend()" class="btn-primary" style="padding:8px 14px;flex-shrink:0;">Enviar</button>
+            </div>
+          </div>
+
           <div style="margin-top:12px;padding:10px 13px;background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;font-size:11.5px;color:#6d28d9;line-height:1.5;">
-            💡 A IA usa a chave do Groq já configurada no app (ou a do Claude, se escolher). Os preços e horários vêm de <b>Procedimentos</b> e <b>Configurar horários</b> — mantenha-os atualizados. No modo copiloto, nada é enviado sem você clicar.
+            💡 A IA usa a chave do motor escolhido acima. Os preços e horários vêm de <b>Procedimentos</b> e <b>Configurar horários</b> — mantenha-os atualizados. No modo copiloto, nada é enviado sem você clicar.
           </div>
 
           <!-- Avançado: modos que respondem/ agem sozinhos (desligados por padrão) -->
@@ -2692,6 +2742,7 @@
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
         <div><label>Profissional</label><select class="select" name="profissionalId" id="ag-profissional"></select></div>
         <div><label>Status</label><select class="select" name="status">
+          <option value="Pendente">Pendente (aguarda confirmação)</option>
           <option value="Confirmado">Confirmado</option>
           <option value="Compareceu">Compareceu</option>
           <option value="No-show">No-show</option>

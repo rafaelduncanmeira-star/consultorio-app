@@ -28,7 +28,7 @@ function carregarPrompt(iaCfg) {
       agenda_config: { horaInicio: '08:00', horaFim: '18:00', diasUteis: [1, 2, 3, 4, 5] },
     }[k] ?? def),
   };
-  return carregar(['getIaConfig', '_iaMontarSystemPrompt'], {
+  return carregar(['getIaConfig', 'getAgConfig', '_ymd', '_iaMontarSystemPrompt'], {
     DB,
     BRL: (v) => 'R$' + v,
     getProcedimentos: () => [
@@ -60,4 +60,40 @@ test('tom e instruções extras entram no prompt quando definidos', () => {
   const p = _iaMontarSystemPrompt();
   assert.match(p, /TOM DE VOZ: cordial e direto/);
   assert.match(p, /INSTRUÇÕES EXTRAS DA CLÍNICA: só particular, sem convênio/);
+});
+
+// ---------- Personalização v2 ----------
+test('nome da assistente e transparência (não fingir ser humana) entram no prompt', () => {
+  const { _iaMontarSystemPrompt } = carregarPrompt({ enabled: true, nomeAssistente: 'Sofia', apresentarComoIA: true });
+  const p = _iaMontarSystemPrompt();
+  assert.match(p, /Você se chama Sofia/);
+  assert.match(p, /nunca finja ser humana/i);
+});
+
+test('endereço, convênios, pagamentos e temas proibidos aparecem quando preenchidos', () => {
+  const { _iaMontarSystemPrompt } = carregarPrompt({
+    enabled: true,
+    endereco: 'Rua A, 100 — Recife',
+    convenios: 'Só particular',
+    pagamentos: 'PIX e cartão 3x',
+    naoResponder: 'resultados de exame',
+  });
+  const p = _iaMontarSystemPrompt();
+  assert.match(p, /ENDEREÇO: Rua A, 100 — Recife/);
+  assert.match(p, /CONVÊNIOS: Só particular/);
+  assert.match(p, /FORMAS DE PAGAMENTO: PIX e cartão 3x/);
+  assert.match(p, /NUNCA responda sobre: resultados de exame/);
+});
+
+test('prompt informa a data de hoje (a IA sabe que dia é)', () => {
+  const { _iaMontarSystemPrompt, _ymd } = carregarPrompt({ enabled: true });
+  const p = _iaMontarSystemPrompt();
+  assert.ok(p.includes(_ymd(new Date())), 'prompt deve conter a data local de hoje');
+});
+
+test('overrides do formulário têm precedência sobre o salvo (playground ao vivo)', () => {
+  const { _iaMontarSystemPrompt } = carregarPrompt({ enabled: true, tom: 'salvo' });
+  const p = _iaMontarSystemPrompt({ tom: 'do formulário' });
+  assert.match(p, /TOM DE VOZ: do formulário/);
+  assert.doesNotMatch(p, /TOM DE VOZ: salvo/);
 });
