@@ -167,6 +167,56 @@ de teste; depois validar o agendar-pendente; e migrar envio da Cloud API p/ serv
 
 ---
 
+## 🔍 AUDITORIA COMPLETA (avaliação de release) — sessão mais recente
+
+Auditoria de 3 frentes (segurança/sync, bugs de produto, webhook/IA) + smoke
+test Playwright real (boot logado simulado, demo-data, 13 páginas, zero erros).
+
+**Corrigido nesta sessão (commitado):**
+- CRÍTICO dados: `_pushBlindada`/`cloudPush` não liam o `{error}` do supabase-js
+  → migração podia apagar blob com push rejeitado = perda total. Corrigido +
+  anti-zeramento reforçado (pull vazio p/ dono nunca sobrescreve; auto-cura).
+- CRÍTICO segurança: snapshots diários vazavam a clínica INTEIRA (+chaves de
+  API) p/ qualquer membro via app_data. Agora: snapshot só do dono, membro
+  limpa snapshots/segredos do localStorage, e **SETUP_SEGURANCA.sql** fecha o
+  RLS (segredos: dono+secretária; snapshots: só dono; DELETE: só dono).
+- CRÍTICO webhook: IA "desligada" continuava respondendo (só checava autonomo);
+  loop de eco por callback de status; retry da Meta duplicava respostas; sem
+  rate limit; marcador AGENDAR sem validação (prompt injection podia marcar
+  qualquer horário); fuso UTC oferecia dias errados à noite. Tudo corrigido —
+  ver commit "hardening". **Requer REDEPLOY do webhook + SETUP_IA_AUTONOMA.sql.**
+- Lembretes automáticos nunca saíam p/ Cloud API (gate exigia Z-API).
+- ~25 pontos de fuso horário (toISOString → _ymd): lembrete 48h antes/dia pulado,
+  dashboard zerado à noite no fim do mês, follow-up "atrasado" às 21h etc.
+- Dedupe de leads com DDI 55 (cards duplicados), chave do chat com +55 (chat
+  vazio), wa.me/5555, drag-drop sem validação, conflito multi-profissional,
+  cancelamento por crmIdx congelado (paciente errado!), edição apagando
+  campos de sistema, Pendente da IA invisível (agora: option+estilo+banner+pull),
+  chat realtime não mostrava respostas da IA, CDN fora do ar derrubava o app.
+
+**Personalização da IA (novo):** nome da assistente, endereço, convênios,
+pagamentos, "nunca responder sobre", transparência (não finge ser humana,
+padrão ligado), data local no prompt, **Playground de teste no card** (conversa
+simulada sem WhatsApp, usa o formulário ao vivo) e "🧠 Ver o que a IA sabe".
+
+**AINDA ABERTO (conhecido, documentado):**
+1. ⚠️ Rodar **SETUP_SEGURANCA.sql** e **SETUP_IA_AUTONOMA.sql** no Supabase e
+   **redeployar o wa-webhook** (o do ar está SEM o hardening).
+2. Teste de isolamento com convite real (pendente desde o início!).
+3. Last-write-wins nos blobs do app_data (PC+celular simultâneo pode perder
+   edição de config/procedimentos); edição offline pode ser sobrescrita no pull.
+4. accept_invite sobrescreve profiles.role global (dono que aceita convite de
+   outra clínica vira secretaria na PRÓPRIA) — corrigir no SQL da equipe.
+5. Segredos ainda vão pro navegador da secretária (necessário p/ enviar do
+   browser) — próximo passo estrutural: envio server-side via Edge Function.
+6. Pagamento "Parcial" de programas não entra em nenhum KPI de receita.
+7. Índices congelados em onclick podem apodrecer quando lead chega via
+   realtime com modal aberto (mitigado nos fluxos críticos; refactor p/ ids).
+8. IA autônoma: código blindado mas NUNCA testada ao vivo — testar com o
+   próprio número antes de ligar pra paciente real. Playground cobre o copiloto.
+
+---
+
 ## 🔜 PRÓXIMO PASSO (é aqui que paramos)
 
 **Provar o isolamento com um teste limpo.** O teste anterior não valeu porque o "Dr. Jovino"

@@ -203,8 +203,20 @@ async function cloudPull() {
 // Profissional não deve ver o financeiro nem as metas da clínica (nem via F12).
 // Remove essas chaves do localStorage dele após cada carga.
 function _limparSensiveisProfissional() {
+  const souMembro = currentUser && (currentDataOwner || currentUser.id) !== currentUser.id;
+  // Snapshots contêm a clínica INTEIRA (pacientes+finanças+chaves) — nenhum
+  // membro deve guardá-los no navegador (o RLS novo também os bloqueia).
+  if (souMembro) {
+    Object.keys(localStorage)
+      .filter(k => k.startsWith('consult__snapshot_'))
+      .forEach(k => localStorage.removeItem(k));
+  }
   if (currentRole !== 'profissional') return;
-  ['despesas', 'metas', 'metas_proc', 'metas_proc_valor'].forEach(k => localStorage.removeItem('consult_' + k));
+  ['despesas', 'metas', 'metas_proc', 'metas_proc_valor',
+   // Segredos de integração: profissional não envia pela clínica — não
+   // precisa (nem deve) ter os tokens do dono no localStorage.
+   'zapi_config', 'wa_cloud_config', 'llm_config', 'gemini_key_secure',
+  ].forEach(k => localStorage.removeItem('consult_' + k));
 }
 
 // ============ BLINDAGEM Fase 2 — coleções sensíveis em tabela por linha (RLS) ============
@@ -10038,6 +10050,12 @@ const MAX_SNAPSHOTS = 7;          // mantém 1 semana de backups
 const SNAPSHOT_PREFIX = '_snapshot_';  // chave: consult__snapshot_YYYY-MM-DD
 
 async function criarSnapshotDiario() {
+  // SÓ O DONO cria snapshot: o blob contém a clínica inteira (pacientes,
+  // finanças, chaves de API). Criado por um membro, ele subia pro app_data e
+  // vazava tudo pra equipe — furando a blindagem e o financeiro escondido.
+  if (!currentUser || (currentDataOwner || currentUser.id) !== currentUser.id) {
+    return { skipped: true, reason: 'snapshot é responsabilidade do dono' };
+  }
   const hoje = _ymd(new Date());
   const chave = SNAPSHOT_PREFIX + hoje;
 
@@ -11844,6 +11862,12 @@ function importarJSON(input) {
 }
 
 async function limparTodosDados() {
+  // Apagar a CLÍNICA INTEIRA é prerrogativa do dono — membro não pode
+  // (o RLS novo também bloqueia o delete no servidor; isto é a 1ª barreira).
+  if (currentUser && (currentDataOwner || currentUser.id) !== currentUser.id) {
+    toast('Apenas o dono da clínica pode apagar todos os dados.');
+    return;
+  }
   // Oferece backup antes
   if (confirm('Recomendamos exportar um backup ANTES de apagar tudo.\n\nQuer baixar o backup agora? (OK = baixar, Cancelar = pular)')) {
     exportarJSON();

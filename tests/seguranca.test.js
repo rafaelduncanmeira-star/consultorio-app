@@ -28,21 +28,29 @@ test('_esc preserva texto normal (sem falso positivo)', () => {
   assert.strictEqual(_esc(42), '42');
 });
 
-// ---------- _limparSensiveisProfissional: blindagem do financeiro ----------
-test('profissional perde acesso a despesas/metas no localStorage', () => {
+// ---------- _limparSensiveisProfissional: blindagem do financeiro + segredos ----------
+test('profissional perde financeiro E segredos de integração no localStorage', () => {
   const removidas = [];
   const store = {
     consult_despesas: '[...]', consult_metas: '{...}',
     consult_metas_proc: '{}', consult_metas_proc_valor: '{}',
+    consult_zapi_config: '{token}', consult_wa_cloud_config: '{token}',
+    consult_llm_config: '{chaves}', consult_gemini_key_secure: '"g"',
     consult_pacientes: '[...]', // NÃO deve ser removido
   };
   const { _limparSensiveisProfissional } = carregar('_limparSensiveisProfissional', {
     currentRole: 'profissional',
-    localStorage: { removeItem: (k) => { removidas.push(k); delete store[k]; } },
+    currentUser: { id: 'membro-1' },
+    currentDataOwner: 'dono-1', // é MEMBRO da equipe de outra pessoa
+    localStorage: {
+      removeItem: (k) => { removidas.push(k); delete store[k]; },
+    },
+    Object, // Object.keys(localStorage) no snapshot-clean
   });
   _limparSensiveisProfissional();
-  assert.deepStrictEqual(removidas.sort(), [
+  assert.deepStrictEqual(removidas.filter(k => k.startsWith('consult_')).sort(), [
     'consult_despesas', 'consult_metas', 'consult_metas_proc', 'consult_metas_proc_valor',
+    'consult_zapi_config', 'consult_wa_cloud_config', 'consult_llm_config', 'consult_gemini_key_secure',
   ].sort());
   assert.ok('consult_pacientes' in store, 'dados clínicos não podem ser apagados');
 });
@@ -52,7 +60,10 @@ test('médico e secretária mantêm o financeiro intacto', () => {
     const removidas = [];
     const { _limparSensiveisProfissional } = carregar('_limparSensiveisProfissional', {
       currentRole: papel,
+      currentUser: { id: 'dono-1' },
+      currentDataOwner: null, // é o próprio dono
       localStorage: { removeItem: (k) => removidas.push(k) },
+      Object,
     });
     _limparSensiveisProfissional();
     assert.strictEqual(removidas.length, 0, `papel ${papel} não deveria perder financeiro`);
