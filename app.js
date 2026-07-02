@@ -4765,9 +4765,18 @@ function saveAgendamento(e) {
 
   const ags = getAgendamentos();
   const idx = ags.findIndex(x => x.id === id);
-  // Preserva campos de sistema do registro antigo (flag de lembrete enviado,
-  // vínculo com programa, marca da IA...) — editar não pode apagá-los.
-  if (idx >= 0) ags[idx] = { ...ags[idx], ...item }; else ags.push(item);
+  // Preserva campos de sistema do registro antigo (vínculo com programa,
+  // marca da IA...) — editar não pode apagá-los.
+  if (idx >= 0) {
+    const antigo = ags[idx];
+    ags[idx] = { ...antigo, ...item };
+    // MAS: se a data ou a hora mudou (remarcação), o lembrete já enviado
+    // não vale mais — rearma para que o novo horário receba um novo lembrete.
+    if (antigo.data !== item.data || antigo.hora !== item.hora) {
+      delete ags[idx]._lembreteEnviado;
+      delete ags[idx]._lembreteErro;
+    }
+  } else ags.push(item);
   DB.set('agendamentos', ags);
 
   // Marca CRM como convertido se veio de lá (por id; fallback índice — Fase 1b)
