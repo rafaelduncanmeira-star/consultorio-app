@@ -2982,6 +2982,38 @@ function formatDate(str) {
 
 function getMes(dateStr) { return dateStr ? dateStr.substring(0, 7) : ''; }
 
+// Resumo financeiro PADRONIZADO — uma única definição p/ todas as telas (Receita,
+// Dashboard, DRE, Relatório, PDF, Metas) baterem entre si. Distingue os DOIS
+// regimes: CAIXA (o que já entrou) e COMPETÊNCIA (o que foi faturado/prestado).
+// O status 'Parcial' (assinaturas com valor cheio, parcialmente pagas) entra em
+// "a receber" — antes sumia de todo KPI de realizado/a-receber e ainda inflava o
+// bruto, deixando "recebido + a receber + isento" sem fechar com o bruto.
+function _resumoFin(pacs) {
+  const soma = (f) => (pacs || []).filter(f).reduce((s, p) => s + (p.valor || 0), 0);
+  const pago     = soma(p => p.statusPgto === 'Pago');
+  const parcial  = soma(p => p.statusPgto === 'Parcial');
+  const pendente = soma(p => p.statusPgto === 'Pendente');
+  const isento   = soma(p => p.statusPgto === 'Isento');
+  const bruto    = (pacs || []).reduce((s, p) => s + (p.valor || 0), 0);
+  return {
+    pago, parcial, pendente, isento, bruto,
+    recebido: pago,                       // CAIXA: só o que entrou de fato
+    aReceber: parcial + pendente,         // ainda a receber (inclui o resto do parcial)
+    faturado: pago + parcial + pendente,  // COMPETÊNCIA: serviço prestado (= bruto − isento)
+  };
+}
+
+// Lucro nos dois regimes, a partir do resumo + total de despesas do período.
+function _lucroFin(resumo, totalDesp) {
+  const caixa       = resumo.recebido - totalDesp;
+  const competencia = resumo.faturado - totalDesp;
+  return {
+    caixa, competencia,
+    margemCaixa:       resumo.recebido ? (caixa / resumo.recebido) * 100 : 0,
+    margemCompetencia: resumo.faturado ? (competencia / resumo.faturado) * 100 : 0,
+  };
+}
+
 // Se a data cair em sábado (6) ou domingo (0), empurra para a próxima segunda
 function proximoDiaUtil(d) {
   const dt = new Date(d);
@@ -5645,16 +5677,17 @@ function renderReceita() {
   const indices = pacs.map(p => todosOriginais.indexOf(p));
 
   // ===== KPIs (sempre sobre todo o período selecionado, ignorando filtros de tabela) =====
-  const recebido = pacs.filter(p => p.statusPgto === 'Pago').reduce((s, p) => s + (p.valor || 0), 0);
-  const aReceber = pacs.filter(p => p.statusPgto === 'Pendente').reduce((s, p) => s + (p.valor || 0), 0);
-  const isento  = pacs.filter(p => p.statusPgto === 'Isento').reduce((s, p) => s + (p.valor || 0), 0);
-  const bruto   = pacs.reduce((s, p) => s + (p.valor || 0), 0);
+  const _rf = _resumoFin(pacs);
+  const recebido = _rf.recebido;         // CAIXA
+  const aReceber = _rf.aReceber;         // Pendente + Parcial (antes o Parcial sumia)
+  const isento  = _rf.isento;
+  const bruto   = _rf.bruto;
   const ticket  = pacs.length ? bruto / pacs.length : 0;
 
   setText('rec-recebido', BRL(recebido));
   setText('rec-recebido-sub', `${pacs.filter(p => p.statusPgto === 'Pago').length} atendimentos pagos`);
   setText('rec-areceber', BRL(aReceber));
-  setText('rec-areceber-sub', `${pacs.filter(p => p.statusPgto === 'Pendente').length} pendente(s)`);
+  setText('rec-areceber-sub', `${pacs.filter(p => p.statusPgto === 'Pendente' || p.statusPgto === 'Parcial').length} pendente(s)/parcial(is)`);
   setText('rec-isento', BRL(isento));
   setText('rec-isento-sub', `${pacs.filter(p => p.statusPgto === 'Isento').length} atendimento(s)`);
   setText('rec-bruto', BRL(bruto));
@@ -6563,10 +6596,12 @@ function renderFinanceiro(mes) {
     setText('fin-proj-meta', 'Configure a meta de faturamento');
   }
 
-  // ===== DRE =====
-  const inad = pacs.filter(p => p.statusPgto === 'Pendente').reduce((s, p) => s + (p.valor || 0), 0);
-  const isento = pacs.filter(p => p.statusPgto === 'Isento').reduce((s, p) => s + (p.valor || 0), 0);
-  const receitaLiq = fat - inad - isento;
+  // ===== DRE (dois regimes: CAIXA e COMPETÊNCIA) =====
+  const _rfDre = _resumoFin(pacs);
+  const inad = _rfDre.pendente;          // pendente (inadimplência)
+  const isento = _rfDre.isento;
+  const recebidoDre = _rfDre.recebido;   // CAIXA (Pago)
+  const faturado    = _rfDre.faturado;   // COMPETÊNCIA (Pago+Parcial+Pendente)
 
   // Separa impostos das demais despesas
   const despImpostos = despsMes.filter(d => d.categoria === 'Impostos').reduce((s, d) => s + (d.valor || 0), 0);
@@ -6575,15 +6610,17 @@ function renderFinanceiro(mes) {
   const despVar   = despsOperacionais.filter(d => d.tipo === 'Variável').reduce((s, d) => s + (d.valor || 0), 0);
   const despsOutras = despsOperacionais.filter(d => d.tipo !== 'Fixo' && d.tipo !== 'Variável').reduce((s, d) => s + (d.valor || 0), 0);
 
-  const receitaPosImp = receitaLiq - despImpostos;
-  const cargaTrib = receitaLiq ? (despImpostos / receitaLiq) * 100 : 0;
   const despOpTotal = despFixas + despVar + despsOutras;
   const despTotal = despOpTotal + despImpostos;
-  const lucroLiq = receitaPosImp - despOpTotal;
-  const margem = receitaLiq ? (lucroLiq / receitaLiq) * 100 : 0;
+  const cargaTrib = faturado ? (despImpostos / faturado) * 100 : 0;
+  // Lucro nos dois regimes (após TODAS as despesas, inclusive impostos).
+  const _luc = _lucroFin(_rfDre, despTotal);
+  const lucroCaixa = _luc.caixa;             // recebido − despesas
+  const lucroComp  = _luc.competencia;       // faturado − despesas
 
-  setText('fin-receita-liq', BRL(receitaLiq));
-  setText('fin-receita-liq-sub', `Bruta ${BRL(fat)} − Pendente ${BRL(inad)}${isento > 0 ? ' − Isento ' + BRL(isento) : ''}`);
+  // Headline: mostra o faturado (competência) com o recebido (caixa) no subtítulo.
+  setText('fin-receita-liq', BRL(faturado));
+  setText('fin-receita-liq-sub', `Recebido (caixa) ${BRL(recebidoDre)} · a receber ${BRL(_rfDre.aReceber)}${isento > 0 ? ' · isento ' + BRL(isento) : ''}`);
 
   const linhaDRE = (lbl, val, isSubtracao, isResultado, cor) => `
     <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;${isResultado ? 'border-top:2px solid #e2e8f0;margin-top:4px;padding-top:12px;' : 'border-bottom:1px dashed #f1f5f9;'}">
@@ -6592,16 +6629,16 @@ function renderFinanceiro(mes) {
     </div>`;
 
   document.getElementById('fin-dre').innerHTML =
-    linhaDRE('Receita Bruta', fat, false, false) +
-    linhaDRE('(−) Pendentes (inadimplência)', inad, true, false) +
-    (isento > 0 ? linhaDRE('(−) Isentos / Cortesias', isento, true, false) : '') +
-    linhaDRE('= Receita Líquida', receitaLiq, false, false, '#0f172a') +
+    linhaDRE('Receita Faturada (competência)', faturado, false, false) +
+    linhaDRE('• dos quais Recebido (caixa)', recebidoDre, false, false, '#10b981') +
+    linhaDRE('• ainda A Receber (pendente + parcial)', _rfDre.aReceber, false, false, '#f59e0b') +
+    (isento > 0 ? linhaDRE('(fora) Isentos / Cortesias', isento, false, false, '#94a3b8') : '') +
     linhaDRE(`(−) Impostos${cargaTrib ? ` (carga ${PCT(cargaTrib)})` : ''}`, despImpostos, true, false) +
-    linhaDRE('= Receita após impostos', receitaPosImp, false, false, '#0f172a') +
     linhaDRE('(−) Despesas Fixas', despFixas, true, false) +
     linhaDRE('(−) Despesas Variáveis', despVar, true, false) +
     (despsOutras > 0 ? linhaDRE('(−) Outras', despsOutras, true, false) : '') +
-    linhaDRE(`= Lucro Líquido (margem ${PCT(margem)})`, lucroLiq, false, true, lucroLiq >= 0 ? '#10b981' : '#ef4444');
+    linhaDRE(`= Lucro Líquido CAIXA (margem ${PCT(_luc.margemCaixa)})`, lucroCaixa, false, true, lucroCaixa >= 0 ? '#10b981' : '#ef4444') +
+    linhaDRE(`= Lucro Líquido COMPETÊNCIA (margem ${PCT(_luc.margemCompetencia)})`, lucroComp, false, true, lucroComp >= 0 ? '#0ea5e9' : '#ef4444');
 
   // ===== Receita por tipo de consulta — agrupa pelos tipos REAIS dos atendimentos =====
   // (antes era lista fixa que filtrava silenciosamente procedimentos com outros nomes)
@@ -7327,10 +7364,13 @@ function gerarPDF(mes) {
   const metas  = DB.getObj('metas', { fat: 0, pac: 0, desp: 0 });
   const todosPacs = DB.get('pacientes');
 
-  const fat        = pacs.reduce((s, p) => s + p.valor, 0);
+  const _rfPdf     = _resumoFin(pacs);
+  const fat        = _rfPdf.bruto;
   const totalDesp  = desps.reduce((s, d) => s + d.valor, 0);
-  const lucro      = fat - totalDesp;
-  const margem     = fat ? (lucro / fat) * 100 : 0;
+  // Lucro em regime de CAIXA (recebido − despesas) — igual ao Relatório na tela.
+  // Antes usava o bruto e divergia do número que aparece no app.
+  const lucro      = _rfPdf.recebido - totalDesp;
+  const margem     = _rfPdf.recebido ? (lucro / _rfPdf.recebido) * 100 : 0;
   const ticket     = pacs.length ? fat / pacs.length : 0;
   const atend      = crm.filter(c => c.status === 'Atendeu').length;
   const conv       = crm.length ? (atend / crm.length) * 100 : 0;
@@ -8492,10 +8532,13 @@ function renderMetas() {
     const mes = `2026-${String(i + 1).padStart(2, '0')}`;
     const pacs = allPacs.filter(p => getMes(p.data) === mes);
     const desps = allDesps.filter(d => getMes(d.data) === mes);
-    const fat = pacs.reduce((s, p) => s + p.valor, 0);
+    const fat = pacs.reduce((s, p) => s + p.valor, 0);   // bruto: compara com a meta de faturamento
     const desp = desps.reduce((s, d) => s + d.valor, 0);
-    const lucro = fat - desp;
-    const margem = fat ? (lucro / fat) * 100 : 0;
+    // Lucro em regime de CAIXA (recebido − despesas), pra bater com Dashboard/
+    // Relatório. Antes usava o bruto e mostrava um lucro diferente pro mesmo mês.
+    const recebidoMes = _resumoFin(pacs).recebido;
+    const lucro = recebidoMes - desp;
+    const margem = recebidoMes ? (lucro / recebidoMes) * 100 : 0;
     const pctMeta = metas.fat ? (fat / metas.fat) * 100 : 0;
 
     totalFat += fat; totalPac += pacs.length; totalLucro += lucro;

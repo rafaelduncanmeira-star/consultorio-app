@@ -300,14 +300,13 @@ sobre o código corrigido. Corrigido e commitado:
 **AINDA ABERTO desta varredura (documentado, não corrigido):**
 1. ⚠️ **Rodar de novo** `SETUP_SEGURANCA.sql` e `SETUP_EQUIPE_PROFISSIONAL.sql`
    no Supabase (as policies e o `accept_invite` mudaram).
-2. **Financeiro — pagamento "Parcial" (DECISÃO DO DR. RAFAEL):** lançamento de
-   programa nasce com valor CHEIO e status `Parcial`, mas nenhum KPI de realizado/
-   a receber conta `Parcial` — então o valor some do "recebido/a receber" e ainda
-   infla o bruto. Pior: na MESMA tela o "Lucro Líquido" do DRE conta Parcial e o
-   card de KPI não → dois números diferentes. PDF e Metas usam bruto, divergindo
-   do Relatório. **Falta decidir**: Parcial conta como "a receber" (regime de
-   caixa) ou como realizado (regime de competência)? Assim que decidir, unifico
-   em todas as telas (Dashboard, DRE, Relatório, PDF, Metas).
+2. ✅ **Financeiro — "Parcial" RESOLVIDO (Dr. Rafael pediu os DOIS regimes).**
+   Helper único `_resumoFin`/`_lucroFin` (com testes) padroniza todas as telas:
+   CAIXA (recebido = Pago) e COMPETÊNCIA (faturado = Pago+Parcial+Pendente). O
+   `Parcial` agora entra em "a receber" e `recebido + a receber + isento` fecha
+   com o bruto. Receita, Dashboard, Relatório, PDF e Metas usam o lucro de CAIXA
+   (batem entre si); o **DRE mostra os dois lucros** (Caixa e Competência) lado a
+   lado. (Nos dados demo: Lucro Caixa R$14.250 · Lucro Competência R$32.050.)
 3. **Sync estrutural (features, não bugs pontuais):** (a) escrita offline/rejeitada
    é engolida e depois apagada pelo próximo pull — falta fila `outbox`+retry;
    (b) blob `app_data` é last-write-wins (PC+celular ao mesmo tempo perde um lado)
