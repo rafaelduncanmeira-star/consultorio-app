@@ -299,7 +299,9 @@ sobre o código corrigido. Corrigido e commitado:
 
 **AINDA ABERTO desta varredura (documentado, não corrigido):**
 1. ⚠️ **Rodar de novo** `SETUP_SEGURANCA.sql` e `SETUP_EQUIPE_PROFISSIONAL.sql`
-   no Supabase (as policies e o `accept_invite` mudaram).
+   no Supabase (as policies e o `accept_invite` mudaram) + o novo
+   `SETUP_SYNC.sql` (coluna `rev` p/ concorrência otimista — sem ela o app
+   funciona no modo antigo).
 2. ✅ **Financeiro — "Parcial" RESOLVIDO (Dr. Rafael pediu os DOIS regimes).**
    Helper único `_resumoFin`/`_lucroFin` (com testes) padroniza todas as telas:
    CAIXA (recebido = Pago) e COMPETÊNCIA (faturado = Pago+Parcial+Pendente). O
@@ -307,11 +309,20 @@ sobre o código corrigido. Corrigido e commitado:
    com o bruto. Receita, Dashboard, Relatório, PDF e Metas usam o lucro de CAIXA
    (batem entre si); o **DRE mostra os dois lucros** (Caixa e Competência) lado a
    lado. (Nos dados demo: Lucro Caixa R$14.250 · Lucro Competência R$32.050.)
-3. **Sync estrutural (features, não bugs pontuais):** (a) escrita offline/rejeitada
-   é engolida e depois apagada pelo próximo pull — falta fila `outbox`+retry;
-   (b) blob `app_data` é last-write-wins (PC+celular ao mesmo tempo perde um lado)
-   — falta `updated_at`/versão ou ir pra tabela por-linha. São os 2 maiores
-   riscos de perda de dados ainda em pé.
+3. ✅ **Sync estrutural RESOLVIDO (Dr. Rafael autorizou "Sim"):**
+   (a) **Outbox**: escrita offline/rejeitada agora fica numa fila por chave
+   (`consult__outbox`); o pull NÃO sobrescreve chaves pendentes e a fila é
+   drenada ao voltar a conexão (`online`) e no início de cada `cloudPull`.
+   (b) **Concorrência otimista**: blobs do `app_data` ganham coluna `rev`
+   (**SETUP_SYNC.sql** — rodar no Supabase). O push usa `update ... where rev =
+   última vista`; se outro aparelho gravou antes, detecta o conflito e MESCLA
+   arrays por id (nada se perde; deleção pode "ressuscitar", que é mais seguro
+   que perder um lançamento). Objetos/sem-id: local vence (LWW como antes, mas
+   detectado). Sem a coluna, o app cai no upsert antigo — retrocompatível.
+   (c) Backfill de `id` em despesas/agendamentos/inscricoes (`_migrarIds`) —
+   habilita o merge e fecha o resíduo "linha sem id ficava fora da blindada".
+   Coberto por 7 testes unitários novos + 2 cenários E2E no smoke (conflito
+   entre 2 aparelhos e edição offline sobrevivendo ao pull).
 
 ---
 

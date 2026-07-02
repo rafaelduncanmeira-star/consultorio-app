@@ -164,35 +164,160 @@ function initSupabase() {
   } catch(e) { console.warn('Supabase init error:', e); }
 }
 
-// Push uma chave ao Supabase (fire-and-forget) — usa o owner da equipe atual
+// ============ OUTBOX — fila de escritas não confirmadas (offline/rejeitadas) ============
+// Toda escrita que o Supabase NÃO confirmou fica anotada aqui, por chave. O pull
+// pula chaves pendentes (a edição local vence até ser entregue) e a fila é
+// drenada ao voltar a conexão e no início de cada cloudPull. Antes, uma edição
+// offline era engolida em silêncio e apagada pelo pull seguinte.
+function _outboxGet() { try { return JSON.parse(localStorage.getItem('consult__outbox') || '{}'); } catch(e) { return {}; } }
+function _outboxAdd(key, tipo) {
+  const o = _outboxGet();
+  o[key] = { tipo, ts: new Date().toISOString() };
+  localStorage.setItem('consult__outbox', JSON.stringify(o));
+}
+function _outboxRemove(key) {
+  const o = _outboxGet();
+  if (key in o) { delete o[key]; localStorage.setItem('consult__outbox', JSON.stringify(o)); }
+}
+function _outboxPendente(key) { return key in _outboxGet(); }
+
+let _drenandoOutbox = false;
+async function _drenarOutbox() {
+  if (_drenandoOutbox || !_supa || !currentUser) return;
+  _drenandoOutbox = true;
+  try {
+    for (const [key, info] of Object.entries(_outboxGet())) {
+      if (info.tipo === 'blindada') {
+        const cfg = _BLINDADAS[key];
+        const arr = JSON.parse(localStorage.getItem('consult_' + key) || '[]');
+        // Só upsert (oldArr=[] ⇒ sem deletes): não dá pra saber o que OUTRO
+        // aparelho criou enquanto estávamos offline — apagar seria pior.
+        const ok = cfg ? await _pushBlindada(cfg.tabela, [], arr) : true;
+        if (ok) _outboxRemove(key);
+      } else {
+        await cloudPush(key); // remove/re-enfileira sozinho
+      }
+    }
+  } finally { _drenandoOutbox = false; }
+}
+// Voltou a conexão → re-entrega o que ficou pendente (1.5s pro socket assentar).
+window.addEventListener('online', () => setTimeout(_drenarOutbox, 1500));
+
+// ============ Concorrência otimista nos blobs (coluna rev — SETUP_SYNC.sql) ============
+// Sem a coluna no banco, o app cai no upsert simples (comportamento antigo).
+let _revSuportado = true;
+function _revsGet() { try { return JSON.parse(localStorage.getItem('consult__revs') || '{}'); } catch(e) { return {}; } }
+function _revsSet(key, rev) {
+  const r = _revsGet(); r[key] = rev;
+  localStorage.setItem('consult__revs', JSON.stringify(r));
+}
+
+// Mescla dois arrays por id (conflito entre dois aparelhos): mantém a ordem e as
+// versões LOCAIS (o usuário acabou de editar) e ANEXA itens que só existem no
+// servidor (criados no outro aparelho). Deleção local pode "voltar" — aceito:
+// ressuscitar um item é mais seguro que perder um lançamento criado no outro
+// aparelho. Só é segura quando TODO item tem id; senão devolve null.
+function _mesclarArraysPorId(serverArr, localArr) {
+  if (!Array.isArray(serverArr) || !Array.isArray(localArr)) return null;
+  const comId = a => a.every(r => r && typeof r === 'object' && r.id);
+  if (!comId(serverArr) || !comId(localArr)) return null;
+  const locais = new Set(localArr.map(r => r.id));
+  return [...localArr, ...serverArr.filter(r => !locais.has(r.id))];
+}
+
+// Push uma chave ao Supabase — usa o owner da equipe atual. Falha ⇒ outbox.
 async function cloudPush(key) {
   if (!_supa || !currentUser) return;
   const owner = currentDataOwner || currentUser.id;
   const raw = localStorage.getItem('consult_' + key);
   if (raw === null) return;
   try {
+    const ok = await _pushComRev(owner, key, JSON.parse(raw));
+    if (ok) _outboxRemove(key); else _outboxAdd(key, 'blob');
+  } catch(e) {
+    console.warn('cloudPush error', key, e.message);
+    _outboxAdd(key, 'blob');
+  }
+}
+
+// Escrita com controle de versão: detecta quando OUTRO aparelho gravou a mesma
+// chave desde o nosso último sync (antes: last-write-wins silencioso, um lado
+// perdia tudo) e mescla arrays por id em vez de sobrescrever. true = confirmado.
+async function _pushComRev(owner, key, value, tentativa = 0) {
+  if (!_revSuportado) {
     const { error } = await _supa.from('app_data').upsert(
-      { user_id: owner, key, value: JSON.parse(raw) },
-      { onConflict: 'user_id,key' }
-    );
+      { user_id: owner, key, value }, { onConflict: 'user_id,key' });
     if (error) console.warn('cloudPush rejeitado', key, error.message);
-  } catch(e) { console.warn('cloudPush error', key, e.message); }
+    return !error;
+  }
+  const seen = _revsGet()[key];
+  if (typeof seen === 'number') {
+    // Caminho feliz: ninguém mexeu desde o último sync → 1 request, como antes.
+    const { data, error } = await _supa.from('app_data')
+      .update({ value, rev: seen + 1 })
+      .eq('user_id', owner).eq('key', key).eq('rev', seen)
+      .select('rev');
+    if (error) {
+      if (error.code === '42703') { _revSuportado = false; return _pushComRev(owner, key, value); }
+      console.warn('cloudPush rejeitado', key, error.message);
+      return false;
+    }
+    if (data && data.length) { _revsSet(key, seen + 1); return true; }
+    // 0 linhas: a rev mudou no servidor (outro aparelho gravou) ou a linha sumiu.
+  }
+  const { data: rows, error: e2 } = await _supa.from('app_data')
+    .select('value, rev').eq('user_id', owner).eq('key', key).limit(1);
+  if (e2) {
+    if (e2.code === '42703') { _revSuportado = false; return _pushComRev(owner, key, value); }
+    console.warn('cloudPush rejeitado', key, e2.message);
+    return false;
+  }
+  if (!rows || !rows.length) {
+    const { error: e3 } = await _supa.from('app_data').upsert(
+      { user_id: owner, key, value, rev: 0 }, { onConflict: 'user_id,key' });
+    if (e3) { console.warn('cloudPush rejeitado', key, e3.message); return false; }
+    _revsSet(key, 0);
+    return true;
+  }
+  if (tentativa >= 3) { console.warn('cloudPush: conflito persistente em', key); return false; }
+  // CONFLITO: mescla arrays por id; objetos/sem-id, a edição local vence (LWW,
+  // como antes — mas agora detectado e sem perder itens de array).
+  const mesclado = _mesclarArraysPorId(rows[0].value, value);
+  if (mesclado) {
+    localStorage.setItem('consult_' + key, JSON.stringify(mesclado)); // UI pega no próximo render
+    console.warn('cloudPush: conflito em', key, '— mesclado por id');
+  }
+  _revsSet(key, rows[0].rev);
+  return _pushComRev(owner, key, mesclado || value, tentativa + 1);
 }
 
 // Pull todas as chaves do Supabase → localStorage — usa o owner da equipe atual
 async function cloudPull() {
   if (!_supa || !currentUser) return;
   const owner = currentDataOwner || currentUser.id;
+  // Entrega primeiro o que ficou pendente (offline/rejeitado) — senão o pull
+  // sobrescreveria a edição local que nunca chegou ao servidor.
+  await _drenarOutbox();
   try {
-    const { data, error } = await _supa.from('app_data')
-      .select('key, value')
+    let { data, error } = await _supa.from('app_data')
+      .select('key, value, rev')
       .eq('user_id', owner);
+    if (error && error.code === '42703') {
+      // Coluna rev ainda não existe (SETUP_SYNC.sql não rodou) — segue sem ela.
+      _revSuportado = false;
+      ({ data, error } = await _supa.from('app_data').select('key, value').eq('user_id', owner));
+    }
     if (error) throw error;
     if (data && data.length) {
+      let aplicadas = 0;
       data.forEach(row => {
+        // Chave com escrita local não confirmada: local vence até drenar.
+        if (_outboxPendente(row.key)) return;
         localStorage.setItem('consult_' + row.key, JSON.stringify(row.value));
+        if (typeof row.rev === 'number') _revsSet(row.key, row.rev);
+        aplicadas++;
       });
-      console.log(`cloudPull: ${data.length} chaves sincronizadas`);
+      console.log(`cloudPull: ${aplicadas} chaves sincronizadas`);
     }
   } catch(e) { console.warn('cloudPull error:', e.message); }
   _migrarIds(); // Fase 1: garante ids estáveis após cada carga (idempotente)
@@ -263,6 +388,9 @@ async function _pushBlindada(tabela, oldArr, newArr) {
 // Pull filtrado por RLS → escreve consult_<key> (só o que o usuário pode ver).
 async function _pullBlindada(key, cfg) {
   if (!_supa || !currentUser) return;
+  // Escrita local ainda não confirmada nesta coleção: local vence até drenar
+  // (senão o pull apagaria a edição feita offline).
+  if (_outboxPendente(key)) { console.warn('_pullBlindada: outbox pendente em', key, '— pull adiado'); return; }
   const owner = currentDataOwner || currentUser.id;
   try {
     const { data, error } = await _supa.from(cfg.tabela).select('data').eq('owner_id', owner);
@@ -1123,7 +1251,11 @@ const DB = {
     if (cfg) {
       const old = JSON.parse(localStorage.getItem('consult_' + key) || '[]');
       localStorage.setItem('consult_' + key, JSON.stringify(val));
-      _pushBlindada(cfg.tabela, old, val);
+      // Falhou (offline/RLS)? Vai pra outbox — o pull não sobrescreve e a fila
+      // re-entrega quando a conexão voltar.
+      _pushBlindada(cfg.tabela, old, val)
+        .then(ok => { if (ok) _outboxRemove(key); else _outboxAdd(key, 'blindada'); })
+        .catch(() => _outboxAdd(key, 'blindada'));
       return;
     }
     localStorage.setItem('consult_' + key, JSON.stringify(val));
@@ -1171,16 +1303,22 @@ function _migrarIds() {
     if (mc) DB.set('crm', crm);
     const ags = DB.get('agendamentos'); let ma = false;
     ags.forEach(a => {
+      if (!a.id) { a.id = _novoId('ag'); ma = true; } // sem id ficava FORA da sync blindada
       if (a.pacId == null && a.pacIdx != null && pacs[a.pacIdx]) { a.pacId = pacs[a.pacIdx].id; ma = true; }
       if (a.crmId == null && a.crmIdx != null && crm[a.crmIdx]) { a.crmId = crm[a.crmIdx].id; ma = true; }
     });
     if (ma) DB.set('agendamentos', ags);
     const ins = DB.get('inscricoes'); let mi = false;
     ins.forEach(i => {
+      if (!i.id) { i.id = _novoId('ins'); mi = true; } // idem agendamentos
       if (i.pacId == null && i.pacIdx != null && pacs[i.pacIdx]) { i.pacId = pacs[i.pacIdx].id; mi = true; }
       if (i.profissionalId == null) { const pid = _profDoPaciente(i.pacienteNome); if (pid) { i.profissionalId = pid; mi = true; } }
     });
     if (mi) DB.set('inscricoes', ins);
+    // Despesas: id habilita o merge por id em conflito de sync entre aparelhos.
+    const desps = DB.get('despesas'); let md = false;
+    desps.forEach(d => { if (!d.id) { d.id = _novoId('desp'); md = true; } });
+    if (md) DB.set('despesas', desps);
     const fus = DB.get('followup'); let mf = false;
     fus.forEach(f => {
       if (!f.id) { f.id = _novoId('fu'); mf = true; }
@@ -5625,7 +5763,10 @@ function saveDespesa(e) {
   if (valorDesp < 0) { alert('Valor não pode ser negativo.'); return; }
   const item = { data: fd.get('data'), descricao: fd.get('descricao'), categoria: fd.get('categoria'), tipo: fd.get('tipo'), valor: valorDesp, formaPgto: fd.get('formaPgto') };
   const data = DB.get('despesas');
-  if (editState.col === 'despesas' && editState.idx !== null) { data[editState.idx] = item; } else { data.unshift(item); }
+  if (editState.col === 'despesas' && editState.idx !== null) {
+    item.id = (data[editState.idx] && data[editState.idx].id) || _novoId('desp'); // id estável sobrevive à edição
+    data[editState.idx] = item;
+  } else { item.id = _novoId('desp'); data.unshift(item); }
   DB.set('despesas', data);
   closeModal('modal-despesa');
   renderDespesas();
