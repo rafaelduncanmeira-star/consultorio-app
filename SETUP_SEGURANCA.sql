@@ -38,6 +38,11 @@ create policy "team read app_data" on app_data for select to authenticated using
     user_id IN (select owner_id from team_members where member_id = auth.uid())
     -- …exceto snapshots (contêm TUDO, inclusive finanças)
     AND key NOT LIKE '\_snapshot\_%'
+    -- …e o FINANCEIRO (despesas/metas): SÓ o dono. Antes a blindagem era só no
+    -- navegador (_limparSensiveisProfissional apagava do localStorage), então um
+    -- membro lia direto do banco pelo console. Agora o RLS barra de verdade —
+    -- vale p/ profissional E secretária (secretária "vê tudo, menos finanças").
+    AND key NOT IN ('despesas','metas','metas_proc','metas_proc_valor')
     -- …e segredos só para secretária/médico (profissional fica de fora)
     AND (
       key NOT IN ('zapi_config','wa_cloud_config','llm_config','gemini_key_secure')
@@ -52,6 +57,7 @@ create policy "team insert app_data" on app_data for insert to authenticated wit
   OR (
     user_id IN (select owner_id from team_members where member_id = auth.uid())
     AND key NOT LIKE '\_snapshot\_%'
+    AND key NOT IN ('despesas','metas','metas_proc','metas_proc_valor')
     AND key NOT IN ('zapi_config','wa_cloud_config','llm_config','gemini_key_secure')
   )
 );
@@ -61,6 +67,7 @@ create policy "team update app_data" on app_data for update to authenticated usi
   OR (
     user_id IN (select owner_id from team_members where member_id = auth.uid())
     AND key NOT LIKE '\_snapshot\_%'
+    AND key NOT IN ('despesas','metas','metas_proc','metas_proc_valor')
     AND key NOT IN ('zapi_config','wa_cloud_config','llm_config','gemini_key_secure')
   )
 ) with check (
@@ -68,6 +75,7 @@ create policy "team update app_data" on app_data for update to authenticated usi
   OR (
     user_id IN (select owner_id from team_members where member_id = auth.uid())
     AND key NOT LIKE '\_snapshot\_%'
+    AND key NOT IN ('despesas','metas','metas_proc','metas_proc_valor')
     AND key NOT IN ('zapi_config','wa_cloud_config','llm_config','gemini_key_secure')
   )
 );

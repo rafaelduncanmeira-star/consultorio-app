@@ -270,11 +270,13 @@ async function _pullBlindada(key, cfg) {
     const arr = (data || []).map(row => row.data).filter(Boolean)
       .sort((a, b) => (b.data || '').localeCompare(a.data || ''));
     const atual = JSON.parse(localStorage.getItem('consult_' + key) || '[]');
+    // Flag "membro já sincronizou linhas ao menos uma vez" (separada da flag de
+    // migração do dono). Sem ela, o membro NUNCA aceitava um pull vazio e ficava
+    // com registros-fantasma que o dono já apagou.
+    const msyncFlag = 'consult_' + key + '_msync';
     // Anti-zeramento: nunca troca dados locais por um pull VAZIO quando quem
     // olha é o DONO (dono com local não-vazio deveria sempre ter linhas na
     // tabela — vazio indica migração perdida/RLS quebrado, não "apagou tudo").
-    // Pro membro (profissional), vazio pode ser legítimo (nada atribuído a ele),
-    // mas só confiamos nisso depois da migração do dono concluída.
     if (arr.length === 0 && atual.length > 0) {
       const souDono = (currentDataOwner || currentUser.id) === currentUser.id;
       if (souDono) {
@@ -282,9 +284,13 @@ async function _pullBlindada(key, cfg) {
         localStorage.removeItem(cfg.flag); // força re-migração no próximo ciclo (auto-cura)
         return;
       }
-      if (localStorage.getItem(cfg.flag) !== '1') return;
+      // Membro: só confia num vazio DEPOIS de já ter sincronizado linhas uma vez
+      // (evita apagar local por glitch de RLS/timing no 1º load). A partir daí,
+      // vazio = deleção real do dono e é refletido.
+      if (localStorage.getItem(msyncFlag) !== '1') return;
     }
     localStorage.setItem('consult_' + key, JSON.stringify(arr));
+    if (arr.length > 0) localStorage.setItem(msyncFlag, '1');
   } catch(e) { console.warn('_pullBlindada', cfg.tabela, e.message); }
 }
 
@@ -491,11 +497,20 @@ async function _acceptInviteIfPending() {
 async function resolveDataOwner() {
   if (!_supa || !currentUser) return;
   try {
+    // Quem tem clínica PRÓPRIA (já gravou dados em app_data) sempre vê a própria,
+    // mesmo sendo também membro de outra equipe. Sem isto, aceitar um convite de
+    // outra clínica trancava o dono fora da sua (resolveDataOwner adotava o
+    // vínculo de equipe por cima da própria conta). Só quem NÃO tem clínica
+    // própria adota o papel de membro.
+    const { data: propria } = await _supa.from('app_data')
+      .select('key').eq('user_id', currentUser.id).limit(1);
+    const temClinicaPropria = !!(propria && propria.length);
+
     const { data } = await _supa.from('team_members')
       .select('owner_id, role')
       .eq('member_id', currentUser.id)
       .limit(1);
-    if (data && data.length) {
+    if (!temClinicaPropria && data && data.length) {
       currentDataOwner = data[0].owner_id;
       currentTeamRole  = 'member';
       currentRole      = data[0].role || currentRole; // role na equipe
@@ -3001,11 +3016,14 @@ function statusSelect(status, idx) {
   const s = styles[val] || styles['Contato feito'];
   const opts = ['Contato feito','Em negociação','Marcou','Atendeu','Não marcou']
     .map(o => `<option value="${o}"${val===o?' selected':''}>${o}</option>`).join('');
-  return `<select onchange="updateCrmStatus(${idx},this.value)" style="${s};border:none;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:600;cursor:pointer;outline:none;-webkit-appearance:none;appearance:none;text-align:center;">${opts}</select>`;
+  return `<select onchange="updateCrmStatus('${idx}',this.value)" style="${s};border:none;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:600;cursor:pointer;outline:none;-webkit-appearance:none;appearance:none;text-align:center;">${opts}</select>`;
 }
 
-function updateCrmStatus(idx, newStatus) {
+function updateCrmStatus(ref, newStatus) {
   const data = DB.get('crm');
+  // ref: id estável (string) ou índice (número) — resolve por id no momento.
+  const idx = (typeof ref === 'string') ? data.findIndex(x => x.id === ref) : ref;
+  if (idx < 0 || !data[idx]) return;
   const oldStatus = data[idx].status;
   data[idx].status = newStatus;
   if (oldStatus !== newStatus) {
@@ -3045,6 +3063,7 @@ function _aplicarEfeitosMudancaStatusCrm(idx, oldStatus, newStatus) {
           whatsapp: c.whatsapp,
           procedimento: c.tipo,
           crmIdx: idx,
+          crmId: c.id,   // vínculo estável (índice pode reordenar durante o confirm)
         });
       }
     }, 100);
@@ -3180,8 +3199,12 @@ function _detectarVinculos(col, item) {
 }
 let _vinculosIdx = null;
 
-function deleteRow(col, idx) {
+function deleteRow(col, ref) {
   const data = DB.get(col);
+  // ref pode ser índice (número) OU id estável (string). CRM recebe inserções
+  // via realtime que reordenam o array — resolver por id no MOMENTO da ação
+  // evita apagar o contato ERRADO quando a lista mudou entre render e clique.
+  const idx = (typeof ref === 'string') ? data.findIndex(x => x.id === ref) : ref;
   const item = data[idx];
   if (!item) return;
   _vinculosIdx = idx;
@@ -3210,10 +3233,14 @@ function deleteRow(col, idx) {
   _auditLog('excluiu', col, `Excluiu ${col}: ${item.nome || item.descricao || '(sem nome)'}`);
 }
 
-function editRow(col, idx) {
+function editRow(col, ref) {
   const data = DB.get(col);
+  // ref: índice (número) OU id estável (string) — ver deleteRow. Resolver por id
+  // impede editar o registro errado quando o array reordenou (lead via realtime).
+  const idx = (typeof ref === 'string') ? data.findIndex(x => x.id === ref) : ref;
   const r = data[idx];
-  editState = { col, idx };
+  if (!r) return;
+  editState = { col, idx, id: r.id ?? null };
 
   const modalMap = { crm: 'modal-crm', pacientes: 'modal-paciente', followup: 'modal-followup', agenda: 'modal-agenda', despesas: 'modal-despesa' };
   const titleMap = { crm: 'Editar Contato', pacientes: 'Editar Consulta', followup: 'Editar Follow-Up', agenda: 'Editar Dia', despesas: 'Editar Despesa' };
@@ -3300,7 +3327,12 @@ function saveCrm(e) {
   const data = DB.get('crm');
   // Bloqueia duplicata por WhatsApp (normalizado — com ou sem DDI 55)
   const cleanPhone = _normPhone(item.whatsapp);
-  const editIdx = (editState.col === 'crm' && editState.idx !== null) ? editState.idx : -1;
+  // Resolve o alvo da edição por ID no momento do save (não pelo índice
+  // congelado ao abrir o modal): se um lead chegou via realtime nesse meio-tempo,
+  // o índice antigo apontaria pro contato errado.
+  const editIdx = (editState.col === 'crm')
+    ? (editState.id ? data.findIndex(c => c.id === editState.id) : (editState.idx ?? -1))
+    : -1;
   if (cleanPhone) {
     const dupIdx = data.findIndex((c, i) => i !== editIdx && c.whatsapp && _normPhone(c.whatsapp) === cleanPhone);
     if (dupIdx >= 0) {
@@ -3325,11 +3357,14 @@ function renderCrm() {
   let data = DB.get('crm');
   let changed = false;
   data = data.map(r => {
-    if (!r.status || r.status === 'null' || r.status === 'undefined') {
-      changed = true;
-      return { ...r, status: 'Contato feito' };
+    let nr = r;
+    // Garante id estável em TODA linha — as ações (editar/excluir/status/chat)
+    // resolvem por id, não por índice (que apodrece com lead via realtime).
+    if (!nr.id) { nr = { ...nr, id: _novoId('crm') }; changed = true; }
+    if (!nr.status || nr.status === 'null' || nr.status === 'undefined') {
+      nr = { ...nr, status: 'Contato feito' }; changed = true;
     }
-    return r;
+    return nr;
   });
   if (changed) DB.set('crm', data);
 
@@ -3352,14 +3387,14 @@ function renderCrm() {
         <td>${formatDate(r.data)}</td>
         <td style="font-weight:600;color:#0f172a;">${_esc(r.nome)}</td>
         <td>${r.whatsapp ? (_waConnected()
-          ? `<button onclick="openCrmChat(${i})" style="background:none;border:none;cursor:pointer;color:#10b981;font-weight:600;font-size:13px;padding:0;font-family:'Inter',sans-serif;">💬 ${_esc(r.whatsapp)}</button>`
+          ? `<button onclick="openCrmChat('${r.id}')" style="background:none;border:none;cursor:pointer;color:#10b981;font-weight:600;font-size:13px;padding:0;font-family:'Inter',sans-serif;">💬 ${_esc(r.whatsapp)}</button>`
           : `<a href="https://wa.me/55${_normPhone(r.whatsapp)}" target="_blank" style="color:#10b981;font-weight:600;text-decoration:none;">💬 ${_esc(r.whatsapp)}</a>`) : '—'}</td>
         <td style="color:#475569;">${_esc(r.canal||'—')}</td>
         <td style="color:#475569;">${_esc(r.tipo||'—')}</td>
-        <td>${statusSelect(r.status, i)}</td>
+        <td>${statusSelect(r.status, r.id)}</td>
         <td style="white-space:nowrap;">
-          <button onclick="editRow('crm',${i})" title="Editar" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;">✏️</button>
-          <button onclick="deleteRow('crm',${i})" title="Excluir" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;">🗑️</button>
+          <button onclick="editRow('crm','${r.id}')" title="Editar" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;">✏️</button>
+          <button onclick="deleteRow('crm','${r.id}')" title="Excluir" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;">🗑️</button>
         </td>
       </tr>`;
     }).join('');
@@ -3484,7 +3519,13 @@ function renderKanban(filtro) {
   const container = document.getElementById('crm-kanban-view');
   if (!container) return;
 
-  const data         = DB.get('crm');
+  let data           = DB.get('crm');
+  // Garante id estável em toda linha (idem renderCrm) — as ações do kanban
+  // resolvem por id, não por índice (que reordena com lead via realtime).
+  if (data.some(r => !r.id)) {
+    data = data.map(r => r.id ? r : { ...r, id: _novoId('crm') });
+    DB.set('crm', data);
+  }
   const termo        = (_crmKanbanFiltro || '').toLowerCase().trim();
   const statusFiltro = (document.getElementById('crm-status-filter') || {}).value || '';
 
@@ -3650,7 +3691,7 @@ function _kanbanCardHtml(r, col) {
   const _prof   = r.profissionalId ? getProfissional(r.profissionalId) : null;
   const whatsBtn = r.whatsapp
     ? (_zapiOn
-        ? `<button onclick="openCrmChat(${idx})"
+        ? `<button onclick="openCrmChat('${r.id}')"
               style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#10b981;font-weight:600;
                      background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:4px 9px;
                      cursor:pointer;margin-bottom:9px;font-family:'Inter',sans-serif;">
@@ -3669,7 +3710,7 @@ function _kanbanCardHtml(r, col) {
   return `
     <div class="kanban-card"
          draggable="true"
-         ondragstart="_kanbanDragStart(event,${idx})"
+         ondragstart="_kanbanDragStart(event,'${r.id}')"
          ondragend="document.querySelectorAll('.kanban-card').forEach(c=>c.classList.remove('kanban-dragging'))">
 
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;margin-bottom:6px;">
@@ -3691,7 +3732,7 @@ function _kanbanCardHtml(r, col) {
 
         <!-- Linha 1: botão de avançar (largura total) -->
         ${nextCol ? `
-          <button onclick="moverKanbanCard(${idx},'${nextCol.status.replace(/'/g,"\\'")}',event)"
+          <button onclick="moverKanbanCard('${r.id}','${nextCol.status.replace(/'/g,"\\'")}',event)"
             style="width:100%;background:${col.cor}18;color:${col.cor};border:1px solid ${col.cor}35;border-radius:6px;padding:5px 8px;font-size:11.5px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;margin-bottom:6px;transition:background 0.15s;text-align:center;"
             onmouseover="this.style.background='${col.cor}30'"
             onmouseout="this.style.background='${col.cor}18'">
@@ -3702,16 +3743,16 @@ function _kanbanCardHtml(r, col) {
         <!-- Linha 2: ações secundárias -->
         <div style="display:flex;align-items:center;gap:5px;justify-content:flex-end;">
           ${r.status === 'Marcou' ? `
-            <button onclick="convertCrmToAtendidoKanban(${idx},event)"
+            <button onclick="convertCrmToAtendidoKanban('${r.id}',event)"
               title="Registrar atendimento"
               style="background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;">
               ✓ Atendeu
             </button>` : ''}
 
-          <button onclick="editRow('crm',${idx})" title="Editar"
+          <button onclick="editRow('crm','${r.id}')" title="Editar"
             style="background:#f8fafc;color:#64748b;border:1px solid #e2e8f0;border-radius:6px;padding:4px 7px;font-size:11px;cursor:pointer;">✏️</button>
 
-          <button onclick="deleteRow('crm',${idx})" title="Excluir"
+          <button onclick="deleteRow('crm','${r.id}')" title="Excluir"
             style="background:#fff1f2;color:#dc2626;border:1px solid #fecdd3;border-radius:6px;padding:4px 7px;font-size:11px;cursor:pointer;">🗑️</button>
         </div>
       </div>
@@ -3741,10 +3782,13 @@ function _diasDesde(dataStr) {
   return           { texto: `${diff}d atrás`,    cor: '#ef4444' };
 }
 
-function moverKanbanCard(idx, novoStatus, evt) {
+function moverKanbanCard(ref, novoStatus, evt) {
   if (evt) evt.stopPropagation();
   const data = DB.get('crm');
-  if (!data[idx]) return;
+  // ref: id estável (string) ou índice (número) — resolve por id no momento
+  // da ação (o array pode ter reordenado por um lead via realtime/drag).
+  const idx = (typeof ref === 'string') ? data.findIndex(x => x.id === ref) : ref;
+  if (idx < 0 || !data[idx]) return;
   const statusAnterior = data[idx].status;
   data[idx].status = novoStatus;
   // Registra o momento da mudança para o cronômetro
@@ -3815,15 +3859,16 @@ function _atualizarFunilCrm(data) {
   }).join('');
 }
 
-function convertCrmToAtendidoKanban(idx, evt) {
+function convertCrmToAtendidoKanban(ref, evt) {
   if (evt) evt.stopPropagation();
-  moverKanbanCard(idx, 'Atendeu');
-  // trigger the same convert modal/action
-  setTimeout(() => convertCrmToAtendido(idx), 80);
+  moverKanbanCard(ref, 'Atendeu');
+  // trigger the same convert modal/action — passa o id (resolvido na hora),
+  // pra não registrar atendimento do contato ERRADO depois dos 80ms.
+  setTimeout(() => convertCrmToAtendido(ref), 80);
 }
 
-function _kanbanDragStart(evt, idx) {
-  _kanbanDragIdx = idx;
+function _kanbanDragStart(evt, ref) {
+  _kanbanDragIdx = ref; // id estável (não índice) — ver _kanbanDrop
   evt.target.classList.add('kanban-dragging');
   evt.dataTransfer.effectAllowed = 'move';
 }
@@ -3833,7 +3878,9 @@ function _kanbanDrop(evt, novoStatus, colEl) {
   colEl.classList.remove('kanban-drop-target');
   if (_kanbanDragIdx === null) return;
   const data = DB.get('crm');
-  if (data[_kanbanDragIdx] && data[_kanbanDragIdx].status !== novoStatus) {
+  const idx = (typeof _kanbanDragIdx === 'string')
+    ? data.findIndex(x => x.id === _kanbanDragIdx) : _kanbanDragIdx;
+  if (idx >= 0 && data[idx] && data[idx].status !== novoStatus) {
     moverKanbanCard(_kanbanDragIdx, novoStatus);
   }
   _kanbanDragIdx = null;
@@ -3841,7 +3888,13 @@ function _kanbanDrop(evt, novoStatus, colEl) {
 
 // ====================== INTEGRAÇÃO CRM → ATENDIDOS ======================
 function renderCrmPendentesAtendidos() {
-  const crm = DB.get('crm');
+  let crm = DB.get('crm');
+  // Garante id estável (as ações resolvem por id) mesmo se esta página abrir
+  // antes de renderCrm/renderKanban.
+  if (crm.some(r => !r.id)) {
+    crm = crm.map(r => r.id ? r : { ...r, id: _novoId('crm') });
+    DB.set('crm', crm);
+  }
   const pendentes = crm.map((c, i) => ({ ...c, _idx: i })).filter(c => (c.status === 'Marcou' || c.status === 'Atendeu') && !c.converted);
   const container = document.getElementById('crm-pendentes-atendidos');
   if (!container) return;
@@ -3860,7 +3913,7 @@ function renderCrmPendentesAtendidos() {
               <span style="font-weight:600;color:#0f172a;">${_esc(c.nome)}</span>
               <span style="color:#64748b;font-size:12px;margin-left:10px;">${_esc(c.tipo || '')} · ${_esc(c.canal || '')} · ${formatDate(c.data)}</span>
             </div>
-            <button onclick="convertCrmToAtendido(${c._idx})" style="background:#10b981;color:#fff;border:none;border-radius:7px;padding:7px 16px;font-weight:600;font-size:13px;cursor:pointer;">
+            <button onclick="convertCrmToAtendido('${c.id}')" style="background:#10b981;color:#fff;border:none;border-radius:7px;padding:7px 16px;font-weight:600;font-size:13px;cursor:pointer;">
               ✓ Registrar Atendimento
             </button>
           </div>`).join('')}
@@ -3868,11 +3921,13 @@ function renderCrmPendentesAtendidos() {
     </div>`;
 }
 
-function convertCrmToAtendido(crmIdx) {
+function convertCrmToAtendido(ref) {
   const crm = DB.get('crm');
+  // ref: id estável (string) ou índice (número).
+  const crmIdx = (typeof ref === 'string') ? crm.findIndex(x => x.id === ref) : ref;
   const c = crm[crmIdx];
   if (!c) return;
-  editState = { col: null, idx: null, crmIdx };
+  editState = { col: null, idx: null, crmIdx, crmId: c.id ?? null };
   const modal = document.getElementById('modal-paciente');
   const form = modal.querySelector('form');
   const today = _ymd(new Date());
@@ -4204,9 +4259,14 @@ function savePaciente(e) {
   }
 
   // Marcar CRM como convertido quando vem de conversão
-  if (editState.crmIdx !== null && editState.crmIdx !== undefined) {
+  if (editState.crmId || editState.crmIdx !== null && editState.crmIdx !== undefined) {
     const crm = DB.get('crm');
-    if (crm[editState.crmIdx]) { crm[editState.crmIdx].converted = true; crm[editState.crmIdx].status = 'Atendeu'; }
+    // Prefere o id estável; índice congelado só como fallback (pode ter
+    // reordenado por um lead via realtime durante o modal aberto).
+    const alvo = editState.crmId
+      ? crm.find(c => c.id === editState.crmId)
+      : crm[editState.crmIdx];
+    if (alvo) { alvo.converted = true; alvo.status = 'Atendeu'; }
     DB.set('crm', crm);
   } else {
     // Auto-vincular: registro manual sem usar banner — procura CRM pelo nome
@@ -4667,7 +4727,7 @@ function _popularProfissionalSelect(selectedId, elId, permitirVazio) {
 }
 
 function openNovoAgendamento(prefill = {}) {
-  editState = { col: null, idx: null, crmIdx: prefill.crmIdx || null, pacIdx: null, agId: null };
+  editState = { col: null, idx: null, crmIdx: prefill.crmIdx ?? null, crmId: prefill.crmId ?? null, pacIdx: null, agId: null };
   const modal = document.getElementById('modal-agendamento');
   const form = modal.querySelector('form');
   form.reset();
@@ -4698,7 +4758,7 @@ function editAgendamento(id) {
   const ags = getAgendamentos();
   const a = ags.find(x => x.id === id);
   if (!a) return;
-  editState = { col: null, idx: null, crmIdx: a.crmIdx ?? null, pacIdx: a.pacIdx ?? null, agId: id };
+  editState = { col: null, idx: null, crmIdx: a.crmIdx ?? null, crmId: a.crmId ?? null, pacIdx: a.pacIdx ?? null, agId: id };
   const modal = document.getElementById('modal-agendamento');
   const form = modal.querySelector('form');
   const sel = document.getElementById('ag-procedimento');
@@ -4742,8 +4802,10 @@ function saveAgendamento(e) {
     tipoAtividade: fd.get('tipoAtividade') || 'Consultório',
     crmIdx: editState.crmIdx ?? null,
     pacIdx: editState.pacIdx ?? null,
-    // vínculos por id (Fase 1) — resolvidos a partir do índice atual
-    crmId: (editState.crmIdx != null && DB.get('crm')[editState.crmIdx]) ? DB.get('crm')[editState.crmIdx].id : null,
+    // vínculos por id (Fase 1) — prefere o id estável; só cai no índice
+    // congelado (crmIdx) se não houver id (que pode apontar pro contato errado
+    // após a lista reordenar por um lead via realtime).
+    crmId: editState.crmId ?? ((editState.crmIdx != null && DB.get('crm')[editState.crmIdx]) ? DB.get('crm')[editState.crmIdx].id : null),
     pacId: (editState.pacIdx != null && DB.get('pacientes')[editState.pacIdx]) ? DB.get('pacientes')[editState.pacIdx].id : null,
   };
 
@@ -11129,8 +11191,10 @@ let _chatPhone = null;
 let _chatIdx   = null;
 let _chatSub   = null;
 
-function openCrmChat(idx) {
-  const r = DB.get('crm')[idx];
+function openCrmChat(ref) {
+  const data = DB.get('crm');
+  const idx = (typeof ref === 'string') ? data.findIndex(x => x.id === ref) : ref;
+  const r = data[idx];
   if (!r) return;
   abrirChatPorTelefone(r.nome, r.whatsapp, idx);
 }

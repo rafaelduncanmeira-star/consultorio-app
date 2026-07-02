@@ -266,6 +266,56 @@ profissional, os guards de snapshot/segredo, `_pushBlindada` lendo `{error}`, e 
 
 ---
 
+## 🧹 VARREDURA 6h #1 (loop automático) — segurança, isolamento e integridade
+
+Três auditorias paralelas (financeiro/KPI, integridade de sync, auth/equipe/RLS)
+sobre o código corrigido. Corrigido e commitado:
+
+**Segurança / isolamento (exige rodar SQL de novo no Supabase):**
+- **Financeiro vazava por RLS:** `despesas/metas/metas_proc/metas_proc_valor` eram
+  legíveis por qualquer membro (inclusive profissional) direto no banco — a
+  blindagem só existia no navegador. **SETUP_SEGURANCA.sql** agora tranca essas
+  chaves ao dono no RLS (select/insert/update).
+- **Convite agora é NOMINAL:** `accept_invite` só aceita se o e-mail logado for o
+  convidado (antes, qualquer um com o link entrava). **SETUP_EQUIPE_PROFISSIONAL.sql**.
+- **Dono não é mais rebaixado:** `accept_invite` não sobrescreve mais o
+  `profiles.role` global (o papel do convite vale só dentro da equipe, em
+  `team_members.role`). E `resolveDataOwner` (app.js) faz quem tem clínica
+  própria SEMPRE ver a própria, mesmo sendo membro de outra — antes, aceitar um
+  convite trancava o dono fora dos próprios dados.
+
+**Integridade de dados (app.js, já no deploy):**
+- **Ações de CRM e Kanban por ID, não por índice:** editar/excluir/mudar
+  status/converter/chat/arrastar resolviam a linha por índice congelado. Um lead
+  chegando via realtime (`unshift`) reordenava o array e a ação caía no contato
+  ERRADO (sobrescrevia/excluía/convertia o vizinho). Agora tudo resolve por id
+  no momento da ação; `renderCrm`/`renderKanban` garantem id em toda linha.
+  Coberto por novo teste no smoke (simula lead no meio da edição).
+- **saveAgendamento** prefere `crmId` estável ao índice congelado.
+- **Anti-zeramento do membro:** o guard usava a flag de migração (que nunca liga
+  pra membro), então o membro nunca refletia deleções do dono (registros-fantasma).
+  Agora há flag `_msync` por coleção: aceita pull vazio só depois de sincronizar
+  linhas uma vez.
+
+**AINDA ABERTO desta varredura (documentado, não corrigido):**
+1. ⚠️ **Rodar de novo** `SETUP_SEGURANCA.sql` e `SETUP_EQUIPE_PROFISSIONAL.sql`
+   no Supabase (as policies e o `accept_invite` mudaram).
+2. **Financeiro — pagamento "Parcial" (DECISÃO DO DR. RAFAEL):** lançamento de
+   programa nasce com valor CHEIO e status `Parcial`, mas nenhum KPI de realizado/
+   a receber conta `Parcial` — então o valor some do "recebido/a receber" e ainda
+   infla o bruto. Pior: na MESMA tela o "Lucro Líquido" do DRE conta Parcial e o
+   card de KPI não → dois números diferentes. PDF e Metas usam bruto, divergindo
+   do Relatório. **Falta decidir**: Parcial conta como "a receber" (regime de
+   caixa) ou como realizado (regime de competência)? Assim que decidir, unifico
+   em todas as telas (Dashboard, DRE, Relatório, PDF, Metas).
+3. **Sync estrutural (features, não bugs pontuais):** (a) escrita offline/rejeitada
+   é engolida e depois apagada pelo próximo pull — falta fila `outbox`+retry;
+   (b) blob `app_data` é last-write-wins (PC+celular ao mesmo tempo perde um lado)
+   — falta `updated_at`/versão ou ir pra tabela por-linha. São os 2 maiores
+   riscos de perda de dados ainda em pé.
+
+---
+
 ## 🔜 PRÓXIMO PASSO (é aqui que paramos)
 
 **Provar o isolamento com um teste limpo.** O teste anterior não valeu porque o "Dr. Jovino"

@@ -58,6 +58,13 @@ begin
   if inv.owner_id = auth.uid() then
     return json_build_object('error', 'Você não pode aceitar um convite seu mesmo.');
   end if;
+  -- Convite é NOMINAL: só a conta com o e-mail convidado pode aceitar. Sem isto,
+  -- qualquer um que recebesse o link (o app manda por WhatsApp) entrava na
+  -- clínica com o papel do convite. (Convites antigos sem e-mail seguem abertos.)
+  if inv.email is not null and inv.email <> ''
+     and lower(inv.email) <> lower(coalesce(auth.email(), '')) then
+    return json_build_object('error', 'Este convite é para outro e-mail. Entre com a conta convidada.');
+  end if;
 
   insert into team_members (owner_id, member_id, role, profissional_id)
     values (inv.owner_id, auth.uid(), inv.role, inv.profissional_id)
@@ -65,7 +72,10 @@ begin
       do update set role = excluded.role, profissional_id = excluded.profissional_id;
 
   update team_invites set accepted_at = now(), accepted_by = auth.uid() where id = inv.id;
-  update profiles set role = inv.role where id = auth.uid();
+  -- NÃO sobrescreve profiles.role (papel GLOBAL). O papel do convite vale só
+  -- DENTRO da equipe e já fica em team_members.role (lido por resolveDataOwner).
+  -- Antes, um DONO que aceitasse convite de outra clínica virava "secretária" na
+  -- PRÓPRIA clínica e ficava trancado fora dos próprios dados.
 
   return json_build_object('ok', true, 'owner_id', inv.owner_id,
                            'role', inv.role, 'profissional_id', inv.profissional_id);
