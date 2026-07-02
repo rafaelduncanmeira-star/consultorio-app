@@ -16,7 +16,12 @@
 // Envs opcionais:
 //   WA_VERIFY_TOKEN   — verify token do webhook da Meta (GET hub.challenge)
 //   WA_WEBHOOK_SECRET — se definido, o POST exige ?s=<segredo> na URL
-//                       (acrescente &s=... na URL colada no provedor)
+//                       (acrescente &s=... na URL colada no provedor).
+//                       OBRIGATÓRIO para o modo AUTÔNOMO: a IA só responde/agenda
+//                       em requisição autenticada. Sem o segredo, o webhook segue
+//                       ingerindo leads/mensagens, mas NUNCA dispara resposta nem
+//                       agendamento — impede que uma URL vazada gere custo de LLM
+//                       ou agenda falsa.
 //
 // Blindagens da IA autônoma (ver "SECRETÁRIA POR IA" abaixo):
 //   gating duplo (enabled+autonomo) · sem resposta a placeholders/eco ·
@@ -54,6 +59,11 @@ Deno.serve(async (req) => {
   if (secret && url.searchParams.get('s') !== secret) {
     return json({ error: 'não autorizado' }, 403);
   }
+  // A IA autônoma (gasto de LLM + criação de agendamentos) SÓ dispara em webhook
+  // autenticado. Sem WA_WEBHOOK_SECRET definido E conferido, o endpoint continua
+  // ingerindo leads/mensagens no CRM, mas nunca responde nem agenda sozinho —
+  // assim uma URL vazada não vira torneira de custo nem porta pra agenda falsa.
+  const autenticado = !!secret && url.searchParams.get('s') === secret;
 
   const owner = url.searchParams.get('owner');
   const prof  = url.searchParams.get('prof'); // opcional: número por profissional
@@ -96,11 +106,19 @@ Deno.serve(async (req) => {
     const phoneChat = phone.replace(/^55/, '');
 
     // 1) SEMPRE registra a mensagem recebida no histórico (crm_messages).
-    const { error: msgErr } = await supa.from('crm_messages').insert({
+    const { data: msgRow, error: msgErr } = await supa.from('crm_messages').insert({
       user_id: owner, whatsapp: phoneChat, remetente: 'contato', mensagem,
-    });
-    if (msgErr) { console.log('[webhook] crm_messages:', msgErr.message); continue; }
+    }).select('created_at').limit(1);
+    if (msgErr) {
+      console.log('[webhook] crm_messages:', msgErr.message);
+      // Desfaz o dedupe: sem a mensagem gravada, um retry do provedor PRECISA
+      // reprocessar. Sem isto o evento ficaria marcado como visto e a mensagem
+      // se perderia de vez.
+      if (bruto.msgId) await supa.from('wa_eventos').delete().eq('id', String(bruto.msgId));
+      continue;
+    }
     armazenadas++;
+    const msgTs = (msgRow && msgRow[0] && msgRow[0].created_at) || null;
 
     // 2) Cria o card no CRM só se ainda não existir um lead desse número.
     const { data: existente } = await supa.from('crm_leads')
@@ -115,14 +133,14 @@ Deno.serve(async (req) => {
       if (error) console.log('[webhook] crm_leads:', error.message);
     }
 
-    ultima = { phone, phoneChat, nome, mensagem };
+    ultima = { phone, phoneChat, nome, mensagem, msgTs };
   }
 
   // 3) ── SECRETÁRIA POR IA (modo autônomo) ──
   // Uma resposta por entrega (para a última mensagem), em background quando o
   // runtime permite — devolve 200 rápido e evita retry do provedor por timeout.
   if (ultima) {
-    const tarefa = maybeAutoReply({ supa, owner, ...ultima }).catch((e) =>
+    const tarefa = maybeAutoReply({ supa, owner, autenticado, ...ultima }).catch((e) =>
       console.log('[IA] erro em background:', (e as Error).message));
     const rt: any = (globalThis as any).EdgeRuntime;
     if (rt && typeof rt.waitUntil === 'function') rt.waitUntil(tarefa);
@@ -179,7 +197,13 @@ function normalizarEntrada(p: any): any {
     (p.image ? '[imagem]' : '') || (p.audio ? '[áudio]' : '') ||
     (p.video ? '[vídeo]' : '') || (p.document ? '[documento]' : '') || '';
   if (!phoneRaw) return { ok: false, motivo: 'z-api: sem telefone' };
-  return { ok: true, msgs: [{ phone: phoneRaw, nome, mensagem, msgId: p.messageId || p.id || null }] };
+  // Dedupe: alguns eventos da Z-API não trazem id. Sintetiza uma chave estável
+  // a partir de telefone + timestamp (`momment`), que o retry reentrega igual —
+  // sem isso um retred vira resposta duplicada.
+  const zTs = p.momment || p.momment_ || p.timestamp || null;
+  const zid = p.messageId || p.id ||
+    (zTs ? String(phoneRaw).replace(/\D/g, '') + ':' + zTs : null);
+  return { ok: true, msgs: [{ phone: phoneRaw, nome, mensagem, msgId: zid }] };
 }
 
 // Mensagens que são só placeholder de mídia — não alimentam resposta automática
@@ -192,11 +216,18 @@ function _ehPlaceholder(txt: string): boolean {
 // SECRETÁRIA POR IA — MODO AUTÔNOMO (responde sozinha).
 // Gated por ia_config.enabled + ia_config.autonomo (ambos no app, OFF por padrão).
 async function maybeAutoReply(ctx: any): Promise<void> {
-  const { supa, owner, phone, phoneChat, nome, mensagem } = ctx;
+  const { supa, owner, phone, phoneChat, nome, mensagem, msgTs, autenticado } = ctx;
   try {
     const ia = await lerAppData(supa, owner, 'ia_config', null);
     // Toggle MESTRE + autônomo: desligar a IA no card desliga TUDO.
     if (!ia || !ia.enabled || !ia.autonomo) return;
+
+    // Só responde em webhook autenticado (WA_WEBHOOK_SECRET conferido). Fecha a
+    // porta pra URL vazada disparar LLM/agendamento em nome de um atacante.
+    if (!autenticado) {
+      console.log('[IA] webhook sem segredo conferido — resposta automática desativada (defina WA_WEBHOOK_SECRET).');
+      return;
+    }
 
     // Não responde placeholder de mídia (áudio/imagem/status) — evita loop e ruído.
     if (_ehPlaceholder(mensagem)) return;
@@ -216,6 +247,15 @@ async function maybeAutoReply(ctx: any): Promise<void> {
       .eq('remetente', 'consultorio').gte('created_at', umDia);
     if ((c24 || 0) >= 60) { console.log('[IA] rate limit 24h:', phoneChat); return; }
 
+    // Fusível GLOBAL por dono: teto diário de respostas do bot somando TODOS os
+    // telefones. Sem ele, um atacante rotacionando números fura o limite por
+    // telefone e estoura o custo de LLM. (Conta envios manuais também — é um
+    // teto de segurança, não um alvo operacional; deixe folgado.)
+    const { count: cDiaDono } = await supa.from('crm_messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', owner).eq('remetente', 'consultorio').gte('created_at', umDia);
+    if ((cDiaDono || 0) >= 300) { console.log('[IA] teto diário do dono atingido'); return; }
+
     // Histórico recente da conversa
     const { data: histRaw } = await supa.from('crm_messages')
       .select('remetente,mensagem,created_at')
@@ -223,11 +263,18 @@ async function maybeAutoReply(ctx: any): Promise<void> {
       .order('created_at', { ascending: false }).limit(16);
     const historico = (histRaw || []).reverse();
 
-    // Guard de frescor: se chegou mensagem mais nova do paciente enquanto esta
-    // era processada, deixa a invocação mais nova responder (evita resposta dupla).
-    const ultimaContato = [...historico].reverse().find((m: any) => m.remetente === 'contato');
-    if (ultimaContato && ultimaContato.mensagem !== mensagem) {
-      console.log('[IA] mensagem mais nova na fila — pulando esta'); return;
+    // Guard de frescor POR TIMESTAMP: se já existe mensagem do paciente MAIS
+    // NOVA que a que estamos respondendo, deixa a invocação dela responder.
+    // (Comparar por timestamp, e não por texto, evita resposta dupla mesmo
+    // quando o paciente manda o mesmo texto duas vezes — ex.: "oi" e "oi".)
+    if (msgTs) {
+      const { count: maisNovas } = await supa.from('crm_messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', owner).eq('whatsapp', phoneChat)
+        .eq('remetente', 'contato').gt('created_at', msgTs);
+      if ((maisNovas || 0) > 0) {
+        console.log('[IA] mensagem mais nova na fila — pulando esta'); return;
+      }
     }
 
     // Conhecimento da clínica (defaults alinhados aos do app)
@@ -260,8 +307,11 @@ async function maybeAutoReply(ctx: any): Promise<void> {
     // e só agenda se o slot estiver na lista de livres que NÓS calculamos
     // (o paciente pode tentar induzir a IA a marcar horário arbitrário).
     if (ia.agendar) {
-      const m = texto.match(/\[\[AGENDAR:\s*(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})\s*(?:\|\s*([^\]]+))?\]\]/);
-      texto = texto.replace(/\[\[AGENDAR[^\]]*(\]\])?/g, '').trim();
+      // Nome do procedimento com `.+?` (não `[^\]]+`) pra não truncar em um `]`
+      // interno (ex.: "Botox [premium]"); ancorado no `]]` de fechamento.
+      const m = texto.match(/\[\[AGENDAR:\s*(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})\s*(?:\|\s*(.+?))?\]\]/);
+      // Remove marcadores completos e também um marcador truncado (sem fechamento).
+      texto = texto.replace(/\[\[AGENDAR[\s\S]*?\]\]/g, '').replace(/\[\[AGENDAR[\s\S]*$/g, '').trim();
       if (m) {
         const slot = `${m[1]} ${m[2].padStart(5, '0')}`;
         if (!disponibilidade.livres.has(slot)) {
@@ -270,6 +320,7 @@ async function maybeAutoReply(ctx: any): Promise<void> {
           const ok = await criarAgendamentoSeguro(supa, owner, {
             data: m[1], hora: m[2].padStart(5, '0'), procedimento: (m[3] || '').trim(),
             pacienteNome: nome || 'Paciente WhatsApp', whatsapp: phone,
+            duracao: agcfg.slotDuracao || 60,
             modo: ia.agendarModo || 'pendente',
           });
           if (!ok) console.log('[IA] agendamento não criado (slot ocupado ou erro de insert)');
@@ -451,19 +502,28 @@ function montarDisponibilidade(agcfg: any, ags: any[], bloqs: any[]): { texto: s
 // Cria o agendamento com re-checagem de ocupação imediatamente antes do insert
 // (dois pacientes confirmando o mesmo slot no mesmo minuto: só o 1º entra).
 async function criarAgendamentoSeguro(supa: any, owner: string, p: any): Promise<boolean> {
-  const { data: choque } = await supa.from('clinica_agendamentos')
-    .select('id')
+  const dur = Number(p.duracao) || 60;
+  const toMin = (h: string) => { const [a, b] = String(h || '0:0').split(':').map(Number); return a * 60 + (b || 0); };
+  const ini = toMin(p.hora), fim = ini + dur;
+  // Re-checa por SOBREPOSIÇÃO de intervalo no mesmo dia (não só início idêntico):
+  // uma consulta de 90min às 08:00 tem de barrar um novo slot às 08:30. Só o
+  // início igual deixava passar sobreposições parciais.
+  const { data: doDia } = await supa.from('clinica_agendamentos')
+    .select('data')
     .eq('owner_id', owner)
     .eq('data->>data', p.data)
-    .eq('data->>hora', p.hora)
-    .neq('data->>status', 'Cancelado')
-    .limit(1);
-  if (choque && choque.length) return false;
+    .neq('data->>status', 'Cancelado');
+  const conflita = (doDia || []).some((r: any) => {
+    const a = r.data; if (!a || !a.hora) return false;
+    const aIni = toMin(a.hora), aFim = aIni + (Number(a.duracao) || 60);
+    return ini < aFim && aIni < fim;
+  });
+  if (conflita) return false;
 
   const id = 'ag_ia_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
   const status = p.modo === 'direto' ? 'Confirmado' : 'Pendente';
   const ag = {
-    id, data: p.data, hora: p.hora, duracao: 60,
+    id, data: p.data, hora: p.hora, duracao: dur,
     pacienteNome: p.pacienteNome, whatsapp: p.whatsapp,
     procedimento: p.procedimento || '', profissionalId: null,
     status, obs: 'Criado pela secretária IA', tipoAtividade: 'Consultório',

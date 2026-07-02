@@ -1283,7 +1283,7 @@ function showPage(page) {
   if (page === 'receita') renderReceita();
   if (page === 'despesas') renderDespesas();
   if (page === 'precos') renderPrecos();
-  if (page === 'relatorio') renderRelatorio('2026-05');
+  if (page === 'relatorio') renderRelatorio(_ymd(new Date()).substring(0, 7));
   if (page === 'metas') { renderMetas(); renderMetasProc(); }
   if (page === 'backup') renderBackup();
   if (page === 'configuracoes') renderConfiguracoes();
@@ -11187,9 +11187,9 @@ function falarComPaciente(nome, whatsapp, mensagem) {
     abrirChatPorTelefone(nome, whatsapp);
     if (mensagem) { const inp = document.getElementById('chat-input-text'); if (inp) { inp.value = mensagem; inp.focus(); } }
   } else {
-    const fone = wa.startsWith('55') ? wa : '55' + wa;
-    const txt  = mensagem ? '?text=' + encodeURIComponent(mensagem) : '';
-    window.open(`https://wa.me/${fone}${txt}`, '_blank');
+    // Usa o helper único (_normPhone + DDI) — evita 5555… e não quebra números
+    // de DDD 55 (Santa Maria-RS) que começam com "55" sem serem DDI.
+    window.open(_waMeLink(whatsapp, mensagem), '_blank');
   }
 }
 

@@ -217,6 +217,55 @@ simulada sem WhatsApp, usa o formulário ao vivo) e "🧠 Ver o que a IA sabe".
 
 ---
 
+## 🔁 RE-AUDITORIA do código já corrigido (esta sessão)
+
+Duas frentes de auditoria adversarial sobre o código JÁ corrigido: (a) verificar
+que as correções estão certas e não introduziram regressão; (b) caçar buracos no
+webhook reescrito. Resultado: o grosso das correções passou limpo — a re-auditoria
+confirmou como **CORRETOS**: os ~45 `_ymd()` (todos recebem `Date`, nenhum string;
+`impNormDate`/Excel seguem UTC de propósito), o `_normPhone` (webhook e cliente
+concordam para número normal; DDD-55 preservado), `_temConflito` ciente de
+profissional, os guards de snapshot/segredo, `_pushBlindada` lendo `{error}`, e o
+`_pullBlindada` da agenda sem loop de eco.
+
+**Corrigido nesta re-auditoria (commitado):**
+- **Regressão (agenda):** o merge que preserva campos de sistema mantinha
+  `_lembreteEnviado` ao **remarcar** — mudança de dia não reenviava lembrete.
+  Agora, se data/hora mudam, `_lembreteEnviado`/`_lembreteErro` são rearmados.
+- **wa.me (DDD-55):** `falarComPaciente` usava fallback inline `startsWith('55')`
+  em vez do `_waMeLink` — quebrava número local de Santa Maria-RS. Migrado.
+- **Relatório mês fixo:** `showPage('relatorio')` abria sempre em `'2026-05'`
+  (hardcode) → agora abre no mês atual.
+- **Webhook — autonomia só autenticada (HIGH):** a IA autônoma (custo de LLM +
+  criação de agenda) agora SÓ dispara com `WA_WEBHOOK_SECRET` conferido. Sem o
+  segredo o webhook ainda ingere leads/mensagens, mas não responde nem agenda —
+  fecha a URL vazada como torneira de custo / porta pra agenda falsa.
+- **Webhook — fusível global por dono:** teto de 300 respostas/dia somando todos
+  os telefones (barra rotação de números furando o limite por telefone).
+- **Webhook — double-booking (HIGH):** `criarAgendamentoSeguro` re-checava só
+  início idêntico; agora checa **sobreposição de intervalo** (90min às 08:00
+  barra novo slot às 08:30). Duração do agendamento vem de `agcfg.slotDuracao`
+  (era fixa em 60).
+- **Webhook — frescor por timestamp:** o guard de "mensagem mais nova" comparava
+  TEXTO (mesmo texto repetido → resposta dupla). Agora compara `created_at`.
+- **Webhook — dedupe:** chave sintetizada (telefone+`momment`) quando a Z-API não
+  manda id; e o registro de dedupe é desfeito se a gravação da mensagem falhar
+  (evita perder a mensagem num retry). Marcador AGENDAR com `.+?` (não trunca em
+  `]` interno).
+
+**AINDA ABERTO desta re-auditoria:**
+- Modo autônomo exige agora `WA_WEBHOOK_SECRET` definido no Supabase **e** `&s=...`
+  na URL colada no provedor — sem isso a IA não responde (por design).
+- Double-booking residual: se a clínica NUNCA migrou a agenda pras linhas
+  `clinica_agendamentos` (flag `consult_ag_migrado`), o webhook vê tudo livre.
+  Garantir que a migração rodou antes de ligar o `agendar`.
+- **REDEPLOY do wa-webhook** de novo (esta re-auditoria mexeu no index.ts).
+- Corridas check-then-act no rate limit (duas invocações quase simultâneas) e
+  tarefa de background morta = resposta perdida sem retry — baixo volume, aceito
+  para o piloto; ideal futuro é guarda atômica (RPC).
+
+---
+
 ## 🔜 PRÓXIMO PASSO (é aqui que paramos)
 
 **Provar o isolamento com um teste limpo.** O teste anterior não valeu porque o "Dr. Jovino"
