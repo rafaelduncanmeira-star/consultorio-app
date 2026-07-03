@@ -453,6 +453,9 @@
     .chat-bubble.in  { background:#f1f5f9; color:#0f172a; border-radius:12px 12px 12px 2px; }
     .chat-ts { font-size:10px; color:#94a3b8; margin-top:3px; }
 
+    /* ── Agenda: resumo mobile (escondido no desktop — a 768px vira visível) ── */
+    .ag-kpi-mobile-toggle { display: none; }
+
     /* ── Toggle switch ── */
     .zapi-toggle-wrap { position:relative; width:40px; height:22px; flex-shrink:0; }
     .zapi-toggle-wrap input { opacity:0; width:0; height:0; }
@@ -600,6 +603,32 @@
       .cal-day { min-height: 64px !important; }
       .cal-evt { display: none; }
       .cal-day.has-evt::after { content: '•'; font-size: 14px; color: #3b82f6; display: block; text-align: center; }
+
+      /* ── Agenda: KPIs colapsados por padrão (resumo de 1 linha) — o
+         calendário é o que a secretária quer ver primeiro, não 5 cards. ── */
+      .ag-kpi-mobile-toggle {
+        display: flex !important; align-items: center; justify-content: space-between;
+        background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+        padding: 11px 14px; margin-bottom: 12px; font-size: 12.5px; font-weight: 600;
+        color: #334155; cursor: pointer;
+      }
+      #ag-kpis-grid { display: none !important; }
+      #ag-kpis-grid.ag-kpis-expanded {
+        display: grid !important; grid-template-columns: repeat(2,1fr) !important;
+      }
+
+      /* ── Ícones de ação nas tabelas (✏️🗑️👤): tocáveis no dedo, não no mouse.
+         Seleciona pelo onclick (mesmo truque já usado nas grids acima) — não
+         precisa mexer em cada render() que gera esses botões inline. ── */
+      button[onclick*="editRow"], button[onclick*="deleteRow"],
+      button[onclick*="editAgendamento"], button[onclick*="deleteAgendamento"],
+      button[onclick*="excluirInscricao"], button[onclick*="deleteProc"],
+      button[onclick*="excluirProfissional"], button[onclick*="deleteBloqueio"],
+      button[onclick*="renovarInscricao"], button[onclick*="cancelarInscricaoAssinatura"] {
+        min-width: 38px !important; min-height: 38px !important;
+        display: inline-flex !important; align-items: center; justify-content: center;
+        padding: 6px !important; font-size: 15px !important; margin: 1px !important;
+      }
 
       /* ── Section headers ── */
       div[style*="font-size:22px"] { font-size: 18px !important; }
@@ -769,6 +798,9 @@
           </button>
         </div>
       </div>
+
+      <!-- Banner: mês selecionado sem lançamentos (evita parecer app quebrado) -->
+      <div id="dash-mes-vazio-banner" style="display:none;"></div>
 
       <!-- ===== ANÁLISE DA MAESTRIA (alertas automáticos) ===== -->
       <div data-section="analise" style="margin-bottom:24px;">
@@ -1456,8 +1488,14 @@
         </div>
       </div>
 
+      <!-- Resumo compacto (só mobile) — toca pra expandir os KPIs completos -->
+      <div class="ag-kpi-mobile-toggle" onclick="_toggleAgKpisMobile()">
+        <span id="ag-kpi-resumo-mobile">Carregando…</span>
+        <span id="ag-kpi-toggle-icon" style="color:#94a3b8;">▾</span>
+      </div>
+
       <!-- KPIs auto-calculados a partir dos agendamentos -->
-      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px;">
+      <div id="ag-kpis-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px;">
         <div class="kpi-card" style="padding:14px 16px;border-left:3px solid #3b82f6;">
           <div style="font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Agendados</div>
           <div style="font-size:22px;font-weight:800;color:#0f172a;" id="ag-confirmados">0</div>
@@ -2734,7 +2772,7 @@
         <div><label>Hora</label><input type="time" class="input" name="hora" required /></div>
         <div><label>Duração (min)</label><input type="number" class="input" name="duracao" value="60" min="10" step="5" /></div>
       </div>
-      <div style="margin-bottom:14px;"><label>Paciente / Descrição</label><input type="text" class="input" name="pacienteNome" required placeholder="Nome completo" /></div>
+      <div style="margin-bottom:14px;"><label>Paciente / Descrição</label><input type="text" class="input" name="pacienteNome" required placeholder="Nome completo" list="ag-pacientes-list" autocomplete="off" /><datalist id="ag-pacientes-list"></datalist></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
         <div><label>WhatsApp</label><input type="text" class="input" name="whatsapp" placeholder="(11) 99999-9999" /></div>
         <div><label>Procedimento</label><select class="select" name="procedimento" id="ag-procedimento"></select></div>

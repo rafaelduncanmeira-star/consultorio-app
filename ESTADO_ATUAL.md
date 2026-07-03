@@ -326,6 +326,69 @@ sobre o código corrigido. Corrigido e commitado:
 
 ---
 
+## 🎨 PACOTE DE USABILIDADE — auditoria visual (screenshots desktop+mobile)
+
+Pedido do Dr. Rafael: "como melhorar o app, especialmente a usabilidade?".
+Rodei o app real no Playwright (desktop 1440px e mobile 390px) e tirei
+screenshots das telas principais antes de recomendar qualquer coisa. Depois
+implementei o pacote completo:
+
+1. **Agenda no celular**: view padrão passa a ser **Dia** (não mais Semana —
+   7 colunas espremidas em 390px eram inutilizáveis). Os 5 cards de KPI vêm
+   **colapsados** num resumo de 1 linha ("N agendado(s) · N compareceram · X%
+   ocupação"), expansível com 1 toque — o calendário aparece sem precisar
+   rolar. `renderAgenda()` agora também sincroniza as abas ativas sozinho
+   (antes só `setAgendaView` fazia isso — o default mobile 'dia' não acendia
+   nenhuma aba no primeiro load).
+2. **Autocomplete de paciente no agendamento**: campo "Paciente" ganhou
+   `<datalist>` com todo mundo de Atendidos+CRM; ao digitar/selecionar um nome
+   conhecido, WhatsApp/Procedimento/Profissional se preenchem sozinhos (só em
+   campos ainda vazios — não pisa em edição manual). Acaba com o
+   redigitar-e-errar telefone que quebrava lembrete e vínculo com o CRM.
+3. **Toasts de conquista**: no celular saem do canto inferior-direito (cobria
+   calendário/tabelas) pro topo, menores, 2s. Corrigido também um bug real de
+   EMPILHAMENTO — quando 2+ conquistas desbloqueiam juntas (comum ao carregar
+   dados de demonstração), todas caíam na MESMA posição e ficavam ilegíveis
+   sobrepostas; agora cada uma abre um pouco abaixo da anterior.
+4. **Dashboard "Bom dia" 24h por dia + zerado sem aviso**: a saudação era
+   texto FIXO no HTML (nunca atualizava — sempre "Bom dia, Dr. Rafael" mesmo
+   às 23h, com nome de exemplo hardcoded). Agora calcula por hora real e usa
+   `currentNome`. Mês sem nenhum lançamento agora mostra um banner "Nenhum
+   lançamento em [mês] ainda — ver [último mês com dados]" em vez de uma
+   tela de R$0 que parece bug.
+5. **"Dr. Dr. Fulano"**: bug real — nome cadastrado como "Dr. Teste" virava
+   "Dr. Dr. Teste" no chip da sidebar/saudação/PDF. `_comTituloMedico()`
+   agora detecta título existente (regex exige "." ou espaço depois de
+   dr/dra — não confunde nomes reais como "Drico"/"Dracena"). Achei e corrigi
+   um SEGUNDO bug da mesma família na correção da saudação do dashboard
+   (cortar o primeiro nome ANTES de tirar o título transformava "Dr. Teste"
+   em só "Dr.", que meu próprio regex não reconhecia como título já
+   presente — "Dr. Dr." de novo). Travado com teste de regressão dedicado.
+6. **Desfazer exclusão**: `deleteRow` (crm/pacientes/followup/despesas) e as
+   exclusões de agendamento agora mostram um toast com botão "Desfazer" por
+   6s, restaurando o registro na mesma posição. O `confirm()` nativo continua
+   existindo (barreira antes de agir), isto é uma segunda rede de segurança
+   pra quando o dedo escorrega.
+7. **Ícones de ação tocáveis**: ✏️/🗑️ nas tabelas tinham ~20px de área de
+   toque; CSS mobile os aumenta pra ~38px mirando pelo `onclick` (mesmo
+   padrão já usado nas grids responsivas — não precisou tocar em cada
+   função de render).
+8. **Data por extenso**: todo `<input type="date">` da página ganha um texto
+   auxiliar abaixo ("qui, 3 de julho") — o formato nativo do browser
+   (dd/mm vs mm/dd) é ambíguo em alguns navegadores/SOs.
+
+Validado com 12 novos testes unitários (39/39 no total) + smoke Playwright
+com cenários dirigidos (autocomplete preenchendo campos, id-safety do CRM já
+existente continua ok, undo de exclusão restaurando o registro certo, banner
+de mês vazio trocando de mês ao clicar) — 0 erros de runtime, screenshots
+desktop+mobile conferidas visualmente antes de fechar.
+
+**Não implementado** (ficou de fora do pacote, por ser diferente em natureza):
+teste cronometrado com uma secretária de verdade usando o app — isso exige
+uma pessoa real testando ao vivo, não dá pra simular.
+
+---
+
 ## 🔜 PRÓXIMO PASSO (é aqui que paramos)
 
 **Provar o isolamento com um teste limpo.** O teste anterior não valeu porque o "Dr. Jovino"

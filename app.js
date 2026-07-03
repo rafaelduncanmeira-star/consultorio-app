@@ -1071,9 +1071,69 @@ function _reorderDashboardSections() {
   sections.forEach(el => parent.appendChild(el));
 }
 
+// Evita "Dr. Dr. Fulano": se o nome já foi cadastrado com o título (comum —
+// gente digita "Dr. Fulano" no próprio cadastro), não duplica o prefixo.
+// "dr"/"dra" só conta como título se seguido de "." ou espaço — protege nomes
+// reais que começam com essas letras (Drico, Dracena, Draylson...). O regex é
+// repetido nas duas funções (não um const module-level) de propósito — os
+// testes extraem cada função isoladamente (ver tests/_extrair.js).
+function _comTituloMedico(nome) {
+  const n = (nome || '').trim();
+  if (!n) return n;
+  const tituloRe = /^dr\.\s*|^dr\s+|^dra\.\s*|^dra\s+/i;
+  return tituloRe.test(n) ? n : `Dr. ${n}`;
+}
+
+// Primeiro nome, SEM título — precisa tirar "Dr./Dra." antes de cortar pela
+// primeira palavra, senão "Dr. Teste" vira só "Dr." e um _comTituloMedico()
+// depois duplica pra "Dr. Dr." (bug real que apareceu na saudação do dashboard).
+function _primeiroNomeSemTitulo(nomeCompleto) {
+  const n = (nomeCompleto || '').trim();
+  const tituloRe = /^dr\.\s*|^dr\s+|^dra\.\s*|^dra\s+/i;
+  const semTitulo = n.replace(tituloRe, '').trim();
+  return (semTitulo || n).split(' ')[0] || '';
+}
+
+function _saudacaoPorHora() {
+  const h = new Date().getHours();
+  return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
+}
+
+// Escreve a data por extenso logo abaixo de um <input type="date">.
+function _atualizarDataExtenso(inp) {
+  const hint = inp._extensoHint;
+  if (!hint) return;
+  if (!inp.value) { hint.textContent = ''; return; }
+  const d = new Date(inp.value + 'T12:00:00');
+  hint.textContent = isNaN(d) ? '' : d.toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric', month: 'long' });
+}
+
+// Liga o "por extenso" em todo input[type=date] da página (uma vez, no boot).
+// Modais setam .value via JS (não dispara 'input'), então observamos a
+// ABERTURA do modal (mudança de style) pra recalcular com o valor já preenchido.
+function _iniciarDatasExtenso() {
+  const anexar = (inp) => {
+    if (inp._extensoHint) return;
+    const hint = document.createElement('div');
+    hint.style.cssText = 'font-size:10.5px;color:#94a3b8;margin-top:3px;';
+    inp.insertAdjacentElement('afterend', hint);
+    inp._extensoHint = hint;
+    inp.addEventListener('input', () => _atualizarDataExtenso(inp));
+  };
+  const refrescar = (root) => (root || document).querySelectorAll('input[type="date"]').forEach(inp => {
+    anexar(inp);
+    _atualizarDataExtenso(inp);
+  });
+  document.querySelectorAll('.modal-overlay').forEach(modal => {
+    new MutationObserver(() => { if (modal.style.display !== 'none') refrescar(modal); })
+      .observe(modal, { attributes: true, attributeFilter: ['style'] });
+  });
+  refrescar(document);
+}
+
 function _atualizarSidebar() {
   const eMedico = currentRole === 'medico';
-  const nomeFormatado = eMedico ? `Dr. ${currentNome}` : currentNome;
+  const nomeFormatado = eMedico ? _comTituloMedico(currentNome) : currentNome;
   const ehMembro = currentTeamRole === 'member';
   // Etiqueta verdadeira do papel (antes mostrava "Secretária" pra QUALQUER não-médico,
   // escondendo que a pessoa era na verdade "Profissional").
@@ -3399,8 +3459,14 @@ function deleteRow(col, ref) {
   DB.set(col, data);
   const renders = { crm: renderCrm, pacientes: renderPacientes, followup: renderFollowup, agenda: renderAgenda, despesas: renderDespesas };
   if (renders[col]) renders[col]();
-  toast('Registro excluído.');
   _auditLog('excluiu', col, `Excluiu ${col}: ${item.nome || item.descricao || '(sem nome)'}`);
+  _toastUndo(`"${item.nome || item.descricao || 'Registro'}" excluído.`, () => {
+    const atual = DB.get(col);
+    atual.splice(Math.min(idx, atual.length), 0, item);
+    DB.set(col, atual);
+    if (renders[col]) renders[col]();
+    _auditLog('restaurou', col, `Desfez exclusão de ${col}: ${item.nome || item.descricao || '(sem nome)'}`);
+  });
 }
 
 function editRow(col, ref) {
@@ -4481,10 +4547,40 @@ function toast(msg, ms = 3500) {
   if (!t) {
     t = document.createElement('div');
     t.id = 'app-toast';
-    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:12px 20px;border-radius:10px;font-size:13.5px;font-weight:500;box-shadow:0 10px 30px rgba(0,0,0,0.25);z-index:9999;opacity:0;transition:opacity 0.25s;max-width:90vw;text-align:center;';
     document.body.appendChild(t);
   }
+  t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:12px 20px;border-radius:10px;font-size:13.5px;font-weight:500;box-shadow:0 10px 30px rgba(0,0,0,0.25);z-index:9999;opacity:0;transition:opacity 0.25s;max-width:90vw;text-align:center;';
   t.textContent = msg;
+  t.style.opacity = '1';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.style.opacity = '0'; }, ms);
+}
+
+// Toast com botão "Desfazer" — usado nas exclusões pra tirar o medo de apagar
+// (some sempre existiu confirm() nativo, mas engano acontece; ter 6s pra
+// reverter sem precisar redigitar tudo de novo muda a experiência).
+function _toastUndo(msg, restaurarFn, ms = 6000) {
+  let t = document.getElementById('app-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'app-toast';
+    document.body.appendChild(t);
+  }
+  t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 10px 10px 18px;border-radius:10px;font-size:13.5px;font-weight:500;box-shadow:0 10px 30px rgba(0,0,0,0.25);z-index:9999;opacity:0;transition:opacity 0.25s;max-width:90vw;display:flex;align-items:center;gap:14px;';
+  t.innerHTML = '';
+  const span = document.createElement('span');
+  span.textContent = msg;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = 'Desfazer';
+  btn.style.cssText = 'background:#10b981;color:#fff;border:none;border-radius:6px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;';
+  btn.onclick = () => {
+    restaurarFn();
+    t.style.opacity = '0';
+    clearTimeout(t._timer);
+  };
+  t.appendChild(span);
+  t.appendChild(btn);
   t.style.opacity = '1';
   clearTimeout(t._timer);
   t._timer = setTimeout(() => { t.style.opacity = '0'; }, ms);
@@ -4738,7 +4834,10 @@ function _openWhatsAppForFu(idx) {
 //   consult_agenda_config: { horaInicio, horaFim, slotDuracao, almocoInicio, almocoFim, diasUteis: [1..5] }
 //   consult_bloqueios: [{ id, motivo, dataInicio, horaInicio, dataFim, horaFim }]
 
-let agView = 'semana';            // 'dia' | 'semana' | 'mes' | 'profissionais'
+// No celular, 7 colunas da Semana espremem cada dia a quase nada — Dia (1
+// coluna larga) é utilizável de cara. Desktop mantém Semana (visão padrão).
+function _isMobileViewport() { return typeof window !== 'undefined' && window.innerWidth > 0 && window.innerWidth <= 768; }
+let agView = _isMobileViewport() ? 'dia' : 'semana';  // 'dia' | 'semana' | 'mes' | 'profissionais'
 let agAnchor = new Date();        // data de referência para a view
 let _agFiltroProf = '';           // '' = todos; senão id do profissional p/ filtrar a agenda
 
@@ -4834,11 +4933,7 @@ function _slotsDoDia(dataStr) {
 
 function setAgendaView(v) {
   agView = v;
-  ['dia', 'semana', 'mes', 'profissionais'].forEach(view => {
-    const btn = document.getElementById('btn-ag-' + view);
-    if (btn) btn.classList.toggle('active', view === v);
-  });
-  renderAgenda();
+  renderAgenda(); // já sincroniza as abas ativas
 }
 
 function agendaNavegar(dir) {
@@ -4896,6 +4991,56 @@ function _popularProfissionalSelect(selectedId, elId, permitirVazio) {
   else if (profs.length) sel.value = profs[0].id;
 }
 
+// Índice nome→contato pra autocompletar o agendamento (pacientes primeiro —
+// telefone/procedimento mais confiáveis —, depois CRM cobre quem ainda é lead).
+function _agIndiceContatos() {
+  const idx = new Map();
+  DB.get('pacientes').slice()
+    .sort((a, b) => (b.data || '').localeCompare(a.data || ''))
+    .forEach(p => {
+      const chave = (p.nome || '').toLowerCase().trim();
+      if (chave && !idx.has(chave)) {
+        idx.set(chave, { nome: p.nome, whatsapp: p.whatsapp || '', procedimento: p.tipo || '', profissionalId: p.profissionalId || null });
+      }
+    });
+  DB.get('crm').forEach(c => {
+    const chave = (c.nome || '').toLowerCase().trim();
+    if (chave && !idx.has(chave)) {
+      idx.set(chave, { nome: c.nome, whatsapp: c.whatsapp || '', procedimento: c.tipo || '', profissionalId: c.profissionalId || null });
+    }
+  });
+  return idx;
+}
+
+function _agPopularDatalist() {
+  const dl = document.getElementById('ag-pacientes-list');
+  if (!dl) return;
+  dl.innerHTML = Array.from(_agIndiceContatos().values())
+    .map(c => `<option value="${_esc(c.nome)}">`).join('');
+}
+
+// Ao digitar/selecionar um nome já conhecido, preenche WhatsApp/procedimento/
+// profissional sozinho — evita redigitar (e errar) dados que já existem no
+// CRM ou nos atendidos. Só preenche campos ainda VAZIOS (não pisa em edição manual).
+function _agAutocompletarContato() {
+  const modal = document.getElementById('modal-agendamento');
+  const form = modal.querySelector('form');
+  const chave = (form.pacienteNome.value || '').toLowerCase().trim();
+  const c = _agIndiceContatos().get(chave);
+  if (!c) return;
+  if (!form.whatsapp.value && c.whatsapp) form.whatsapp.value = c.whatsapp;
+  if (!form.procedimento.value && c.procedimento) {
+    const procs = getProcedimentos();
+    if (procs.some(p => p.nome === c.procedimento)) {
+      form.procedimento.value = c.procedimento;
+      form.duracao.value = _inferirDuracao(c.procedimento) || form.duracao.value;
+    }
+  }
+  if (c.profissionalId && form.profissionalId && Array.from(form.profissionalId.options).some(o => o.value === c.profissionalId)) {
+    form.profissionalId.value = c.profissionalId;
+  }
+}
+
 function openNovoAgendamento(prefill = {}) {
   editState = { col: null, idx: null, crmIdx: prefill.crmIdx ?? null, crmId: prefill.crmId ?? null, pacIdx: null, agId: null };
   const modal = document.getElementById('modal-agendamento');
@@ -4906,6 +5051,8 @@ function openNovoAgendamento(prefill = {}) {
   const procs = getProcedimentos();
   sel.innerHTML = procs.map(p => `<option value="${_esc(p.nome)}">${_esc(p.nome)}</option>`).join('');
   _popularProfissionalSelect(prefill.profissionalId || _agFiltroProf || null);
+  _agPopularDatalist();
+  form.pacienteNome.oninput = _agAutocompletarContato;
   // Pré-preenche
   form.data.value = prefill.data || _ymd(new Date());
   form.hora.value = prefill.hora || '09:00';
@@ -4938,6 +5085,8 @@ function editAgendamento(id) {
   if (a.procedimento && !procs.some(p => p.nome === a.procedimento)) opts += `<option value="${_esc(a.procedimento)}">${_esc(a.procedimento)} (legado)</option>`;
   sel.innerHTML = opts;
   _popularProfissionalSelect(a.profissionalId);
+  _agPopularDatalist();
+  form.pacienteNome.oninput = _agAutocompletarContato;
   form.data.value = a.data;
   form.hora.value = a.hora;
   form.duracao.value = a.duracao || 60;
@@ -5037,12 +5186,18 @@ function excluirAgendamento() {
   if (!editState.agId) { closeModal('modal-agendamento'); return; }
   const ags  = getAgendamentos();
   const a    = ags.find(x => x.id === editState.agId);
-  const nome = (a && a.pacienteNome) ? a.pacienteNome : 'este agendamento';
-  if (!confirm(`Excluir o agendamento de "${nome}"?\n\nEle será removido da agenda. Esta ação não pode ser desfeita.`)) return;
+  if (!a) { closeModal('modal-agendamento'); return; }
+  const nome = a.pacienteNome || 'este agendamento';
+  if (!confirm(`Excluir o agendamento de "${nome}"?\n\nEle será removido da agenda.`)) return;
   DB.set('agendamentos', ags.filter(x => x.id !== editState.agId));
   closeModal('modal-agendamento');
   renderAgenda();
-  if (typeof toast === 'function') toast('🗑️ Agendamento excluído.');
+  _toastUndo(`🗑️ Agendamento de "${nome}" excluído.`, () => {
+    const atual = getAgendamentos();
+    if (!atual.some(x => x.id === a.id)) atual.push(a);
+    DB.set('agendamentos', atual);
+    renderAgenda();
+  });
 }
 
 function _gcalFmt(dateStr, timeStr) {
@@ -5095,10 +5250,19 @@ function abrirGoogleCalendar() {
 }
 
 function deleteAgendamento(id) {
+  const antes = getAgendamentos();
+  const a = antes.find(x => x.id === id);
   if (!confirm('Excluir este agendamento?')) return;
-  const ags = getAgendamentos().filter(a => a.id !== id);
-  DB.set('agendamentos', ags);
+  DB.set('agendamentos', antes.filter(x => x.id !== id));
   renderAgenda();
+  if (a) {
+    _toastUndo(`Agendamento de "${a.pacienteNome || 'contato'}" excluído.`, () => {
+      const atual = getAgendamentos();
+      if (!atual.some(x => x.id === a.id)) atual.push(a);
+      DB.set('agendamentos', atual);
+      renderAgenda();
+    });
+  }
 }
 
 function updateAgStatus(id, novo) {
@@ -5371,6 +5535,12 @@ function _agDropProf(e, ds, hora, profId) {
 function renderAgenda() {
   // Filtro de profissional (sincroniza dropdown + trava se for login de profissional)
   _popularFiltroProfAgenda();
+  // Reflete o agView atual nas abas (cobre o default mobile 'dia' e qualquer
+  // mudança de agView que não passou por setAgendaView).
+  ['dia', 'semana', 'mes', 'profissionais'].forEach(view => {
+    const btn = document.getElementById('btn-ag-' + view);
+    if (btn) btn.classList.toggle('active', view === agView);
+  });
   // Atualiza KPIs
   _renderAgendaKPIs();
 
@@ -5468,6 +5638,19 @@ function _renderAgendaKPIs() {
   setText('ag-ocup', PCT(ocup));
   setText('ag-ocup-sub', `${slotsUsados} de ${slotsDispo} slots no consultório`);
   setText('ag-perdida', BRL(perdida));
+
+  // Resumo de 1 linha pro toggle mobile (os cards completos ficam colapsados).
+  setText('ag-kpi-resumo-mobile', `${totalAgendados} agendado(s) · ${compareceram} compareceu(ram) · ${PCT(ocup)} ocupação`);
+}
+
+// Expande/recolhe os KPIs completos da agenda no celular (por padrão vêm
+// colapsados num resumo de 1 linha — o calendário é o que importa primeiro).
+function _toggleAgKpisMobile() {
+  const grid = document.getElementById('ag-kpis-grid');
+  const icon = document.getElementById('ag-kpi-toggle-icon');
+  if (!grid) return;
+  const expandido = grid.classList.toggle('ag-kpis-expanded');
+  if (icon) icon.textContent = expandido ? '▴' : '▾';
 }
 
 function _viewMes() {
@@ -7117,6 +7300,16 @@ function renderRenovacoesBanner(ativasAssinatura, today) {
     </div>`;
 }
 
+// Mês (YYYY-MM) mais recente com QUALQUER lançamento (paciente ou despesa),
+// diferente de `excluirMes`. Usado pro banner "sem dados neste mês".
+function _mesMaisRecenteComDados(excluirMes) {
+  const meses = new Set();
+  DB.get('pacientes').forEach(p => { if (p.data) meses.add(getMes(p.data)); });
+  DB.get('despesas').forEach(d => { if (d.data) meses.add(getMes(d.data)); });
+  const lista = Array.from(meses).filter(m => m && m !== excluirMes).sort();
+  return lista.length ? lista[lista.length - 1] : null;
+}
+
 function renderDashboard(mes) {
   _populateMesSelect('dash-mes-filter', { selected: mes });
   mes = document.getElementById('dash-mes-filter')?.value || _ymd(new Date()).substring(0, 7);
@@ -7124,6 +7317,25 @@ function renderDashboard(mes) {
   const desps = DB.get('despesas').filter(d => getMes(d.data) === mes);
   const crm   = DB.get('crm').filter(c => getMes(c.data) === mes);
   const agenda = DB.get('agenda').filter(a => getMes(a.data) === mes);
+
+  // Banner "sem lançamentos neste mês" — sem isso, um mês recém-começado (ou
+  // um filtro esquecido em outro mês) mostra tudo R$0 e parece app quebrado.
+  const bannerVazio = document.getElementById('dash-mes-vazio-banner');
+  if (bannerVazio) {
+    const mesAlt = (!pacs.length && !desps.length) ? _mesMaisRecenteComDados(mes) : null;
+    if (mesAlt) {
+      const [ay, am] = mesAlt.split('-').map(Number);
+      const [my, mm] = mes.split('-').map(Number);
+      bannerVazio.style.display = 'block';
+      bannerVazio.innerHTML = `<div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:12px;padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <span style="font-size:18px;">📅</span>
+        <span style="font-size:13px;color:#1e40af;flex:1;min-width:220px;"><strong>Nenhum lançamento em ${_esc(_MESES_FULL[mm - 1])} ${my} ainda.</strong> O último mês com dados foi ${_esc(_MESES_FULL[am - 1])} ${ay}.</span>
+        <button class="btn-ghost" style="background:#fff;" onclick="updateDashboard('${mesAlt}')">Ver ${_esc(_MESES_FULL[am - 1])} ${ay}</button>
+      </div>`;
+    } else {
+      bannerVazio.style.display = 'none';
+    }
+  }
 
   // Padronização de métricas (idem renderDespesas e renderRelatorio):
   // - fat = faturamento bruto (tudo emitido) — usado para KPI principal
@@ -7257,6 +7469,14 @@ function renderDashboard(mes) {
     const agora = new Date();
     const hhmm  = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     tsEl.textContent = `Atualizado às ${hhmm}`;
+  }
+  // Saudação (era texto fixo "Bom dia, Dr. Rafael" — errado à tarde/noite e
+  // com nome de exemplo hardcoded).
+  const saudEl = document.getElementById('dash-saudacao');
+  if (saudEl) {
+    const primeiroNome = _primeiroNomeSemTitulo(currentNome);
+    const tratamento = currentRole === 'medico' ? _comTituloMedico(primeiroNome) : primeiroNome;
+    saudEl.textContent = tratamento ? `${_saudacaoPorHora()}, ${tratamento}` : _saudacaoPorHora();
   }
 
   // Sprint 4 — Alertas proativos automáticos (sem IA)
@@ -7627,7 +7847,7 @@ function gerarPDF(mes) {
   <!-- HEADER -->
   <div class="header">
     <div class="header-left">
-      <h1>${_esc((getClinicaConfig().nome ? (currentRole==='medico'?'Dr. ':'')+getClinicaConfig().nome : currentNome ? (currentRole==='medico'?'Dr. ':'')+currentNome : 'Consultório'))}</h1>
+      <h1>${_esc(getClinicaConfig().nome ? (currentRole==='medico'?_comTituloMedico(getClinicaConfig().nome):getClinicaConfig().nome) : currentNome ? (currentRole==='medico'?_comTituloMedico(currentNome):currentNome) : 'Consultório')}</h1>
       <p>${_esc(getClinicaConfig().especialidade || 'Medicina')} · Relatório Mensal de Gestão${getClinicaConfig().crm ? ' · '+_esc(getClinicaConfig().crm) : ''}</p>
     </div>
     <div class="header-right">
@@ -7939,7 +8159,7 @@ function gerarRelatorioAnual() {
   const brl = BRL;
   const pct = v => isFinite(v) ? v.toFixed(1) + '%' : '—';
   const nomeMed = clinica.nome || currentNome || 'Consultório';
-  const tratamento = currentRole === 'medico' ? `Dr. ${nomeMed}` : nomeMed;
+  const tratamento = currentRole === 'medico' ? _comTituloMedico(nomeMed) : nomeMed;
   const agora = new Date().toLocaleString('pt-BR');
 
   const maxFat = Math.max(...dadosMes.map(d => d.fat), 1);
@@ -9508,8 +9728,7 @@ function toggleChat() {
         if (alertas.length) setTimeout(() => appendChatMsg('sofia', '⚠️ Lembretes de hoje:\n' + alertas.join('\n')), 400);
       } else {
         const ctx = buildContext();
-        const hora = new Date().getHours();
-        const saudacao = hora < 12 ? 'Bom dia' : hora < 18 ? 'Boa tarde' : 'Boa noite';
+        const saudacao = _saudacaoPorHora();
         const msgs = [];
         if (ctx.followupHoje > 0) msgs.push(`📞 ${ctx.followupHoje} follow-up(s) vencido(s) hoje`);
         if (ctx.crmMarcouPendente > 0) msgs.push(`📋 ${ctx.crmMarcouPendente} paciente(s) marcados sem registro de atendimento`);
@@ -10576,20 +10795,46 @@ function checkAchievements() {
   }
 }
 
+// Toasts de conquista ATIVOS na tela agora — várias podem desbloquear juntas
+// (ex.: ao carregar dados de demonstração) e, sem empilhar, caíam todas na
+// MESMA posição e ficavam ilegíveis, sobrepostas.
+let _toastsConquistaAtivos = [];
+
 function _toastConquista(ach) {
   const el = document.createElement('div');
-  el.style.cssText = `position:fixed;bottom:80px;right:24px;z-index:9999;background:#0f172a;color:#fff;
-    border-radius:12px;padding:14px 18px;display:flex;align-items:center;gap:12px;
-    box-shadow:0 8px 30px rgba(0,0,0,0.25);max-width:320px;animation:slideInRight 0.4s ease;`;
-  el.innerHTML = `
-    <span style="font-size:28px;line-height:1;">${ach.icon}</span>
-    <div>
-      <div style="font-size:10px;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:2px;">🎼 Conquista desbloqueada!</div>
-      <div style="font-size:13.5px;font-weight:700;">${_esc(ach.nome)}</div>
-      <div style="font-size:11.5px;color:#94a3b8;margin-top:1px;">${_esc(ach.desc)}</div>
-    </div>`;
+  // No celular, bottom-right cobria o conteúdo (calendário, tabelas) e a
+  // barra de navegação. Ali o toast some rápido, no topo, fora do caminho.
+  const mob = _isMobileViewport();
+  const offset = _toastsConquistaAtivos.length * (mob ? 52 : 76); // altura do toast anterior + respiro
+  el.style.cssText = mob
+    ? `position:fixed;top:${58 + offset}px;left:10px;right:10px;z-index:9999;background:#0f172a;color:#fff;
+       border-radius:10px;padding:9px 12px;display:flex;align-items:center;gap:9px;
+       box-shadow:0 6px 20px rgba(0,0,0,0.3);animation:slideInRight 0.3s ease;transition:opacity 0.5s;`
+    : `position:fixed;bottom:${80 + offset}px;right:24px;z-index:9999;background:#0f172a;color:#fff;
+       border-radius:12px;padding:14px 18px;display:flex;align-items:center;gap:12px;
+       box-shadow:0 8px 30px rgba(0,0,0,0.25);max-width:320px;animation:slideInRight 0.4s ease;transition:opacity 0.5s;`;
+  el.innerHTML = mob
+    ? `<span style="font-size:20px;line-height:1;flex-shrink:0;">${ach.icon}</span>
+       <div style="min-width:0;">
+         <div style="font-size:9px;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:0.06em;">🎼 Conquista</div>
+         <div style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(ach.nome)}</div>
+       </div>`
+    : `<span style="font-size:28px;line-height:1;">${ach.icon}</span>
+       <div>
+         <div style="font-size:10px;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:2px;">🎼 Conquista desbloqueada!</div>
+         <div style="font-size:13.5px;font-weight:700;">${_esc(ach.nome)}</div>
+         <div style="font-size:11.5px;color:#94a3b8;margin-top:1px;">${_esc(ach.desc)}</div>
+       </div>`;
   document.body.appendChild(el);
-  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.5s'; setTimeout(() => el.remove(), 600); }, 3500);
+  _toastsConquistaAtivos.push(el);
+  const dur = mob ? 2000 : 3500;
+  setTimeout(() => {
+    el.style.opacity = '0';
+    setTimeout(() => {
+      el.remove();
+      _toastsConquistaAtivos = _toastsConquistaAtivos.filter(x => x !== el);
+    }, 600);
+  }, dur);
 }
 
 function _atualizarSidebarMaestria() {
@@ -10646,7 +10891,7 @@ function applyClinicaConfig(cfg) {
   // Sidebar
   const hNome = document.getElementById('sidebar-header-nome');
   const hEsp  = document.getElementById('sidebar-header-esp');
-  if (hNome && nomeMed) hNome.textContent = (currentRole === 'medico' ? 'Dr. ' : '') + nomeMed;
+  if (hNome && nomeMed) hNome.textContent = currentRole === 'medico' ? _comTituloMedico(nomeMed) : nomeMed;
   if (hEsp  && esp)     hEsp.textContent  = esp;
 
   // Dashboard subtítulo
@@ -12738,8 +12983,7 @@ async function saudacaoDiaria() {
   await new Promise(r => setTimeout(r, 1500));
 
   const ctx = buildContext();
-  const hora = new Date().getHours();
-  const saudacao = hora < 12 ? 'Bom dia' : hora < 18 ? 'Boa tarde' : 'Boa noite';
+  const saudacao = _saudacaoPorHora();
 
   // Monta um resumo local sem chamar a API
   const partes = [];
@@ -12789,6 +13033,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.querySelectorAll('.modal-overlay').forEach(el => {
     el.addEventListener('click', (e) => { if (e.target === el) el.style.display = 'none'; });
   });
+
+  // Data por extenso ao lado de todo input[type=date] — o formato nativo
+  // (dd/mm vs mm/dd conforme o navegador/SO) é ambíguo; "qui, 3 de julho" não deixa dúvida.
+  _iniciarDatasExtenso();
 
   // Verifica sessão existente
   const temSessao = await checkSession();
