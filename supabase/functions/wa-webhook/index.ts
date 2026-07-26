@@ -85,7 +85,10 @@ Deno.serve(async (req) => {
   );
 
   let armazenadas = 0;
-  let ultima: any = null; // última mensagem válida — alvo da resposta automática
+  // Uma resposta POR TELEFONE. Um único POST pode trazer mensagens de vários
+  // pacientes (a Meta entrega em lote); guardar só a "última" deixava todos os
+  // outros remetentes do lote sem nenhuma resposta.
+  const alvos = new Map<string, any>();
 
   for (const bruto of norm.msgs) {
     const phone = String(bruto.phone || '').replace(/\D/g, '');
@@ -133,15 +136,23 @@ Deno.serve(async (req) => {
       if (error) console.log('[webhook] crm_leads:', error.message);
     }
 
-    ultima = { phone, phoneChat, nome, mensagem, msgTs };
+    // Alvo da resposta deste telefone: msgTs é sempre o mais recente (o guard
+    // de frescor tem de comparar contra a verdade), mas o TEXTO é o do último
+    // conteúdo real — assim um áudio/figurinha no fim do lote não anula a
+    // pergunta de texto que veio junto e ficaria sem resposta.
+    const anterior = alvos.get(phone);
+    const textoAlvo = (_ehPlaceholder(mensagem) && anterior && !_ehPlaceholder(anterior.mensagem))
+      ? anterior.mensagem : mensagem;
+    alvos.set(phone, { phone, phoneChat, nome, mensagem: textoAlvo, msgTs });
   }
 
   // 3) ── SECRETÁRIA POR IA (modo autônomo) ──
-  // Uma resposta por entrega (para a última mensagem), em background quando o
-  // runtime permite — devolve 200 rápido e evita retry do provedor por timeout.
-  if (ultima) {
-    const tarefa = maybeAutoReply({ supa, owner, autenticado, ...ultima }).catch((e) =>
-      console.log('[IA] erro em background:', (e as Error).message));
+  // Uma resposta por telefone do lote, em background quando o runtime permite —
+  // devolve 200 rápido e evita retry do provedor por timeout.
+  if (alvos.size) {
+    const tarefa = Promise.all([...alvos.values()].map((alvo) =>
+      maybeAutoReply({ supa, owner, autenticado, ...alvo }).catch((e) =>
+        console.log('[IA] erro em background:', (e as Error).message))));
     const rt: any = (globalThis as any).EdgeRuntime;
     if (rt && typeof rt.waitUntil === 'function') rt.waitUntil(tarefa);
     else await tarefa;
@@ -280,15 +291,23 @@ async function maybeAutoReply(ctx: any): Promise<void> {
     // Conhecimento da clínica (defaults alinhados aos do app)
     const proc  = await lerAppData(supa, owner, 'procedimentos', []);
     const prog  = await lerAppData(supa, owner, 'programas', []);
+    // Defaults IDÊNTICOS aos de getAgConfig() no app (app.js) — inclusive o
+    // almoço. Divergir fazia a IA oferecer 12:00/13:00 para clínicas que nunca
+    // salvaram a configuração, horários que a agenda do app nunca ofereceria.
     const agcfg = await lerAppData(supa, owner, 'agenda_config',
-      { horaInicio: '07:00', horaFim: '20:00', slotDuracao: 60, diasUteis: [1, 2, 3, 4, 5] });
+      { horaInicio: '07:00', horaFim: '20:00', slotDuracao: 60,
+        almocoInicio: '12:00', almocoFim: '13:30', diasUteis: [1, 2, 3, 4, 5] });
     const clin  = await lerAppData(supa, owner, 'clinica_config', {});
     const bloqs = await lerAppData(supa, owner, 'bloqueios', []);
 
     // Disponibilidade real (só se a IA pode agendar)
     let disponibilidade: { texto: string; livres: Set<string> } = { texto: '', livres: new Set() };
     if (ia.agendar) {
-      const ags = await lerAgendamentos(supa, owner);
+      // montarDisponibilidade varre de amanhã até 21 dias à frente; lê só isso.
+      const agora = new Date();
+      const de  = _dataLocal(agora);
+      const ate = _dataLocal(new Date(agora.getTime() + 22 * 86400000));
+      const ags = await lerAgendamentos(supa, owner, de, ate);
       disponibilidade = montarDisponibilidade(agcfg, ags, bloqs);
     }
 
@@ -306,6 +325,9 @@ async function maybeAutoReply(ctx: any): Promise<void> {
     // Marcador de agendamento — extrai o 1º, remove TODOS (inclusive truncados)
     // e só agenda se o slot estiver na lista de livres que NÓS calculamos
     // (o paciente pode tentar induzir a IA a marcar horário arbitrário).
+    // `agendou`: null = a IA não tentou marcar · false = tentou e foi recusado
+    // · true = agendamento realmente criado. O texto enviado depende disso.
+    let agendou: boolean | null = null;
     if (ia.agendar) {
       // Nome do procedimento com `.+?` (não `[^\]]+`) pra não truncar em um `]`
       // interno (ex.: "Botox [premium]"); ancorado no `]]` de fechamento.
@@ -316,16 +338,32 @@ async function maybeAutoReply(ctx: any): Promise<void> {
         const slot = `${m[1]} ${m[2].padStart(5, '0')}`;
         if (!disponibilidade.livres.has(slot)) {
           console.log('[IA] marcador fora da disponibilidade — ignorado:', slot);
+          agendou = false;
         } else {
-          const ok = await criarAgendamentoSeguro(supa, owner, {
+          agendou = await criarAgendamentoSeguro(supa, owner, {
             data: m[1], hora: m[2].padStart(5, '0'), procedimento: (m[3] || '').trim(),
             pacienteNome: nome || 'Paciente WhatsApp', whatsapp: phone,
             duracao: agcfg.slotDuracao || 60,
             modo: ia.agendarModo || 'pendente',
           });
-          if (!ok) console.log('[IA] agendamento não criado (slot ocupado ou erro de insert)');
+          if (!agendou) console.log('[IA] agendamento não criado (slot ocupado ou erro de insert)');
         }
       }
+    }
+
+    // ALINHAR O TEXTO AO QUE REALMENTE ACONTECEU.
+    // O prompt manda a IA escrever "vou reservar seu horário" junto do marcador.
+    // Se a reserva foi recusada (slot fora da lista de livres, ou ocupado entre
+    // o cálculo e o insert), mandar essa frase é PIOR que não responder: o
+    // paciente vai à clínica num horário que não existe. Nunca envie a promessa
+    // sem a reserva correspondente.
+    if (agendou === false) {
+      texto = 'Esse horário não está mais disponível. Vou pedir para a equipe falar com você para encontrar outro, tudo bem?';
+    } else if (agendou === true && !texto) {
+      // A IA respondeu SÓ o marcador: o agendamento existe e, sem isto, o
+      // paciente ficaria sem nenhum retorno (e o histórico sem turno de
+      // assistant, fazendo a IA repetir a oferta no turno seguinte).
+      texto = 'Anotei seu horário! A equipe confirma com você em breve.';
     }
     if (!texto) return;
 
@@ -368,8 +406,19 @@ async function lerAppData(supa: any, owner: string, key: string, def: any): Prom
 }
 
 // Lê agendamentos (coleção blindada: 1 linha por registro).
-async function lerAgendamentos(supa: any, owner: string): Promise<any[]> {
-  const { data } = await supa.from('clinica_agendamentos').select('data').eq('owner_id', owner);
+// Limitado À JANELA que a disponibilidade realmente usa. Sem recorte, o
+// PostgREST corta no `max_rows` do projeto (1000 por padrão) e — como não havia
+// ORDER BY — o corte devolvia as linhas mais ANTIGAS, jogando fora justamente a
+// agenda futura: o bot passava a oferecer horários já ocupados.
+async function lerAgendamentos(supa: any, owner: string, de: string, ate: string): Promise<any[]> {
+  const { data, error } = await supa.from('clinica_agendamentos')
+    .select('data')
+    .eq('owner_id', owner)
+    .gte('data->>data', de)
+    .lte('data->>data', ate)
+    .order('data->>data', { ascending: true })
+    .limit(2000);
+  if (error) { console.log('[IA] lerAgendamentos:', error.message); return []; }
   return (data || []).map((r: any) => r.data).filter(Boolean);
 }
 

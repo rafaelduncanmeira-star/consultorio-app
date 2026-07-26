@@ -1265,6 +1265,15 @@ function _esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// Argumento seguro para string JS dentro de atributo HTML (onclick="f('...')").
+// encodeURIComponent NÃO escapa a aspa simples: um nome vindo do WhatsApp como
+// x'*fetch(...)*' fechava a string e executava. O %27 é restaurado intacto pelo
+// decodeURIComponent do outro lado, então nomes com apóstrofo (D'Ávila) seguem
+// funcionando. Use SEMPRE isto — nunca encodeURIComponent puro — em onclick.
+function _jsArg(s) {
+  return encodeURIComponent(s == null ? '' : String(s)).replace(/'/g, '%27');
+}
+
 // Normaliza telefone BR para a forma local (sem DDI 55) — a MESMA usada pelo
 // webhook como chave do chat. Sem isso, contato salvo com "+55" ganhava chave
 // diferente e duplicava lead / abria chat vazio.
@@ -4619,7 +4628,7 @@ function renderPacientes() {
       <td class="px-4 py-3 text-gray-600">${_esc(r.pagamento)}</td>
       <td class="px-4 py-3">${pgtoSelect(r.statusPgto, i)}</td>
       <td class="px-4 py-3">
-        <button onclick="abrirPerfilPaciente('${encodeURIComponent(r.nome)}')" style="background:#f1f5f9;border:none;border-radius:6px;padding:4px 9px;font-size:11.5px;cursor:pointer;color:#475569;font-weight:600;" title="Ver perfil completo" onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f1f5f9'">👤 Ver</button>
+        <button onclick="abrirPerfilPaciente('${_jsArg(r.nome)}')" style="background:#f1f5f9;border:none;border-radius:6px;padding:4px 9px;font-size:11.5px;cursor:pointer;color:#475569;font-weight:600;" title="Ver perfil completo" onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f1f5f9'">👤 Ver</button>
       </td>
       <td class="px-4 py-3" style="white-space:nowrap;">
         <button onclick="editRow('pacientes',${i})" class="text-blue-400 hover:text-blue-600 text-xs mr-2" title="Editar">✏️</button>
@@ -6662,7 +6671,7 @@ function renderRetencao() {
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
           <div style="font-size:11px;font-weight:700;color:#dc2626;background:#fee2e2;padding:3px 9px;border-radius:999px;">${p.diasFora}d</div>
-          <button onclick="criarFollowupReativacao('${encodeURIComponent(p.nome)}','${p.ultData}')" style="background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:5px 11px;font-size:11.5px;font-weight:600;cursor:pointer;">📞 Reativar</button>
+          <button onclick="criarFollowupReativacao('${_jsArg(p.nome)}','${_jsArg(p.ultData)}')" style="background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:5px 11px;font-size:11.5px;font-weight:600;cursor:pointer;">📞 Reativar</button>
         </div>
       </div>`).join('') +
       (abandonados.length > 15 ? `<div style="padding:10px;text-align:center;color:#94a3b8;font-size:11.5px;">e mais ${abandonados.length - 15} paciente(s)...</div>` : '');
@@ -9852,13 +9861,13 @@ function buscaGlobal(query) {
       : 'Sem atendimento registrado';
     const initials = nome.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
     return `
-      <div onclick="abrirPerfilPaciente('${encodeURIComponent(nome)}')"
+      <div onclick="abrirPerfilPaciente('${_jsArg(nome)}')"
            style="display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.05);transition:background 0.15s;"
            onmouseover="this.style.background='rgba(255,255,255,0.07)'"
            onmouseout="this.style.background='transparent'">
-        <div style="width:28px;height:28px;background:#1e293b;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#10b981;flex-shrink:0;">${initials}</div>
+        <div style="width:28px;height:28px;background:#1e293b;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#10b981;flex-shrink:0;">${_esc(initials)}</div>
         <div>
-          <div style="font-size:12.5px;font-weight:600;color:#f1f5f9;">${nome}</div>
+          <div style="font-size:12.5px;font-weight:600;color:#f1f5f9;">${_esc(nome)}</div>
           <div style="font-size:10.5px;color:#94a3b8;">${sub}</div>
         </div>
       </div>`;
@@ -9940,12 +9949,12 @@ function abrirPerfilPaciente(nomeEnc) {
     if (whats) {
       const zapiOk = _waConnected();
       whatsEl.innerHTML =
-        `<button onclick="falarComPacienteNome('${encodeURIComponent(nome)}')" style="display:inline-flex;align-items:center;gap:6px;background:#dcfce7;color:#16a34a;border:none;border-radius:7px;padding:5px 12px;font-size:12.5px;font-weight:600;cursor:pointer;">💬 ${_esc(whats)}</button>` +
-        `<button onclick="_editarWhatsPerfil('${encodeURIComponent(nome)}')" style="background:none;border:none;color:#94a3b8;font-size:11.5px;cursor:pointer;margin-left:8px;">editar</button>` +
+        `<button onclick="falarComPacienteNome('${_jsArg(nome)}')" style="display:inline-flex;align-items:center;gap:6px;background:#dcfce7;color:#16a34a;border:none;border-radius:7px;padding:5px 12px;font-size:12.5px;font-weight:600;cursor:pointer;">💬 ${_esc(whats)}</button>` +
+        `<button onclick="_editarWhatsPerfil('${_jsArg(nome)}')" style="background:none;border:none;color:#94a3b8;font-size:11.5px;cursor:pointer;margin-left:8px;">editar</button>` +
         `<div style="font-size:10.5px;color:#94a3b8;margin-top:3px;">${zapiOk ? '↪ responde pelo CRM' : '↪ abre o WhatsApp'}</div>`;
     } else {
       whatsEl.innerHTML =
-        `<button onclick="_editarWhatsPerfil('${encodeURIComponent(nome)}')" style="background:#f0fdf4;border:1px dashed #86efac;color:#16a34a;border-radius:7px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;">➕ Adicionar WhatsApp</button>`;
+        `<button onclick="_editarWhatsPerfil('${_jsArg(nome)}')" style="background:#f0fdf4;border:1px dashed #86efac;color:#16a34a;border-radius:7px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;">➕ Adicionar WhatsApp</button>`;
     }
   }
 
