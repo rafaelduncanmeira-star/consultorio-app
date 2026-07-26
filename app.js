@@ -3216,6 +3216,30 @@ function formatDate(str) {
 
 function getMes(dateStr) { return dateStr ? dateStr.substring(0, 7) : ''; }
 
+// TICKET MÉDIO em DUAS leituras, porque respondem perguntas diferentes:
+//  · porConsultaPaga — "quanto vale uma consulta": só atendimentos com valor,
+//    que é o preço efetivamente praticado.
+//  · porAtendimento  — "quanto rende cada vez que alguém senta na cadeira":
+//    divide por TUDO, inclusive os gratuitos.
+// Retorno é gratuito por padrão (o procedimento 'Retorno' nasce com valor 0),
+// então usar só a segunda leitura derrubava o número sem o médico perceber:
+// 10 consultas de R$ 500 + 10 retornos grátis apareciam como "ticket R$ 250".
+// "Paga" = valor > 0, ou seja o que foi COBRADO (não o que já entrou no caixa
+// — para isso existe o regime de caixa em _resumoFin).
+function _ticketMedio(pacs) {
+  const lista = pacs || [];
+  const bruto = lista.reduce((s, p) => s + (p.valor || 0), 0);
+  const pagas = lista.filter(p => (p.valor || 0) > 0);
+  const brutoPagas = pagas.reduce((s, p) => s + (p.valor || 0), 0);
+  return {
+    porAtendimento:  lista.length ? bruto / lista.length : 0,
+    porConsultaPaga: pagas.length ? brutoPagas / pagas.length : 0,
+    qtdAtendimentos: lista.length,
+    qtdPagas:        pagas.length,
+    qtdGratuitos:    lista.length - pagas.length,
+  };
+}
+
 // PACIENTE NOVO = pessoa que NUNCA foi atendida antes neste consultório, ou
 // seja: o PRIMEIRO atendimento dela em toda a base cai no mês pedido.
 // (Definição do médico. Antes o app contava como "novo" qualquer atendimento
@@ -6089,7 +6113,12 @@ function renderReceita() {
   setText('rec-isento', BRL(isento));
   setText('rec-isento-sub', `${pacs.filter(p => p.statusPgto === 'Isento').length} atendimento(s)`);
   setText('rec-bruto', BRL(bruto));
-  setText('rec-bruto-sub', `Ticket médio: ${BRL(ticket)} · ${pacs.length} atendimento(s)`);
+  // Mostra as duas leituras; a segunda só quando existe atendimento gratuito
+  // (sem gratuitos os números são idênticos e repetir vira ruído).
+  const _tk = _ticketMedio(pacs);
+  setText('rec-bruto-sub', `Ticket médio: ${BRL(_tk.porConsultaPaga)} por consulta paga`
+    + (_tk.qtdGratuitos ? ` · ${BRL(_tk.porAtendimento)} por atendimento (${_tk.qtdGratuitos} gratuito(s))` : '')
+    + ` · ${_tk.qtdAtendimentos} atendimento(s)`);
 
   // ===== Quebra por forma de pagamento (só pagos) =====
   const pagosPorForma = pacs.filter(p => p.statusPgto === 'Pago');
@@ -7486,7 +7515,10 @@ function renderDashboard(mes) {
   setText('kpi-lucro', BRL(lucro));
   setText('kpi-margem', `Margem: ${PCT(margem)}`);
   setText('kpi-pac', pacs.length);
-  setText('kpi-ticket', BRL(ticket));
+  const _tkDash = _ticketMedio(pacs);
+  setText('kpi-ticket', _tkDash.qtdGratuitos
+    ? `${BRL(_tkDash.porConsultaPaga)} por consulta paga · ${BRL(_tkDash.porAtendimento)} geral`
+    : BRL(_tkDash.porConsultaPaga));
 
   // Sub-linha pacientes: variação real
   const pacSubEl = document.getElementById('kpi-pac-sub');
@@ -7808,6 +7840,7 @@ function gerarPDF(mes) {
   const lucro      = _rfPdf.recebido - totalDesp;
   const margem     = _rfPdf.recebido ? (lucro / _rfPdf.recebido) * 100 : 0;
   const ticket     = pacs.length ? fat / pacs.length : 0;
+  const _tkPdf     = _ticketMedio(pacs);
   const atend      = crm.filter(c => c.status === 'Atendeu').length;
   const conv       = crm.length ? (atend / crm.length) * 100 : 0;
 
@@ -7951,7 +7984,7 @@ function gerarPDF(mes) {
     <div class="kpi blue">
       <label>Atendimentos</label>
       <div class="val">${pacs.length}</div>
-      <div class="sub">Ticket médio ${brl(ticket)}</div>
+      <div class="sub">Ticket médio ${brl(_tkPdf.porConsultaPaga)} por consulta paga</div>
     </div>
   </div>
 
@@ -7978,7 +8011,8 @@ function gerarPDF(mes) {
           <tr><td>Pacientes atendidos</td><td class="r">${pacs.length}</td><td class="r gray">${metas.pac || '—'}</td></tr>
           <tr><td>Novos pacientes</td><td class="r">${novosUnicos}</td><td class="r gray">—</td></tr>
           <tr><td>Recorrentes</td><td class="r">${recUnicos}</td><td class="r gray">—</td></tr>
-          <tr><td>Ticket médio</td><td class="r">${brl(ticket)}</td><td class="r gray">—</td></tr>
+          <tr><td>Ticket médio <span class="gray">(consulta paga)</span></td><td class="r">${brl(_tkPdf.porConsultaPaga)}</td><td class="r gray">—</td></tr>
+          ${_tkPdf.qtdGratuitos ? `<tr><td>Ticket médio <span class="gray">(por atendimento)</span></td><td class="r">${brl(_tkPdf.porAtendimento)}</td><td class="r gray">—</td></tr>` : ''}
           <tr><td>Conversão CRM</td><td class="r">${pct(conv)}</td><td class="r gray">60%</td></tr>
           <tr><td>Contatos no CRM</td><td class="r">${crm.length}</td><td class="r gray">—</td></tr>
         </tbody>
@@ -8436,6 +8470,7 @@ function renderRelatorio(mes) {
   const atend  = crm.filter(c => c.status === 'Atendeu').length;
   const conv   = crm.length ? (atend / crm.length) * 100 : 0;
   const ticket = pacs.length ? fat / pacs.length : 0;
+  const _tkRel = _ticketMedio(pacs);
 
   const statusIcon = (real, meta, inverted = false) => {
     if (!meta) return '—';
@@ -8619,7 +8654,8 @@ function renderRelatorio(mes) {
         <tbody>
           <tr class="border-b border-gray-50"><td class="py-2 text-gray-700">Pacientes atendidos</td><td class="py-2 text-right font-semibold">${pacs.length}</td><td class="py-2 text-right text-gray-500">${metas.pac || '—'}</td><td class="py-2 text-right">${metas.pac ? PCT((pacs.length/metas.pac)*100) : '—'}</td><td class="py-2 text-right">${statusIcon(pacs.length, metas.pac)}</td></tr>
           <tr class="border-b border-gray-50"><td class="py-2 text-gray-700">Taxa de conversão CRM</td><td class="py-2 text-right font-semibold">${PCT(conv)}</td><td class="py-2 text-right text-gray-500">60%</td><td class="py-2 text-right">${PCT((conv/60)*100)}</td><td class="py-2 text-right">${statusIcon(conv, 60)}</td></tr>
-          <tr class="border-b border-gray-50"><td class="py-2 text-gray-700">Ticket médio</td><td class="py-2 text-right font-semibold">${BRL(ticket)}</td><td class="py-2 text-right text-gray-500">—</td><td class="py-2 text-right">—</td><td class="py-2 text-right">—</td></tr>
+          <tr class="border-b border-gray-50"><td class="py-2 text-gray-700">Ticket médio <span style="font-size:10.5px;color:#94a3b8;font-weight:400;">(consulta paga)</span></td><td class="py-2 text-right font-semibold">${BRL(_tkRel.porConsultaPaga)}</td><td class="py-2 text-right text-gray-500">—</td><td class="py-2 text-right">—</td><td class="py-2 text-right">—</td></tr>
+          ${_tkRel.qtdGratuitos ? `<tr class="border-b border-gray-50"><td class="py-2 text-gray-700">Ticket médio <span style="font-size:10.5px;color:#94a3b8;font-weight:400;">(por atendimento)</span></td><td class="py-2 text-right font-semibold">${BRL(_tkRel.porAtendimento)}</td><td class="py-2 text-right text-gray-500">—</td><td class="py-2 text-right">—</td><td class="py-2 text-right">—</td></tr>` : ''}
           <tr><td class="py-2 text-gray-700">Contatos no CRM</td><td class="py-2 text-right font-semibold">${crm.length}</td><td class="py-2 text-right text-gray-500">—</td><td class="py-2 text-right">—</td><td class="py-2 text-right">—</td></tr>
         </tbody>
       </table>

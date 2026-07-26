@@ -110,6 +110,42 @@ test('impNormStatus: parcelado vira Parcial, cortesia vira Isento', () => {
   assert.strictEqual(impNormStatus(''), 'Pendente');
 });
 
+// TICKET MÉDIO em duas leituras. Retorno é gratuito por padrão, então dividir
+// tudo pelo total de atendimentos derrubava o número pela metade sem aviso.
+const MES_COM_RETORNOS = [
+  { nome: 'Ana',   data: '2026-08-03', valor: 500 },  // consulta paga
+  { nome: 'Bruno', data: '2026-08-05', valor: 500 },  // consulta paga
+  { nome: 'Ana',   data: '2026-08-18', valor: 0   },  // retorno gratuito
+  { nome: 'Bruno', data: '2026-08-20', valor: 0   },  // retorno gratuito
+];
+
+test('_ticketMedio: consulta paga não é diluída pelos retornos gratuitos', () => {
+  const { _ticketMedio } = carregar('_ticketMedio');
+  const t = _ticketMedio(MES_COM_RETORNOS);
+  assert.strictEqual(t.porConsultaPaga, 500, 'preço praticado');
+  assert.strictEqual(t.porAtendimento, 250, 'rendimento por cadeira ocupada');
+  assert.strictEqual(t.qtdPagas, 2);
+  assert.strictEqual(t.qtdGratuitos, 2);
+});
+
+test('_ticketMedio: sem gratuitos as duas leituras coincidem', () => {
+  const { _ticketMedio } = carregar('_ticketMedio');
+  const t = _ticketMedio([{ valor: 300 }, { valor: 500 }]);
+  assert.strictEqual(t.porConsultaPaga, 400);
+  assert.strictEqual(t.porAtendimento, 400);
+  assert.strictEqual(t.qtdGratuitos, 0);
+});
+
+test('_ticketMedio: lista vazia e só-gratuitos não dividem por zero', () => {
+  const { _ticketMedio } = carregar('_ticketMedio');
+  const vazio = _ticketMedio([]);
+  assert.strictEqual(vazio.porConsultaPaga, 0);
+  assert.strictEqual(vazio.porAtendimento, 0);
+  const soGratis = _ticketMedio([{ valor: 0 }, { valor: 0 }]);
+  assert.strictEqual(soGratis.porConsultaPaga, 0, 'sem consulta paga, não é NaN');
+  assert.strictEqual(soGratis.porAtendimento, 0);
+});
+
 // PACIENTE NOVO = nunca foi atendido antes (primeiro atendimento cai no mês).
 // O bug: qualquer atendimento de quem um dia veio do CRM contava como aquisição
 // nova do mês, então retorno de paciente antigo inflava CAC e ROI.
