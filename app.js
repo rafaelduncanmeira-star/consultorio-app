@@ -1379,7 +1379,20 @@ function _profDoPaciente(nome) {
 function _migrarIds() {
   try {
     const pacs = DB.get('pacientes'); let mp = false;
-    pacs.forEach(p => { if (!p.id) { p.id = _novoId('pac'); mp = true; } });
+    pacs.forEach(p => {
+      if (!p.id) { p.id = _novoId('pac'); mp = true; }
+      // Conserta o que a importação de planilha gravou na chave ERRADA: 'status'
+      // em vez de 'statusPgto' (e o 'Parcelado', que não existe no app). Sem
+      // isto, quem já importou continua com a receita fora de todos os KPIs.
+      // Conservador de propósito: só age se statusPgto está AUSENTE e o valor
+      // em 'status' é reconhecidamente um status de pagamento. Atendimento não
+      // usa 'status' pra mais nada (isso é coisa de CRM e de agendamento).
+      if (p.statusPgto == null && p.status != null) {
+        const conv = { 'Pago': 'Pago', 'Parcial': 'Parcial', 'Parcelado': 'Parcial',
+                       'Pendente': 'Pendente', 'Isento': 'Isento' }[p.status];
+        if (conv) { p.statusPgto = conv; delete p.status; mp = true; }
+      }
+    });
     if (mp) DB.set('pacientes', pacs);
     const crm = DB.get('crm'); let mc = false;
     crm.forEach(c => { if (!c.id) { c.id = _novoId('crm'); mc = true; } });
@@ -4478,13 +4491,19 @@ function savePaciente(e) {
   // Gera recebimentos futuros se parcelado
   let recebimentos = null;
   if (parcelas > 1) {
-    const valorParcela = valorTotal / parcelas;
+    // Divide em CENTAVOS e joga a sobra na última parcela: arredondar todas
+    // por igual fazia a soma não fechar com o total (1000 em 3x virava 999,99)
+    // e a coluna "Diferença" da previsão de recebimentos exibir "R$ -0".
     recebimentos = [];
+    const totalCent = Math.round(valorTotal * 100);
+    const baseCent  = Math.floor(totalCent / parcelas);
+    const sobraCent = totalCent - baseCent * parcelas;
     const [ano, mes, dia] = dataConsulta.split('-').map(Number);
     for (let i = 0; i < parcelas; i++) {
       const d = new Date(ano, mes - 1 + i, 1);
       const mesStr = _ymd(d).substring(0, 7);
-      recebimentos.push({ numero: i + 1, mes: mesStr, valor: Math.round(valorParcela * 100) / 100, recebido: i === 0 });
+      const cent = baseCent + (i === parcelas - 1 ? sobraCent : 0);
+      recebimentos.push({ numero: i + 1, mes: mesStr, valor: cent / 100, recebido: i === 0 });
     }
   }
 
@@ -6177,7 +6196,8 @@ function renderDespesas() {
   // Receita realizada = soma do que foi efetivamente PAGO — base para lucro contábil
   const faturamentoBruto = pacs.reduce((s, p) => s + (p.valor || 0), 0);
   const receitaRealizada = pacs.filter(p => p.statusPgto === 'Pago').reduce((s, r) => s + (r.valor || 0), 0);
-  const aReceber         = pacs.filter(p => p.statusPgto === 'Pendente').reduce((s, r) => s + (r.valor || 0), 0);
+  // Idem Relatório: inclui o Parcial (era só Pendente e divergia da Receita).
+  const aReceber         = _resumoFin(pacs).aReceber;
   const lucro  = receitaRealizada - totalDesp;
   const margem = receitaRealizada ? (lucro / receitaRealizada) * 100 : 0;
 
@@ -8106,7 +8126,10 @@ function gerarRelatorioAnual() {
     const desps = allDesps.filter(d => getMes(d.data) === mes);
     const fat = pacs.reduce((s,p) => s + (p.valor||0), 0);
     const desp = desps.reduce((s,d) => s + (d.valor||0), 0);
-    const lucro = fat - desp;
+    // Lucro no MESMO regime das demais telas (caixa: recebido − despesas).
+    // Calcular sobre o bruto fazia o anual mostrar, para o mesmo mês, um lucro
+    // bem maior que o Dashboard, o Relatório e o PDF.
+    const lucro = _resumoFin(pacs).recebido - desp;
 
     // Inscrições novas no mês
     const novas = inscricoes.filter(i => (i.dataInicio||'').startsWith(mes));
@@ -8377,7 +8400,10 @@ function renderRelatorio(mes) {
   // Métricas padronizadas (Dashboard, Despesas e Relatório agora batem)
   const fat              = pacs.reduce((s, p) => s + (p.valor || 0), 0); // bruto emitido
   const receitaRealizada = pacs.filter(p => p.statusPgto === 'Pago').reduce((s, p) => s + (p.valor || 0), 0);
-  const aReceber         = pacs.filter(p => p.statusPgto === 'Pendente').reduce((s, p) => s + (p.valor || 0), 0);
+  // Via _resumoFin p/ incluir o Parcial, como a Receita e o DRE já fazem. Ficou
+  // de fora da unificação e mostrava só o Pendente: o Relatório dizia "A receber
+  // R$ 800" enquanto a tela de Receita dizia R$ 17.800 no mesmo mês.
+  const aReceber         = _resumoFin(pacs).aReceber;
   const totalDesp = desps.reduce((s, d) => s + d.valor, 0);
   const lucro  = receitaRealizada - totalDesp; // lucro sobre realizado (consistente com Despesas)
   const margem = receitaRealizada ? (lucro / receitaRealizada) * 100 : 0;
@@ -8553,7 +8579,7 @@ function renderRelatorio(mes) {
         <tbody>
           <tr class="border-b border-gray-50"><td class="py-2 text-gray-700">Faturamento bruto <span style="font-size:10.5px;color:#94a3b8;font-weight:400;">(tudo emitido)</span></td><td class="py-2 text-right font-semibold">${BRL(fat)}</td><td class="py-2 text-right text-gray-500">${BRL(metas.fat)}</td><td class="py-2 text-right">${metas.fat ? PCT((fat/metas.fat)*100) : '—'}</td><td class="py-2 text-right">${statusIcon(fat, metas.fat)}</td></tr>
           <tr class="border-b border-gray-50"><td class="py-2 text-gray-700">Receita realizada <span style="font-size:10.5px;color:#94a3b8;font-weight:400;">(só pagos)</span></td><td class="py-2 text-right font-semibold text-green-700">${BRL(receitaRealizada)}</td><td class="py-2 text-right text-gray-500">—</td><td class="py-2 text-right text-gray-600">${fat ? PCT((receitaRealizada/fat)*100) : '—'} do bruto</td><td class="py-2 text-right">—</td></tr>
-          ${aReceber > 0 ? `<tr class="border-b border-gray-50"><td class="py-2 text-gray-700">A receber <span style="font-size:10.5px;color:#94a3b8;font-weight:400;">(pendente)</span></td><td class="py-2 text-right font-semibold text-amber-600">${BRL(aReceber)}</td><td class="py-2 text-right text-gray-500">—</td><td class="py-2 text-right text-gray-600">${PCT((aReceber/fat)*100)}</td><td class="py-2 text-right">—</td></tr>` : ''}
+          ${aReceber > 0 ? `<tr class="border-b border-gray-50"><td class="py-2 text-gray-700">A receber <span style="font-size:10.5px;color:#94a3b8;font-weight:400;">(pendente + parcial)</span></td><td class="py-2 text-right font-semibold text-amber-600">${BRL(aReceber)}</td><td class="py-2 text-right text-gray-500">—</td><td class="py-2 text-right text-gray-600">${PCT((aReceber/fat)*100)}</td><td class="py-2 text-right">—</td></tr>` : ''}
           <tr class="border-b border-gray-50"><td class="py-2 text-gray-700">Despesas Totais</td><td class="py-2 text-right font-semibold text-red-600">${BRL(totalDesp)}</td><td class="py-2 text-right text-gray-500">${BRL(metas.desp)}</td><td class="py-2 text-right">${metas.desp ? PCT((totalDesp/metas.desp)*100) : '—'}</td><td class="py-2 text-right">${statusIcon(totalDesp, metas.desp, true)}</td></tr>
           <tr class="border-b border-gray-50"><td class="py-2 font-semibold text-gray-800">Lucro Líquido <span style="font-size:10.5px;color:#94a3b8;font-weight:400;">(realizada − despesas)</span></td><td class="py-2 text-right font-bold ${lucro<0?'text-red-600':'text-green-600'}">${BRL(lucro)}</td><td class="py-2 text-right text-gray-500">—</td><td class="py-2 text-right">—</td><td class="py-2 text-right">—</td></tr>
           <tr><td class="py-2 text-gray-700">Margem Líquida</td><td class="py-2 text-right font-semibold">${PCT(margem)}</td><td class="py-2 text-right text-gray-500">—</td><td class="py-2 text-right">—</td><td class="py-2 text-right">—</td></tr>
@@ -12778,8 +12804,12 @@ function impNormValor(s) {
 /* ── Normaliza status de pagamento ── */
 function impNormStatus(s) {
   const lc = (s||'').toLowerCase();
+  // Só pode devolver status CANÔNICOS (os mesmos de _resumoFin e do dropdown).
+  // 'Parcelado' não existia em lugar nenhum do app: o valor caía fora de todos
+  // os baldes de pagamento e o dinheiro ficava invisível.
+  if (/isent|cortesia|gratui|free/.test(lc)) return 'Isento';
   if (/pago|recebi|paid|quit|ok|sim|yes/.test(lc)) return 'Pago';
-  if (/parcel/.test(lc)) return 'Parcelado';
+  if (/parcel/.test(lc)) return 'Parcial';
   return 'Pendente';
 }
 
@@ -12824,7 +12854,10 @@ function impExecute() {
       data,
       tipo:     impNormTipo(m.tipo     ? row[m.tipo]     : ''),
       valor:    impNormValor(m.valor   ? row[m.valor]   : 0),
-      status:   impNormStatus(m.status ? row[m.status]  : ''),
+      // statusPgto (NÃO 'status'): é a chave que todo o financeiro lê. Gravando
+      // 'status', a receita importada entrava no bruto mas ficava fora de
+      // pago/parcial/pendente/isento — "Recebido R$ 0" com faturamento cheio.
+      statusPgto: impNormStatus(m.status ? row[m.status] : ''),
       whatsapp: m.whatsapp ? String(row[m.whatsapp]||'').replace(/\D/g,'').slice(-11) : '',
       obs:      'Importado de planilha',
     });

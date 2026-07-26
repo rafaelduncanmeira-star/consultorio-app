@@ -84,3 +84,45 @@ test('pgtoSelect: status ausente cai em Pendente (e não em Pago)', () => {
     assert.match(pgtoSelect(vazio, 0), /<option value="Pendente" selected>/);
   }
 });
+
+// A importação de planilha só pode produzir status que o resto do app entende.
+// 'Parcelado' não existia em lugar nenhum: o lançamento entrava no bruto mas
+// ficava fora de TODOS os baldes de _resumoFin — dinheiro invisível.
+const STATUS_CANONICOS = ['Pago', 'Parcial', 'Pendente', 'Isento'];
+
+test('impNormStatus: nunca inventa status fora do canônico', () => {
+  const { impNormStatus } = carregar('impNormStatus');
+  const entradas = ['pago', 'PAGO', 'recebido', 'parcelado', 'Parcial', 'pendente',
+                    'isento', 'cortesia', '', null, undefined, 'qualquer coisa'];
+  for (const e of entradas) {
+    assert.ok(STATUS_CANONICOS.includes(impNormStatus(e)),
+      `impNormStatus(${JSON.stringify(e)}) devolveu "${impNormStatus(e)}", fora do canônico`);
+  }
+});
+
+test('impNormStatus: parcelado vira Parcial, cortesia vira Isento', () => {
+  const { impNormStatus } = carregar('impNormStatus');
+  assert.strictEqual(impNormStatus('Parcelado'), 'Parcial');
+  assert.strictEqual(impNormStatus('parcelado em 3x'), 'Parcial');
+  assert.strictEqual(impNormStatus('cortesia'), 'Isento');
+  assert.strictEqual(impNormStatus('isento'), 'Isento');
+  assert.strictEqual(impNormStatus('pago'), 'Pago');
+  assert.strictEqual(impNormStatus(''), 'Pendente');
+});
+
+// O status importado tem de fechar com _resumoFin — é o acoplamento que
+// quebrava: importava, o bruto subia e "Recebido" continuava zerado.
+test('importação alimenta os baldes de _resumoFin', () => {
+  const { impNormStatus } = carregar('impNormStatus');
+  const { _resumoFin } = carregar('_resumoFin');
+  const importados = [
+    { statusPgto: impNormStatus('pago'),      valor: 1000 },
+    { statusPgto: impNormStatus('parcelado'), valor: 500 },
+    { statusPgto: impNormStatus('pendente'),  valor: 300 },
+    { statusPgto: impNormStatus('cortesia'),  valor: 200 },
+  ];
+  const r = _resumoFin(importados);
+  assert.strictEqual(r.recebido + r.aReceber + r.isento, r.bruto, 'a regra de ouro tem de fechar');
+  assert.strictEqual(r.recebido, 1000);
+  assert.strictEqual(r.aReceber, 800);
+});
