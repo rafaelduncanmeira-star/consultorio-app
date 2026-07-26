@@ -3216,6 +3216,32 @@ function formatDate(str) {
 
 function getMes(dateStr) { return dateStr ? dateStr.substring(0, 7) : ''; }
 
+// PACIENTE NOVO = pessoa que NUNCA foi atendida antes neste consultório, ou
+// seja: o PRIMEIRO atendimento dela em toda a base cai no mês pedido.
+// (Definição do médico. Antes o app contava como "novo" qualquer atendimento
+// de quem um dia tinha vindo do CRM — então um retorno de paciente antigo
+// entrava como aquisição do mês e inflava CAC e ROI da verba de marketing.)
+// Identidade por nome normalizado: é a única que existe hoje na coleção.
+function _novosNoMes(pacs, mes) {
+  const chave = p => (p.nome || '').toLowerCase().trim();
+  const primeira = new Map(); // nome → data do 1º atendimento em toda a base
+  for (const p of (pacs || [])) {
+    const n = chave(p);
+    if (!n || !p.data) continue;
+    const atual = primeira.get(n);
+    if (!atual || p.data < atual) primeira.set(n, p.data);
+  }
+  const atendimentos = (pacs || []).filter(p => {
+    const n = chave(p);
+    return n && p.data && getMes(p.data) === mes && getMes(primeira.get(n)) === mes;
+  });
+  return {
+    atendimentos,
+    quantidade: new Set(atendimentos.map(chave)).size,
+    receita: atendimentos.reduce((s, p) => s + (p.valor || 0), 0),
+  };
+}
+
 // Resumo financeiro PADRONIZADO — uma única definição p/ todas as telas (Receita,
 // Dashboard, DRE, Relatório, PDF, Metas) baterem entre si. Distingue os DOIS
 // regimes: CAIXA (o que já entrou) e COMPETÊNCIA (o que foi faturado/prestado).
@@ -6759,13 +6785,13 @@ function renderMarketing(mesAtual) {
     .filter(d => getMes(d.data) === mesAtual && d.categoria === 'Marketing')
     .reduce((s, d) => s + (d.valor || 0), 0);
 
-  // Pacientes novos do mês atendidos via CRM
-  const crmAtendMes = crm.filter(c => c.status === 'Atendeu' && c.converted);
-  const pacsNovosNomes = new Set(crmAtendMes.map(c => (c.nome || '').toLowerCase().trim()));
-  const pacsDoMes = pacs.filter(p => getMes(p.data) === mesAtual);
-  const novosNoMes = pacsDoMes.filter(p => pacsNovosNomes.has((p.nome || '').toLowerCase().trim()));
-  const novosCount = new Set(novosNoMes.map(p => (p.nome || '').toLowerCase().trim())).size;
-  const receitaNovos = novosNoMes.reduce((s, p) => s + (p.valor || 0), 0);
+  // Pacientes novos do mês = quem foi atendido pela PRIMEIRA vez neste mês.
+  // (O filtro antigo varria o histórico inteiro do CRM apesar do nome "Mes":
+  // bastava a pessoa ter vindo do CRM algum dia e qualquer retorno dela
+  // contava como aquisição nova — CAC e ROI do mês saíam errados.)
+  const _novos = _novosNoMes(pacs, mesAtual);
+  const novosCount   = _novos.quantidade;
+  const receitaNovos = _novos.receita;
 
   const cac = (despMktMes > 0 && novosCount > 0) ? despMktMes / novosCount : 0;
   setText('mkt-cac', despMktMes > 0 ? BRL(cac) : 'R$ 0');

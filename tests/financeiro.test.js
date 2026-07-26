@@ -110,6 +110,47 @@ test('impNormStatus: parcelado vira Parcial, cortesia vira Isento', () => {
   assert.strictEqual(impNormStatus(''), 'Pendente');
 });
 
+// PACIENTE NOVO = nunca foi atendido antes (primeiro atendimento cai no mês).
+// O bug: qualquer atendimento de quem um dia veio do CRM contava como aquisição
+// nova do mês, então retorno de paciente antigo inflava CAC e ROI.
+const BASE = [
+  { nome: 'Ana',      data: '2026-05-10', valor: 400 },  // 1ª vez em maio
+  { nome: 'Ana',      data: '2026-08-04', valor: 0   },  // retorno em agosto
+  { nome: 'Bruno',    data: '2026-08-12', valor: 500 },  // 1ª vez em agosto
+  { nome: '  bruno ', data: '2026-08-20', valor: 0   },  // retorno no mesmo mês
+  { nome: 'Célia',    data: '2026-08-15', valor: 300 },  // 1ª vez em agosto
+  { nome: '',         data: '2026-08-15', valor: 999 },  // sem nome: ignorar
+];
+
+test('_novosNoMes: retorno de paciente antigo NÃO conta como novo', () => {
+  const { _novosNoMes } = carregar(['_novosNoMes', 'getMes']);
+  const r = _novosNoMes(BASE, '2026-08');
+  assert.strictEqual(r.quantidade, 2, 'só Bruno e Célia estrearam em agosto');
+  assert.ok(!r.atendimentos.some(p => (p.nome || '').trim() === 'Ana'),
+    'Ana estreou em maio — o retorno dela em agosto não é aquisição');
+});
+
+test('_novosNoMes: mesma pessoa 2x no mês conta 1, mas soma a receita', () => {
+  const { _novosNoMes } = carregar(['_novosNoMes', 'getMes']);
+  const r = _novosNoMes(BASE, '2026-08');
+  assert.strictEqual(r.quantidade, 2);          // Bruno (2 atendimentos) + Célia
+  assert.strictEqual(r.receita, 800);           // 500 + 0 (Bruno) + 300 (Célia)
+});
+
+test('_novosNoMes: mês da estreia conta a própria estreia', () => {
+  const { _novosNoMes } = carregar(['_novosNoMes', 'getMes']);
+  const r = _novosNoMes(BASE, '2026-05');
+  assert.strictEqual(r.quantidade, 1);
+  assert.strictEqual(r.receita, 400);
+});
+
+test('_novosNoMes: base vazia e mês sem estreia não quebram', () => {
+  const { _novosNoMes } = carregar(['_novosNoMes', 'getMes']);
+  assert.strictEqual(_novosNoMes([], '2026-08').quantidade, 0);
+  assert.strictEqual(_novosNoMes(BASE, '2026-07').quantidade, 0);
+  assert.strictEqual(_novosNoMes(null, '2026-08').receita, 0);
+});
+
 // O status importado tem de fechar com _resumoFin — é o acoplamento que
 // quebrava: importava, o bruto subia e "Recebido" continuava zerado.
 test('importação alimenta os baldes de _resumoFin', () => {
