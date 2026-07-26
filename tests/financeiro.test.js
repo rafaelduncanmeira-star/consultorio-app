@@ -59,3 +59,28 @@ test('_lucroFin: margens não estouram com receita zero', () => {
   assert.strictEqual(l.margemCaixa, 0);
   assert.strictEqual(l.margemCompetencia, 0);
 });
+
+// O dropdown precisa OFERECER todos os status que o app grava. Faltando
+// 'Parcial', nenhuma <option> ficava selecionada, o <select> exibia a primeira
+// ("Pago") e qualquer toque gravava por cima, destruindo o status sem volta.
+test('pgtoSelect: Parcial existe e vem selecionado', () => {
+  const { pgtoSelect } = carregar('pgtoSelect');
+  const html = pgtoSelect('Parcial', 0);
+  assert.match(html, /<option value="Parcial" selected>/,
+    'Parcial precisa existir no dropdown E vir selecionado');
+});
+
+test('pgtoSelect: todo status gravado pelo app tem opção própria', () => {
+  const { pgtoSelect } = carregar('pgtoSelect');
+  for (const st of ['Pago', 'Parcial', 'Pendente', 'Isento']) {
+    assert.match(pgtoSelect(st, 0), new RegExp(`<option value="${st}" selected>`),
+      `${st} deveria vir selecionado`);
+  }
+});
+
+test('pgtoSelect: status ausente cai em Pendente (e não em Pago)', () => {
+  const { pgtoSelect } = carregar('pgtoSelect');
+  for (const vazio of [null, undefined, '', 'null']) {
+    assert.match(pgtoSelect(vazio, 0), /<option value="Pendente" selected>/);
+  }
+});

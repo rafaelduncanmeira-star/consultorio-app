@@ -429,9 +429,23 @@ async function _migrarBlindada(key, cfg) {
   if (localStorage.getItem(cfg.flag) === '1') return;
   if ((currentDataOwner || currentUser.id) !== currentUser.id) return; // membro não migra
   try {
-    const arr = JSON.parse(localStorage.getItem('consult_' + key) || '[]');
-    let ok = true;
-    if (arr.length) ok = await _pushBlindada(cfg.tabela, [], arr);
+    let arr = JSON.parse(localStorage.getItem('consult_' + key) || '[]');
+    // Local VAZIO não prova que não há nada a migrar: pode ser aparelho novo,
+    // logo após logout, ou um cloudPull que falhou. Antes o blob era apagado
+    // assim mesmo e a coleção inteira sumia do servidor sem NUNCA ter sido
+    // copiada pra tabela — perda total e silenciosa. Nesse caso a fonte da
+    // verdade é o próprio blob: migra a partir dele e repõe o local.
+    if (!arr.length) {
+      const { data, error } = await _supa.from('app_data').select('value')
+        .eq('user_id', currentUser.id).eq('key', key).limit(1);
+      if (error) { console.warn('_migrarBlindada: blob ilegível —', key, '— nada apagado'); return; }
+      const blob = (data && data[0] && data[0].value) || [];
+      if (!Array.isArray(blob) || !blob.length) { localStorage.setItem(cfg.flag, '1'); return; }
+      console.warn('_migrarBlindada: local vazio mas blob tem', blob.length, 'registros —', key, '— recuperando do blob');
+      arr = blob;
+      localStorage.setItem('consult_' + key, JSON.stringify(arr));
+    }
+    const ok = await _pushBlindada(cfg.tabela, [], arr);
     if (!ok) { console.warn('migração blindada falhou —', key, '— blob preservado'); return; }
     await _supa.from('app_data').delete().eq('user_id', currentUser.id).eq('key', key);
     localStorage.setItem(cfg.flag, '1');
@@ -3342,13 +3356,19 @@ function _aplicarEfeitosMudancaStatusCrm(idx, oldStatus, newStatus) {
 // Dropdown inline de status de pagamento (Atendidos)
 function pgtoSelect(status, idx) {
   const val = (!status || status === 'null' || status === 'undefined') ? 'Pendente' : status;
+  // 'Parcial' é gravado por toda inscrição parcelada em programa
+  // (inscreverEmPrograma) e contado por _resumoFin. Sem ele na lista, nenhuma
+  // <option> ficava selecionada, o <select> exibia a PRIMEIRA ("Pago") sobre a
+  // pílula âmbar de pendente — e qualquer toque no dropdown gravava um status
+  // real por cima, destruindo o 'Parcial' sem volta.
   const styles = {
     'Pago':     'background:#d1fae5;color:#065f46',
+    'Parcial':  'background:#dbeafe;color:#1e40af',
     'Pendente': 'background:#fef3c7;color:#92400e',
     'Isento':   'background:#f1f5f9;color:#475569',
   };
   const s = styles[val] || styles['Pendente'];
-  const opts = ['Pago','Pendente','Isento']
+  const opts = ['Pago','Parcial','Pendente','Isento']
     .map(o => `<option value="${o}"${val===o?' selected':''}>${o}</option>`).join('');
   return `<select onchange="updatePacStatus(${idx},this.value)" style="${s};border:none;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:600;cursor:pointer;outline:none;-webkit-appearance:none;appearance:none;text-align:center;">${opts}</select>`;
 }
@@ -10609,13 +10629,30 @@ async function restaurarSnapshot(data) {
   const snap = JSON.parse(raw);
   if (!confirm(`Restaurar backup de ${data}?\n\nSeus dados atuais serão substituídos. Esta ação não pode ser desfeita.`)) return;
 
+  const falhas = [];
   for (const k of BACKUP_KEYS) {
-    if (snap[k] !== undefined) {
+    if (snap[k] === undefined) continue;
+    const cfg = _BLINDADAS[k];
+    if (cfg) {
+      // Coleção blindada: mora em tabela própria. cloudPush grava só o blob
+      // morto do app_data, então o restore era um NO-OP SILENCIOSO justamente
+      // nas coleções que importam (atendimentos, agenda, CRM, inscrições,
+      // followup) — e o pull seguinte devolvia os dados velhos por cima.
+      const old = JSON.parse(localStorage.getItem('consult_' + k) || '[]');
+      localStorage.setItem('consult_' + k, JSON.stringify(snap[k]));
+      const ok = await _pushBlindada(cfg.tabela, old, snap[k]);
+      if (!ok) { falhas.push(k); _outboxAdd(k, 'blindada'); }
+    } else {
       localStorage.setItem('consult_' + k, JSON.stringify(snap[k]));
       if (typeof cloudPush === 'function') await cloudPush(k);
     }
   }
-  toast('✅ Backup de ' + data + ' restaurado! Recarregando…', 2000);
+  if (falhas.length) {
+    alert('Backup restaurado NESTE APARELHO, mas estas coleções não subiram para a nuvem: '
+      + falhas.join(', ') + '.\n\nElas ficaram na fila de envio. Mantenha o app aberto com internet até sincronizar.');
+  } else {
+    toast('✅ Backup de ' + data + ' restaurado! Recarregando…', 2000);
+  }
   setTimeout(() => location.reload(), 2000);
 }
 
@@ -12400,17 +12437,35 @@ async function limparTodosDados() {
     .forEach(k => localStorage.removeItem(k));
 
   // 2) Apaga na nuvem (Supabase) — senão o cloudPull rebaixa tudo no reload
+  const naoApagou = [];
   if (_supa && currentUser) {
     const owner = currentDataOwner || currentUser.id;
-    try {
-      await _supa.from('app_data').delete().eq('user_id', owner);
-      await _supa.from('crm_leads').delete().eq('user_id', owner);
-      await _supa.from('crm_messages').delete().eq('user_id', owner);
-    } catch(e) { console.warn('Erro limpando nuvem:', e.message); }
+    const alvos = [
+      ['app_data',     'user_id'],
+      ['crm_leads',    'user_id'],
+      ['crm_messages', 'user_id'],
+      // As 5 coleções blindadas vivem em TABELAS PRÓPRIAS e ficavam de fora:
+      // o usuário via "tudo apagado", o reload repopulava do servidor, e os
+      // dados de saúde continuavam no Supabase indefinidamente (LGPD).
+      ...Object.values(_BLINDADAS).map(cfg => [cfg.tabela, 'owner_id']),
+    ];
+    for (const [tabela, coluna] of alvos) {
+      try {
+        const { error } = await _supa.from(tabela).delete().eq(coluna, owner);
+        if (error) { naoApagou.push(tabela); console.warn('limparTodosDados', tabela, error.message); }
+      } catch(e) { naoApagou.push(tabela); console.warn('limparTodosDados', tabela, e.message); }
+    }
   }
 
   _auditLog('excluiu', 'sistema', 'Apagou TODOS os dados do consultório');
-  toast('✅ Todos os dados foram apagados.', 2500);
+  // Nunca afirmar que apagou tudo se alguma tabela resistiu — é justamente a
+  // afirmação falsa que cria o problema de LGPD.
+  if (naoApagou.length) {
+    alert('Os dados foram apagados deste aparelho, mas NÃO foi possível apagar na nuvem: '
+      + naoApagou.join(', ') + '.\n\nOs dados continuam no servidor. Tente de novo com internet estável.');
+  } else {
+    toast('✅ Todos os dados foram apagados.', 2500);
+  }
   setTimeout(() => location.reload(), 2000);
 }
 
