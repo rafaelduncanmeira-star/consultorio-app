@@ -1524,33 +1524,45 @@ function _profDoPaciente(nome) {
 // Regra: nome idêntico ganha. Só cai pro parcial com nome de verdade dos dois
 // lados, e apenas quando há UM candidato — na dúvida devolve -1, porque
 // escrever no contato errado é pior que não escrever.
-function _acharCrmPorNome(crm, nome) {
-  const alvo = (nome || '').toLowerCase().trim();
-  if (!alvo) return -1;
-  const nomeDe = c => ((c && c.nome) || '').toLowerCase().trim();
-  const lista = crm || [];
-  const exato = lista.findIndex(c => nomeDe(c) === alvo);
-  if (exato >= 0) return exato;
-  if (alvo.length < 3) return -1;
-  // Substring solta casa demais: "Ana" cai dentro de "Mariana" e cria uma
-  // ambiguidade que não existe pra ninguém olhando a tela. Só vale quando o
-  // trecho começa e termina em palavra inteira — assim "Bruno Alves Silva"
-  // ainda acha "Bruno Alves", mas "Mariana" não colide com "Ana".
-  const casaPorPalavra = (dentro, busca) => {
-    const i = dentro.indexOf(busca);
+function _nomeNorm(s) { return (s || '').toLowerCase().trim(); }
+
+// Casamento PARCIAL por palavra inteira. Substring solta casa demais: "Ana" cai
+// dentro de "Mariana" e cria uma ambiguidade que não existe pra ninguém olhando
+// a tela. Com fronteira de palavra, "Bruno Alves Silva" ainda acha "Bruno
+// Alves" e "Mariana" não colide com "Ana".
+function _nomeCasaParcial(a, b) {
+  if (a.length < 3 || b.length < 3) return false;
+  const dentro = (hay, needle) => {
+    const i = hay.indexOf(needle);
     if (i < 0) return false;
-    const inicio = i === 0 || dentro[i - 1] === ' ';
-    const fim = i + busca.length === dentro.length || dentro[i + busca.length] === ' ';
-    return inicio && fim;
+    return (i === 0 || hay[i - 1] === ' ')
+        && (i + needle.length === hay.length || hay[i + needle.length] === ' ');
   };
+  return dentro(a, b) || dentro(b, a);
+}
+
+// Acha UM registro pelo nome. `filtro` restringe os candidatos (ex.: agendamento
+// não cancelado). Nome idêntico ganha; parcial só quando há um único candidato
+// — na dúvida devolve -1, porque escrever no registro errado é pior que não
+// escrever. Nome vazio nunca casa: `'qualquer coisa'.includes('')` é sempre
+// true, e era assim que um registro sem nome virava coringa universal.
+function _acharPorNome(lista, nome, campo, filtro) {
+  const alvo = _nomeNorm(nome);
+  if (!alvo) return -1;
+  const arr = lista || [];
+  const vale = (c, i) => c && (!filtro || filtro(c, i));
+  // Homônimo exato também é dúvida. Duas consultas da "Ana" e um "cancela a da
+  // Ana" sem data: findIndex escolheria pela ordem do array, que não quer dizer
+  // nada pro usuário. Melhor devolver -1 e deixar ele dizer a data.
+  const exatos = [];
+  arr.forEach((c, i) => { if (vale(c, i) && _nomeNorm(c[campo]) === alvo) exatos.push(i); });
+  if (exatos.length) return exatos.length === 1 ? exatos[0] : -1;
   const cands = [];
-  lista.forEach((c, i) => {
-    const n = nomeDe(c);
-    if (n.length < 3) return;
-    if (casaPorPalavra(n, alvo) || casaPorPalavra(alvo, n)) cands.push(i);
-  });
+  arr.forEach((c, i) => { if (vale(c, i) && _nomeCasaParcial(_nomeNorm(c[campo]), alvo)) cands.push(i); });
   return cands.length === 1 ? cands[0] : -1;
 }
+
+function _acharCrmPorNome(crm, nome) { return _acharPorNome(crm, nome, 'nome'); }
 
 // Migração idempotente: garante id em pacientes/crm e converte vínculos
 // por índice (pacIdx/crmIdx) em vínculos por id (pacId/crmId), mantendo os
@@ -9811,7 +9823,12 @@ function executeAIAction(action) {
   // fica invisível na lista E vira coringa na busca por nome (contato sem nome
   // casava com qualquer paciente). Melhor recusar e pedir de novo do que gravar
   // um fantasma que só aparece quando estraga outra coisa.
-  const PRECISA_NOME = ['criar_paciente', 'criar_crm', 'criar_followup', 'criar_agendamento'];
+  // Vale principalmente pras ações DESTRUTIVAS: sem nome, a busca de
+  // agendamento casava com o primeiro da lista e cancelava/movia a consulta de
+  // um paciente aleatório, avisando "feito" com o nome errado.
+  const PRECISA_NOME = ['criar_paciente', 'criar_crm', 'criar_followup', 'criar_agendamento',
+                        'cancelar_agendamento', 'mover_agendamento',
+                        'atualizar_status_crm', 'atualizar_pagamento'];
   if (PRECISA_NOME.includes(tipo)) {
     const nome = String(dados.pacienteNome || dados.nome || '').trim();
     if (!nome) {
@@ -9900,12 +9917,8 @@ function executeAIAction(action) {
 
   } else if (tipo === 'cancelar_agendamento') {
     const ags = getAgendamentos();
-    const alvo = (dados.pacienteNome || dados.nome || '').toLowerCase().trim();
-    const idx = ags.findIndex(a =>
-      (a.pacienteNome||'').toLowerCase().includes(alvo) &&
-      a.status !== 'Cancelado' &&
-      (!dados.data || a.data === dados.data)
-    );
+    const idx = _acharPorNome(ags, dados.pacienteNome || dados.nome, 'pacienteNome',
+      a => a.status !== 'Cancelado' && (!dados.data || a.data === dados.data));
     if (idx >= 0) {
       const nome = ags[idx].pacienteNome;
       const dt   = ags[idx].data;
@@ -9914,11 +9927,7 @@ function executeAIAction(action) {
 
       // Atualiza CRM: reverte "Marcou" → "Em negociação"
       const crm = DB.get('crm');
-      const nomeAlvo = nome.toLowerCase().trim();
-      const crmIdx = crm.findIndex(c =>
-        (c.nome||'').toLowerCase().trim().includes(nomeAlvo) ||
-        nomeAlvo.includes((c.nome||'').toLowerCase().trim())
-      );
+      const crmIdx = _acharCrmPorNome(crm, nome);
       if (crmIdx >= 0 && crm[crmIdx].status === 'Marcou') {
         crm[crmIdx].status = 'Em negociação';
         DB.set('crm', crm);
@@ -9929,16 +9938,13 @@ function executeAIAction(action) {
       }
       if (document.getElementById('page-agenda').classList.contains('active')) renderAgenda();
     } else {
-      appendChatMsg('system-ok', `⚠️ Não achei agendamento ativo para "${dados.pacienteNome || dados.nome}". Verifique na agenda.`);
+      appendChatMsg('system-ok', `⚠️ Não achei UM agendamento ativo para "${dados.pacienteNome || dados.nome}". Se houver mais de um, me diga a data.`);
     }
 
   } else if (tipo === 'mover_agendamento') {
     const ags = getAgendamentos();
-    const alvo = (dados.pacienteNome || dados.nome || '').toLowerCase().trim();
-    const idx = ags.findIndex(a =>
-      (a.pacienteNome||'').toLowerCase().includes(alvo) &&
-      a.status !== 'Cancelado'
-    );
+    const idx = _acharPorNome(ags, dados.pacienteNome || dados.nome, 'pacienteNome',
+      a => a.status !== 'Cancelado');
     if (idx >= 0) {
       const novaData = dados.novaData || ags[idx].data;
       const novaHora = dados.novaHora || ags[idx].hora;
@@ -9954,7 +9960,7 @@ function executeAIAction(action) {
       appendChatMsg('system-ok', `✅ Consulta de ${nomeAnt} movida para ${novaData} às ${novaHora}`);
       if (document.getElementById('page-agenda').classList.contains('active')) renderAgenda();
     } else {
-      appendChatMsg('system-ok', `⚠️ Não achei agendamento ativo para "${dados.pacienteNome || dados.nome}".`);
+      appendChatMsg('system-ok', `⚠️ Não achei UM agendamento ativo para "${dados.pacienteNome || dados.nome}". Se houver mais de um, confira o nome completo na agenda.`);
     }
 
   } else if (tipo === 'criar_bloqueio') {
@@ -9972,8 +9978,7 @@ function executeAIAction(action) {
 
   } else if (tipo === 'atualizar_pagamento') {
     const arr = DB.get('pacientes');
-    const alvo = (dados.nome || '').toLowerCase().trim();
-    const idx = alvo ? arr.findIndex(p => (p.nome||'').toLowerCase().includes(alvo)) : -1;
+    const idx = _acharPorNome(arr, dados.nome, 'nome');
     if (idx >= 0) {
       if (dados.novoStatus) arr[idx].statusPgto = dados.novoStatus;
       if (dados.valor)      arr[idx].valor = parseFloat(dados.valor);
@@ -9983,7 +9988,7 @@ function executeAIAction(action) {
       if (document.getElementById('page-pacientes').classList.contains('active')) renderPacientes();
       renderDashboard();
     } else {
-      appendChatMsg('system-ok', `⚠️ Não achei "${dados.nome}" nos atendidos.`);
+      appendChatMsg('system-ok', `⚠️ Não achei UM atendimento de "${dados.nome}". Se houver mais de um, ajuste direto na tela de Atendidos.`);
     }
 
   } else if (tipo === 'criar_procedimento') {

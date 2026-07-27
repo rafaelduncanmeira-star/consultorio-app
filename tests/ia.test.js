@@ -18,20 +18,20 @@ const CRM = [
 ];
 
 test('_acharCrmPorNome: contato sem nome não casa com todo mundo', () => {
-  const { _acharCrmPorNome } = carregar('_acharCrmPorNome');
+  const { _acharCrmPorNome } = carregar(['_nomeNorm', '_nomeCasaParcial', '_acharPorNome', '_acharCrmPorNome']);
   assert.strictEqual(_acharCrmPorNome(CRM, 'Carla Mendes'), -1,
     'Carla não está no CRM — o card vazio não pode ser marcado no lugar dela');
   assert.strictEqual(_acharCrmPorNome(CRM, 'Bruno Alves'), 3, 'e quem existe continua achando');
 });
 
 test('_acharCrmPorNome: nome idêntico ganha do parcial', () => {
-  const { _acharCrmPorNome } = carregar('_acharCrmPorNome');
+  const { _acharCrmPorNome } = carregar(['_nomeNorm', '_nomeCasaParcial', '_acharPorNome', '_acharCrmPorNome']);
   assert.strictEqual(_acharCrmPorNome(CRM, 'Ana'), 1, 'exato vence "Mariana Souza"');
   assert.strictEqual(_acharCrmPorNome(CRM, '  aNa  '), 1, 'ignora caixa e espaço');
 });
 
 test('_acharCrmPorNome: parcial ambíguo devolve -1 em vez de chutar', () => {
-  const { _acharCrmPorNome } = carregar('_acharCrmPorNome');
+  const { _acharCrmPorNome } = carregar(['_nomeNorm', '_nomeCasaParcial', '_acharPorNome', '_acharCrmPorNome']);
   const dois = [{ nome: 'Ana Paula' }, { nome: 'Ana Clara' }];
   assert.strictEqual(_acharCrmPorNome(dois, 'Ana'), -1,
     'escrever no contato errado é pior do que não escrever');
@@ -39,14 +39,14 @@ test('_acharCrmPorNome: parcial ambíguo devolve -1 em vez de chutar', () => {
 });
 
 test('_acharCrmPorNome: parcial único ainda funciona (sobrenome a mais)', () => {
-  const { _acharCrmPorNome } = carregar('_acharCrmPorNome');
+  const { _acharCrmPorNome } = carregar(['_nomeNorm', '_nomeCasaParcial', '_acharPorNome', '_acharCrmPorNome']);
   assert.strictEqual(_acharCrmPorNome([{ nome: 'Bruno Alves' }], 'Bruno Alves Silva'), 0);
 });
 
 // "Ana" é substring de "Mariana", mas ninguém olhando a tela acharia que os
 // dois nomes colidem. O casamento é por palavra inteira justamente pra isso.
 test('_acharCrmPorNome: parcial casa por palavra, não por pedaço de palavra', () => {
-  const { _acharCrmPorNome } = carregar('_acharCrmPorNome');
+  const { _acharCrmPorNome } = carregar(['_nomeNorm', '_nomeCasaParcial', '_acharPorNome', '_acharCrmPorNome']);
   assert.strictEqual(_acharCrmPorNome(CRM, 'Mariana'), 2,
     '"Ana" não pode disputar com "Mariana Souza"');
   assert.strictEqual(_acharCrmPorNome([{ nome: 'Ana' }], 'Mariana'), -1,
@@ -55,8 +55,58 @@ test('_acharCrmPorNome: parcial casa por palavra, não por pedaço de palavra', 
     'palavra do meio conta');
 });
 
+// _acharPorNome com filtro é o que cancelar_agendamento e mover_agendamento
+// usam. Antes era findIndex com includes(alvo): nome vazio (o LLM esquecendo de
+// mandar) casava com o PRIMEIRO agendamento ativo da lista — e o copiloto
+// cancelava ou movia a consulta de um paciente aleatório, avisando "feito" com
+// o nome errado.
+const AGS = [
+  { pacienteNome: 'Ana Paula',   data: '2026-08-03', status: 'Confirmado' },
+  { pacienteNome: 'Bruno Alves', data: '2026-08-04', status: 'Confirmado' },
+  { pacienteNome: 'Bruno Alves', data: '2026-08-10', status: 'Cancelado' },
+];
+
+test('_acharPorNome: sem nome não cancela a consulta de um estranho', () => {
+  const { _acharPorNome } = carregar(['_nomeNorm', '_nomeCasaParcial', '_acharPorNome']);
+  for (const vazio of ['', null, undefined, '   ']) {
+    assert.strictEqual(_acharPorNome(AGS, vazio, 'pacienteNome', a => a.status !== 'Cancelado'), -1,
+      `nome ${JSON.stringify(vazio)} não pode casar com o primeiro da agenda`);
+  }
+});
+
+test('_acharPorNome: o filtro exclui cancelado antes de decidir', () => {
+  const { _acharPorNome } = carregar(['_nomeNorm', '_nomeCasaParcial', '_acharPorNome']);
+  const ativo = a => a.status !== 'Cancelado';
+  assert.strictEqual(_acharPorNome(AGS, 'Bruno Alves', 'pacienteNome', ativo), 1,
+    'sem o filtro, os dois Bruno seriam ambíguos e nada seria cancelado');
+  assert.strictEqual(_acharPorNome(AGS, 'Ana Paula', 'pacienteNome', ativo), 0);
+});
+
+// Homônimo exato é dúvida igual: "cancela a da Ana" com duas consultas da Ana
+// não pode ser resolvido pela ordem do array, que não significa nada pro
+// usuário — nem por data mais próxima, que ele não pediu.
+test('_acharPorNome: dois registros com o MESMO nome exato devolvem -1', () => {
+  const { _acharPorNome } = carregar(['_nomeNorm', '_nomeCasaParcial', '_acharPorNome']);
+  const homonimos = [{ nome: 'Ana Paula' }, { nome: 'Ana Paula' }];
+  assert.strictEqual(_acharPorNome(homonimos, 'Ana Paula', 'nome'), -1);
+  assert.strictEqual(_acharPorNome([{ nome: 'Ana Paula' }], 'Ana Paula', 'nome'), 0,
+    'um só continua resolvendo');
+});
+
+test('_acharPorNome: filtro por data separa dois agendamentos do mesmo paciente', () => {
+  const { _acharPorNome } = carregar(['_nomeNorm', '_nomeCasaParcial', '_acharPorNome']);
+  const dois = [
+    { pacienteNome: 'Ana', data: '2026-08-03', status: 'Confirmado' },
+    { pacienteNome: 'Ana', data: '2026-08-09', status: 'Confirmado' },
+  ];
+  const ativo = a => a.status !== 'Cancelado';
+  assert.strictEqual(_acharPorNome(dois, 'Ana', 'pacienteNome', ativo), -1, 'sem data, ambíguo');
+  assert.strictEqual(
+    _acharPorNome(dois, 'Ana', 'pacienteNome', a => ativo(a) && a.data === '2026-08-09'), 1);
+});
+
 test('_acharCrmPorNome: busca vazia, lista vazia e nome curto não casam nada', () => {
-  const { _acharCrmPorNome } = carregar('_acharCrmPorNome');
+  const { _acharCrmPorNome } = carregar(['_nomeNorm', '_nomeCasaParcial', '_acharPorNome', '_acharCrmPorNome']);
   for (const vazio of ['', null, undefined, '   ']) {
     assert.strictEqual(_acharCrmPorNome(CRM, vazio), -1);
   }
