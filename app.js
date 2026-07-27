@@ -1386,22 +1386,38 @@ function _iniciarApp() {
   }
   // Esconde login
   document.getElementById('login-page').style.display = 'none';
-  // Atualiza sidebar
-  _atualizarSidebar();
-  // Aplica visibilidade de role
-  _applyRole();
-  // Inicializa ícones e dashboard
-  if (window.lucide) lucide.createIcons();
-  applyClinicaConfig();
-  _reorderDashboardSections();
-  renderDashboard();
-  saudacaoDiaria();
+
+  // Cada passo isolado. Antes era uma sequência solta: o primeiro que lançasse
+  // levava todos os seguintes junto, e o app ficava meio montado — sem nada na
+  // tela explicando. Dois estragos concretos disso:
+  //   · _applyRole vinha DEPOIS do _atualizarSidebar. Uma exceção na sidebar
+  //     deixava o gate de papel sem rodar, e o profissional via as seções
+  //     financeiras que o RLS esconde dele. Por isso ele agora vem PRIMEIRO:
+  //     é segurança, não decoração, e não depende de mais nada.
+  //   · _agendarTarefasDoDia vinha DEPOIS do renderDashboard, que é o passo com
+  //     mais conta e mais chance de tropeçar num dado esquisito. Um erro ali
+  //     desarmava, para a sessão inteira, o backup automático e os lembretes.
+  const falhas = [];
+  const passo = (nome, fn) => {
+    try { fn(); } catch (e) { falhas.push(nome); console.warn('arranque:', nome, '—', e && e.message); }
+  };
+  passo('permissões', _applyRole);        // gate: primeiro de todos
+  passo('sidebar', _atualizarSidebar);
+  passo('ícones', () => { if (window.lucide) lucide.createIcons(); });
+  passo('config da clínica', applyClinicaConfig);
+  passo('ordem do dashboard', _reorderDashboardSections);
+  passo('dashboard', renderDashboard);
+  passo('saudação', saudacaoDiaria);
+  passo('menu mobile', () => _mobSync('dashboard'));
+  // Estes vão por último e fora do caminho de qualquer render: são as rotinas
+  // que sustentam backup e lembretes o dia inteiro.
   setTimeout(() => checkAchievements(), 1000); // verifica conquistas após render
   setTimeout(_tarefaBackupDiario, 3000);
   setTimeout(_tarefaLembretes, 5000);
   _agendarTarefasDoDia();
-  // Sincroniza UI mobile com página inicial
-  _mobSync('dashboard');
+  if (falhas.length) {
+    toast('⚠️ Parte da tela não carregou (' + falhas.join(', ') + '). Recarregue a página.', 8000);
+  }
   // Mostra modal de boas-vindas se for primeiro acesso
   if (localStorage.getItem('consult_onboarding_pending')) {
     setTimeout(() => mostrarOnboarding(), 500);

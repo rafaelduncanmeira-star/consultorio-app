@@ -65,3 +65,73 @@ test('o app abre mesmo com a sincronização inicial falhando', () => {
     + 'fica olhando uma tela que nunca monta, com os dados dela intactos e inalcançáveis');
   assert.match(m[0], /toast\(/, 'e precisa dizer que está trabalhando só com o aparelho');
 });
+
+// ---------- um render que lança não pode levar o resto junto ----------
+// _iniciarApp era uma sequência solta de chamadas. O primeiro passo que
+// lançasse levava todos os seguintes, e o app ficava meio montado sem nada na
+// tela explicando.
+function arranque({ quebrar = [] } = {}) {
+  const rodou = [];
+  const toasts = [];
+  const timers = [];
+  const stub = (nome) => () => {
+    rodou.push(nome);
+    if (quebrar.includes(nome)) throw new Error('boom em ' + nome);
+  };
+  const s = carregar('_iniciarApp', {
+    console: { warn() {}, log() {} },
+    currentUser: { id: 'u1' }, currentRole: 'medico',
+    document: { getElementById: () => ({ style: {} }) },
+    window: {},
+    localStorage: { getItem: () => null },
+    setTimeout: (fn) => { timers.push(fn); return timers.length; },
+    toast: (t) => toasts.push(t),
+    _applyRole: stub('_applyRole'),
+    _atualizarSidebar: stub('_atualizarSidebar'),
+    applyClinicaConfig: stub('applyClinicaConfig'),
+    _reorderDashboardSections: stub('_reorderDashboardSections'),
+    renderDashboard: stub('renderDashboard'),
+    saudacaoDiaria: stub('saudacaoDiaria'),
+    _mobSync: stub('_mobSync'),
+    checkAchievements: () => {},
+    _tarefaBackupDiario: () => {}, _tarefaLembretes: () => {},
+    _agendarTarefasDoDia: stub('_agendarTarefasDoDia'),
+    mostrarOnboarding: () => {},
+  });
+  s._iniciarApp();
+  return { rodou, toasts };
+}
+
+test('arranque: o gate de permissões roda ANTES de qualquer render', () => {
+  const a = arranque();
+  assert.strictEqual(a.rodou[0], '_applyRole',
+    'com o gate depois da sidebar, uma exceção na sidebar deixava o profissional '
+    + 'vendo as seções financeiras que o RLS esconde dele');
+});
+
+test('arranque: dashboard quebrado não desarma backup nem lembretes', () => {
+  const a = arranque({ quebrar: ['renderDashboard'] });
+  assert.ok(a.rodou.includes('_agendarTarefasDoDia'),
+    'o render é o passo com mais conta e mais chance de tropeçar num dado esquisito; '
+    + 'um erro ali desarmava o agendador pela sessão inteira');
+  assert.ok(a.rodou.includes('_mobSync'), 'e os passos seguintes também continuam');
+});
+
+test('arranque: falha no primeiro passo não impede os demais', () => {
+  const a = arranque({ quebrar: ['_applyRole'] });
+  for (const p of ['_atualizarSidebar', 'renderDashboard', '_agendarTarefasDoDia']) {
+    assert.ok(a.rodou.includes(p), `${p} tem de rodar mesmo assim`);
+  }
+});
+
+test('arranque: o que falhou é dito na tela, com nome', () => {
+  const a = arranque({ quebrar: ['renderDashboard', 'saudacaoDiaria'] });
+  assert.match(a.toasts.join(' '), /Parte da tela não carregou/);
+  assert.match(a.toasts.join(' '), /dashboard/);
+  assert.match(a.toasts.join(' '), /saudação/);
+});
+
+test('arranque: sem falha, nenhum alarme', () => {
+  const a = arranque();
+  assert.deepStrictEqual(a.toasts, []);
+});
