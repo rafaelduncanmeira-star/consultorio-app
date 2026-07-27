@@ -111,6 +111,15 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- 🔴 **Índice no `onclick` é o índice de OUTRO registro.** Ele é calculado no *render* e
+  usado no *clique*; entre os dois a coleção muda (unshift do copiloto, outra aba, pull).
+  Pior ainda congelado num `dataset` do DOM atravessando um modal — era assim que
+  "marcar como Pago" registrava o pagamento **e trocava a forma de pagamento** do
+  paciente errado. A tela **passa o id**; a ação **reencontra por id na hora de gravar**
+  (`_acharPacPorRef`/`_acharFuPorRef`), e avisa se sumiu. Índice só como reserva de dado
+  legado. Vale também pro save: `editState.id`, nunca `editState.idx`.
+  Escrita sem guarda (`data[i].campo = x`) dentro de `onchange` **lança e some** — o
+  controle muda na tela e nada é gravado.
 - 🔴 **`async` chamada de `onclick` não tem catch.** Exceção vira promise rejeitada em
   **silêncio**: o botão simplesmente não faz nada. Pior quando a função desabilita o
   botão antes do `await` — `doLogin`/`doSignup`/`confirmar2FA`/`iaSugerirNoChat`
