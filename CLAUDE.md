@@ -225,6 +225,12 @@ Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
   já tem identidade: o telefone. `_crmPorTelefone(_chatPhone)`, resolvido na hora do uso.
   Corolário de nomes: variável que recebe `_waConnected()` **não** se chama `zapiOk` — foi
   esse nome que convidou a regressão do card de lembretes. Há teste reprovando.
+- 🔴 **Fechar modal é `closeModal(id)`, nunca `style.display = 'none'`.** É o `closeModal`
+  que reseta formulário, título **e `editState`**. O handler de "clicar fora" só escondia o
+  elemento: dispensar um ✏️ assim e depois clicar em "+ Novo Atendimento" reabria o modal
+  com os dados do anterior e com `editState.id` intacto — e o `savePaciente` decide
+  INSERT × UPDATE por ele, então salvar **substituía** o atendimento antigo, levando junto
+  a receita dele no mês.
 - 🔴 **Índice no `onclick` é o índice de OUTRO registro.** Ele é calculado no *render* e
   usado no *clique*; entre os dois a coleção muda (unshift do copiloto, outra aba, pull).
   Pior ainda congelado num `dataset` do DOM atravessando um modal — era assim que
