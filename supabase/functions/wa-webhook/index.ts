@@ -518,8 +518,21 @@ function montarDisponibilidade(agcfg: any, ags: any[], bloqs: any[]): { texto: s
   const ocupado = (ds: string, ini: number, fim: number) =>
     ocupados.some(o => o.ds === ds && ini < o.fim && o.ini < fim);
 
-  const bloqueado = (ds: string) =>
-    (bloqs || []).some((b: any) => b && b.dataInicio && ds >= b.dataInicio && ds <= (b.dataFim || b.dataInicio));
+  // Bloqueio tem HORA, não só data (app.js:_isBloqueado usa as duas pontas).
+  // Aqui a hora era ignorada: bastava a data cair no intervalo pro dia inteiro
+  // sumir. Quem bloqueava as tardes de quinta pra um congresso via a IA
+  // responder que não havia NADA na quinta — com a manhã toda livre.
+  // O bloqueio é um intervalo contínuo de dataInicio+horaInicio até
+  // dataFim+horaFim: dia do meio é integral, só as pontas têm recorte de hora.
+  const bloqueado = (ds: string, ini: number, fim: number) =>
+    (bloqs || []).some((b: any) => {
+      if (!b || !b.dataInicio) return false;
+      const dIni = b.dataInicio, dFim = b.dataFim || b.dataInicio;
+      if (ds < dIni || ds > dFim) return false;
+      const hIni = (ds === dIni) ? toMin(b.horaInicio || '00:00') : 0;
+      const hFim = (ds === dFim) ? toMin(b.horaFim || '23:59') : 24 * 60;
+      return ini < hFim && hIni < fim;
+    });
 
   const ini = toMin(agcfg.horaInicio || '07:00');
   const fim = toMin(agcfg.horaFim || '20:00');
@@ -534,10 +547,10 @@ function montarDisponibilidade(agcfg: any, ags: any[], bloqs: any[]): { texto: s
     const d = new Date(base.getTime() + i * 86400000);
     if (!diasUteis.includes(_dowLocal(d))) continue;
     const ds = _dataLocal(d);
-    if (bloqueado(ds)) continue;
     const doDia: string[] = [];
     for (let min = ini; min + dur <= fim; min += dur) {
       if (almIni !== null && almFim !== null && min < almFim && almIni < min + dur) continue;
+      if (bloqueado(ds, min, min + dur)) continue;
       if (ocupado(ds, min, min + dur)) continue;
       const slot = `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
       livres.add(`${ds} ${slot}`);

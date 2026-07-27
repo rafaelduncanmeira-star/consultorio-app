@@ -5171,8 +5171,12 @@ function _slotsDoDia(dataStr) {
 
   const slots = [];
   for (let m = ini; m + slot <= fim; m += slot) {
-    // Pula slot que cai integralmente dentro do almoço
-    if (almIni !== null && almFim !== null && m >= almIni && (m + slot) <= almFim) continue;
+    // Pula slot que ENCOSTA no almoço — sobreposição, não contenção. Com a
+    // config padrão (almoço 12:00–13:30, slot de 60min) a regra de contenção
+    // deixava passar o 13:00–14:00, que come meia hora do almoço.
+    // (Função sem chamador hoje; a agenda que a IA oferece sai do wa-webhook,
+    // que já usa a regra certa. Alinhado pra ninguém herdar a regra fraca.)
+    if (almIni !== null && almFim !== null && m < almFim && almIni < (m + slot)) continue;
     slots.push(_toHHMM(m));
   }
   return slots;
