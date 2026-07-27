@@ -111,6 +111,13 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- 🔴 **`SIGNED_OUT` involuntário tem de aparecer — e NÃO pode limpar o localStorage.**
+  Sessão derrubada pelo servidor (senha trocada em outro aparelho, token rotacionado)
+  deixava a tela inteira de pé com `currentUser` preenchido, e toda gravação passava a
+  ser recusada em silêncio. O logout normal limpa o `consult_*` de propósito; a queda
+  involuntária não pode — é ali que mora o outbox. Todo signOut do app passa por
+  **`_signOutIntencional`**, senão o aviso dispara nos fluxos de login e esconde a
+  mensagem verdadeira.
 - 🔴 **Canal de realtime cai — e leva o CRM junto.** Depois do login, o realtime é a
   ÚNICA porta por onde um lead do WhatsApp entra. `subscribe()` **sempre** com callback de
   status: `SUBSCRIBED` varre o que chegou durante a queda, `CHANNEL_ERROR`/`TIMED_OUT`
