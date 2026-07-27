@@ -187,6 +187,57 @@ test('_novosNoMes: base vazia e mês sem estreia não quebram', () => {
   assert.strictEqual(_novosNoMes(null, '2026-08').receita, 0);
 });
 
+// IMPORTAÇÃO DE VALOR. Todo ponto era lido como separador de milhar, então
+// "1234.56" virava 123456 — cem vezes maior, calado. E esse é o formato que o
+// exportarCSV deste app escreve: exportar e reimportar inflava o faturamento.
+test('impNormValor: ponto decimal não vira milhar (o bug dos 100x)', () => {
+  const { impNormValor } = carregar('impNormValor');
+  assert.strictEqual(impNormValor('1234.56'), 1234.56);
+  assert.strictEqual(impNormValor('1.50'), 1.5);
+  assert.strictEqual(impNormValor('0.99'), 0.99);
+});
+
+test('impNormValor: ponto de milhar continua sendo milhar', () => {
+  const { impNormValor } = carregar('impNormValor');
+  assert.strictEqual(impNormValor('1.500'), 1500, 'R$ 1.500 — três casas é milhar');
+  assert.strictEqual(impNormValor('1.234.567'), 1234567, 'mais de um ponto é milhar');
+});
+
+test('impNormValor: com os dois separadores, o da direita é o decimal', () => {
+  const { impNormValor } = carregar('impNormValor');
+  assert.strictEqual(impNormValor('1.234,56'), 1234.56, 'pt-BR');
+  assert.strictEqual(impNormValor('1,234.56'), 1234.56, 'en-US');
+  assert.strictEqual(impNormValor('1.234.567,89'), 1234567.89);
+  assert.strictEqual(impNormValor('R$ 1.234,56'), 1234.56, 'com símbolo e espaço');
+});
+
+test('impNormValor: vírgula sozinha segue decimal (leitura pt-BR)', () => {
+  const { impNormValor } = carregar('impNormValor');
+  assert.strictEqual(impNormValor('1234,56'), 1234.56);
+  assert.strictEqual(impNormValor('1234,5'), 1234.5);
+});
+
+test('impNormValor: negativo, vazio e lixo não viram NaN', () => {
+  const { impNormValor } = carregar('impNormValor');
+  assert.strictEqual(impNormValor('-500,50'), -500.5);
+  assert.strictEqual(impNormValor(''), 0);
+  assert.strictEqual(impNormValor(null), 0);
+  assert.strictEqual(impNormValor('grátis'), 0);
+  assert.strictEqual(impNormValor(1234.567), 1234.57, 'número já vem arredondado a centavos');
+});
+
+// O ciclo fechado: o que o app exporta tem de voltar igual quando reimportado.
+test('exportar e reimportar o próprio CSV preserva o valor', () => {
+  const { impParseCSV, impNormValor } = carregar(['impParseCSV', 'impNormValor']);
+  const registro = { nome: 'Ana', data: '2026-08-03', valor: 1234.56 };
+  // Mesma serialização do exportarCSV: String(v), separador ';'
+  const cols = Object.keys(registro);
+  const csv = [cols.join(';'), cols.map(c => String(registro[c])).join(';')].join('\n');
+  const lido = impParseCSV(csv);
+  assert.strictEqual(impNormValor(lido.rows[0].valor), 1234.56,
+    'exportar e reimportar não pode multiplicar o faturamento por 100');
+});
+
 // O status importado tem de fechar com _resumoFin — é o acoplamento que
 // quebrava: importava, o bruto subia e "Recebido" continuava zerado.
 test('importação alimenta os baldes de _resumoFin', () => {

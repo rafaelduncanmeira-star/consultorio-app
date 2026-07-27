@@ -13017,11 +13017,44 @@ function impNormDate(s) {
 }
 
 /* ── Normaliza valor monetário ── */
+// Antes, TODO ponto era tratado como separador de milhar. Com isso "1234.56"
+// virava 123456 — cem vezes maior, sem nenhum aviso. E não era formato exótico:
+// é exatamente o que o exportarCSV deste app escreve (String(1234.56)), então
+// exportar e reimportar o próprio arquivo inflava o faturamento em 100x.
+//
+// Regra agora: quando os dois separadores aparecem, o da DIREITA é o decimal
+// ("1.234,56" e "1,234.56" caem certo). Só vírgula = decimal, como sempre (pt-BR).
+// Só ponto = decimal apenas se for um único ponto deixando 1 ou 2 casas
+// ("1234.56"); "1.500" e "1.234.567" seguem sendo milhar.
+//
+// Ambiguidade que sobra, e é insolúvel sem saber a origem do arquivo: "1,234"
+// pode ser 1234 (milhar en-US) ou 1,234 (decimal pt-BR). Fica na leitura pt-BR,
+// que é a do usuário deste app.
 function impNormValor(s) {
   if (!s && s !== 0) return 0;
   if (typeof s === 'number') return Math.round(s * 100) / 100;
-  const n = parseFloat(String(s).replace(/[R$\s\.]/g,'').replace(',','.'));
-  return isNaN(n) ? 0 : Math.round(n * 100) / 100;
+  let t = String(s).replace(/[^\d.,-]/g, '').trim();
+  if (!t) return 0;
+  const negativo = t.startsWith('-');
+  t = t.replace(/-/g, '');
+
+  const virg = t.lastIndexOf(',');
+  const ponto = t.lastIndexOf('.');
+  let dec = -1;
+  if (virg >= 0 && ponto >= 0) {
+    dec = Math.max(virg, ponto);
+  } else if (virg >= 0) {
+    dec = virg;
+  } else if (ponto >= 0) {
+    const casas = t.length - ponto - 1;
+    if (t.indexOf('.') === ponto && casas >= 1 && casas <= 2) dec = ponto;
+  }
+
+  const inteiro = (dec >= 0 ? t.slice(0, dec) : t).replace(/[.,]/g, '');
+  const frac    = dec >= 0 ? t.slice(dec + 1).replace(/[.,]/g, '') : '';
+  const n = parseFloat((inteiro || '0') + (frac ? '.' + frac : ''));
+  if (isNaN(n)) return 0;
+  return Math.round((negativo ? -n : n) * 100) / 100;
 }
 
 /* ── Normaliza status de pagamento ── */
