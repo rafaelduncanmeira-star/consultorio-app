@@ -225,6 +225,13 @@ Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
   já tem identidade: o telefone. `_crmPorTelefone(_chatPhone)`, resolvido na hora do uso.
   Corolário de nomes: variável que recebe `_waConnected()` **não** se chama `zapiOk` — foi
   esse nome que convidou a regressão do card de lembretes. Há teste reprovando.
+- **Identidade de paciente é SEMPRE `(p.nome || '').toLowerCase().trim()`.** O alerta
+  "sem retorno há +6 meses" do Dashboard agrupava pelo nome cru enquanto a tela de Retenção
+  (de onde a regra foi copiada) normalizava — e o comentário dizia que estavam iguais. Nome
+  chega digitado a cada visita, de planilha e do perfil do WhatsApp: as grafias viravam
+  pessoas diferentes, e o paciente atendido semana passada era listado como sumido, com o
+  alerta mandando ligar pra ele. Alinhar o corte de data e esquecer a chave é meia
+  correção.
 - **Marco ancorado no fim se calcula a partir do FIM.** O "Renovar" da assinatura vinha de
   `dataInicio + vigência − 30`, que só coincide com o vencimento na primeira inscrição: a
   renovação estende a partir do vencimento **antigo** e recria o cronograma a partir de
