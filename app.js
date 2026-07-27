@@ -1574,6 +1574,24 @@ function _crmPorRef(crmId, crmIdx) {
 }
 // Profissional "dono" de um paciente (pra etiquetar programas/inscrições):
 // pega o profissional de um atendimento dele; senão o profissional logado; senão null.
+// Versão ESTRITA: só devolve profissional que dá pra provar pelo histórico do
+// paciente. Sem o palpite do "profissional logado".
+//
+// A diferença importa em MIGRAÇÃO. O _profDoPaciente cai em
+// currentProfissionalId quando não acha o paciente — o que é razoável na
+// CRIAÇÃO de um registro (quem está criando é quem atende), mas é errado ao
+// varrer registros históricos: o _migrarIds roda a cada cloudPull e carimbava
+// toda inscrição/follow-up sem dono com o profissional que por acaso tinha
+// acabado de logar. Como o RLS das coleções blindadas filtra por
+// profissional_id, o registro passava a ser visível SÓ pra ele — os outros
+// profissionais da clínica perdiam de vista os próprios pacientes.
+function _profDoPacienteEstrito(nome) {
+  const chave = (nome || '').toLowerCase().trim();
+  if (!chave) return null;   // sem nome não dá pra atribuir a ninguém
+  const p = DB.get('pacientes').find(x => (x.nome || '').toLowerCase().trim() === chave && x.profissionalId);
+  return (p && p.profissionalId) || null;
+}
+
 function _profDoPaciente(nome) {
   const chave = (nome || '').toLowerCase().trim();
   const p = DB.get('pacientes').find(x => (x.nome || '').toLowerCase().trim() === chave && x.profissionalId);
@@ -1666,7 +1684,8 @@ function _migrarIds() {
     ins.forEach(i => {
       if (!i.id) { i.id = _novoId('ins'); mi = true; } // idem agendamentos
       if (i.pacId == null && i.pacIdx != null && pacs[i.pacIdx]) { i.pacId = pacs[i.pacIdx].id; mi = true; }
-      if (i.profissionalId == null) { const pid = _profDoPaciente(i.pacienteNome); if (pid) { i.profissionalId = pid; mi = true; } }
+      // ESTRITO: migração não pode chutar o profissional logado (ver _profDoPacienteEstrito)
+      if (i.profissionalId == null) { const pid = _profDoPacienteEstrito(i.pacienteNome); if (pid) { i.profissionalId = pid; mi = true; } }
     });
     if (mi) DB.set('inscricoes', ins);
     // Despesas: id habilita o merge por id em conflito de sync entre aparelhos.
@@ -1676,7 +1695,7 @@ function _migrarIds() {
     const fus = DB.get('followup'); let mf = false;
     fus.forEach(f => {
       if (!f.id) { f.id = _novoId('fu'); mf = true; }
-      if (f.profissionalId == null) { const pid = _profDoPaciente(f.nome); if (pid) { f.profissionalId = pid; mf = true; } }
+      if (f.profissionalId == null) { const pid = _profDoPacienteEstrito(f.nome); if (pid) { f.profissionalId = pid; mf = true; } }
     });
     if (mf) DB.set('followup', fus);
   } catch(e) { console.warn('_migrarIds:', e.message); }

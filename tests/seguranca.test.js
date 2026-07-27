@@ -453,3 +453,51 @@ test('SETUP_EQUIPE.sql: avisa que sobrescreve o que arquivos posteriores restrin
   assert.match(cabecalho, /SETUP_SEGURANCA/, 'a ordem de execução tem de estar no topo');
   assert.match(cabecalho, /REVERTE|reverte/, 'o risco de re-rodar tem de estar explícito');
 });
+
+// ---------- migração não pode chutar o dono do registro ----------
+// _migrarIds roda a CADA cloudPull e carimba inscrições/follow-ups sem
+// profissionalId. Usava _profDoPaciente, que cai no profissional LOGADO quando
+// não acha o paciente. Numa clínica com vários profissionais, o primeiro a
+// abrir o app levava pra si todos os registros sem dono — e como o RLS das
+// coleções blindadas filtra por profissional_id, os outros perdiam de vista os
+// próprios pacientes.
+const PACS_PROF = [
+  { nome: 'Ana Lima',  profissionalId: 'prof_A' },
+  { nome: 'Bruno Sá',  profissionalId: 'prof_B' },
+  { nome: 'Sem Dono' },                              // paciente sem profissional
+];
+const carregaEstrito = () => carregar('_profDoPacienteEstrito', {
+  DB: { get: () => PACS_PROF }, currentProfissionalId: 'prof_LOGADO',
+});
+
+test('_profDoPacienteEstrito: acha pelo histórico do paciente', () => {
+  const { _profDoPacienteEstrito } = carregaEstrito();
+  assert.strictEqual(_profDoPacienteEstrito('Ana Lima'), 'prof_A');
+  assert.strictEqual(_profDoPacienteEstrito('  bruno sá '), 'prof_B', 'ignora caixa e espaço');
+});
+
+test('_profDoPacienteEstrito: NÃO cai no profissional logado', () => {
+  const { _profDoPacienteEstrito } = carregaEstrito();
+  for (const desconhecido of ['Zuleica', 'Sem Dono', '', null, undefined, '   ']) {
+    assert.strictEqual(_profDoPacienteEstrito(desconhecido), null,
+      `"${desconhecido}" não pode ser atribuído ao profissional que abriu o app`);
+  }
+});
+
+// A versão não-estrita continua caindo no logado — e isso está certo na
+// CRIAÇÃO de registro, onde quem cria é quem atende.
+test('_profDoPaciente (não-estrito) mantém o fallback para quem está criando', () => {
+  const { _profDoPaciente } = carregar('_profDoPaciente', {
+    DB: { get: () => PACS_PROF }, currentProfissionalId: 'prof_LOGADO',
+  });
+  assert.strictEqual(_profDoPaciente('Zuleica'), 'prof_LOGADO');
+  assert.strictEqual(_profDoPaciente('Ana Lima'), 'prof_A', 'histórico ainda ganha');
+});
+
+test('_migrarIds usa a versão estrita, não a que chuta', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  const src = recortarFuncao('_migrarIds').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /_profDoPacienteEstrito\(/, 'a migração tem de usar a estrita');
+  assert.doesNotMatch(src, /[^A-Za-z]_profDoPaciente\(/,
+    'a versão que cai no profissional logado não pode voltar pra migração');
+});
