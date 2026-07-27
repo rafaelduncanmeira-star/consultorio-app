@@ -3334,8 +3334,9 @@ function excluirInscricao(id) {
   // Remove follow-ups pendentes
   const fusLimpos = DB.get('followup').filter(f => f.programaInscricaoId !== id || f.feito);
   DB.set('followup', fusLimpos);
-  // Remove inscrição
-  const filtradas = inscricoes.filter(i => i.id !== id);
+  // Remove inscrição — relendo, como as duas coleções acima já faziam. O
+  // prompt() que exige digitar EXCLUIR fica aberto o tempo que o usuário levar.
+  const filtradas = getInscricoes().filter(i => i.id !== id);
   DB.set('inscricoes', filtradas);
   renderProgramas();
   toast('Inscrição excluída');
@@ -3447,8 +3448,12 @@ function deleteProc(idx) {
   const p = procs[idx];
   if (!p) return;
   if (!confirm(`Excluir o procedimento "${p.nome}"?\n\nAtendimentos já registrados com esse nome continuarão valendo, mas ele sairá do dropdown.`)) return;
-  procs.splice(idx, 1);
-  DB.set('procedimentos', procs);
+  // Relê depois do confirm, e remove por id — o índice pode ter mudado.
+  const atuais = getProcedimentos();
+  const pos = p.id ? atuais.findIndex(x => x && x.id === p.id) : idx;
+  if (pos < 0) { toast('Procedimento já removido.', 2500); return; }
+  atuais.splice(pos, 1);
+  DB.set('procedimentos', atuais);
   renderPrecos();
   toast('Procedimento excluído');
 }
@@ -3832,8 +3837,17 @@ function deleteRow(col, ref) {
     }
   }
 
-  data.splice(idx, 1);
-  DB.set(col, data);
+  // RELÊ AGORA. Entre o DB.get lá em cima e este ponto houve um confirm() — ou
+  // um prompt() esperando a palavra EXCLUIR — que pode ter ficado aberto por
+  // minutos. O CRM recebe leads via realtime nesse meio-tempo. Gravar o array
+  // velho apagaria o que chegou, e o push manda essa exclusão pro servidor: o
+  // lead some de vez. O comentário lá em cima já tratava a resolução do índice
+  // por id; faltava a outra metade, que é reler antes de escrever.
+  const atual = DB.get(col);
+  const idxAtual = item.id ? atual.findIndex(x => x && x.id === item.id) : idx;
+  if (idxAtual < 0) { toast('Este registro já não está mais na lista.', 3000); return; }
+  atual.splice(idxAtual, 1);
+  DB.set(col, atual);
   const renders = { crm: renderCrm, pacientes: renderPacientes, followup: renderFollowup, agenda: renderAgenda, despesas: renderDespesas };
   if (renders[col]) renders[col]();
   _auditLog('excluiu', col, `Excluiu ${col}: ${item.nome || item.descricao || '(sem nome)'}`);
@@ -3954,8 +3968,14 @@ function saveCrm(e) {
     }
   }
   item.id = (editIdx >= 0 && data[editIdx] && data[editIdx].id) || _novoId('crm'); // id estável (Fase 1)
-  if (editIdx >= 0) { data[editIdx] = item; } else { data.unshift(item); }
-  DB.set('crm', data);
+  // RELÊ AGORA: o confirm de duplicata acima pode ter ficado aberto, e o CRM
+  // recebe leads via realtime. Gravar o array lido no começo da função apagaria
+  // o lead que chegou nesse meio-tempo — e o push levaria a exclusão pro
+  // servidor. O comentário do editIdx já cuidava do índice; faltava reler.
+  const atualCrm = DB.get('crm');
+  const posAtual = atualCrm.findIndex(c => c && c.id === item.id);
+  if (posAtual >= 0) { atualCrm[posAtual] = item; } else { atualCrm.unshift(item); }
+  DB.set('crm', atualCrm);
   closeModal('modal-crm');
   renderCrm();
 }

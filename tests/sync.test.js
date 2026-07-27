@@ -390,3 +390,48 @@ test('_lerTodasBlindada: coleção vazia e erro de banco não viram lista falsa'
   assert.ok(r.error, 'erro tem de subir — devolver [] apagaria a coleção local');
   assert.strictEqual(r.data, undefined);
 });
+
+// ---------- ler → esperar o usuário → gravar o array VELHO ----------
+// deleteRow e saveCrm liam a coleção, abriam um confirm()/prompt() (que fica
+// aberto o tempo que o usuário levar) e gravavam o array lido ANTES do diálogo.
+// O CRM recebe leads via realtime nesse meio-tempo: o lead que chegou era
+// apagado na gravação — e o push leva a exclusão pro servidor, então some de
+// vez. Os comentários do próprio código já tratavam a resolução do ÍNDICE por
+// id; faltava a outra metade, que é reler antes de escrever.
+function fonteDe(nome) {
+  const { recortarFuncao } = require('./_extrair.js');
+  return recortarFuncao(nome).replace(/\/\/[^\n]*/g, '');
+}
+
+test('deleteRow: relê a coleção depois do diálogo, antes de gravar', () => {
+  const src = fonteDe('deleteRow');
+  const posDialogo = Math.max(src.lastIndexOf('confirm('), src.lastIndexOf('prompt('));
+  const posReleitura = src.indexOf('DB.get(col)', posDialogo);
+  const posGravacao = src.indexOf('DB.set(col', posDialogo);
+  assert.ok(posReleitura > posDialogo, 'a releitura tem de vir DEPOIS do diálogo');
+  assert.ok(posReleitura < posGravacao, 'e ANTES da gravação');
+});
+
+test('saveCrm: grava sobre a lista relida, não sobre a do início da função', () => {
+  const src = fonteDe('saveCrm');
+  const posConfirm = src.lastIndexOf('confirm(');
+  const posReleitura = src.indexOf("DB.get('crm')", posConfirm);
+  const posGravacao = src.indexOf("DB.set('crm'", posConfirm);
+  assert.ok(posConfirm > 0, 'o confirm de duplicata existe');
+  assert.ok(posReleitura > posConfirm && posReleitura < posGravacao,
+    'sem reler, o lead que chegou via realtime durante o confirm é apagado');
+});
+
+test('excluirInscricao e deleteProc também releem depois do diálogo', () => {
+  for (const [fn, leitura, escrita] of [
+    ['excluirInscricao', 'getInscricoes()', "DB.set('inscricoes'"],
+    ['deleteProc', 'getProcedimentos()', "DB.set('procedimentos'"],
+  ]) {
+    const src = fonteDe(fn);
+    const posDialogo = Math.max(src.lastIndexOf('confirm('), src.lastIndexOf('prompt('));
+    const posEscrita = src.indexOf(escrita, posDialogo);
+    const posLeitura = src.indexOf(leitura, posDialogo);
+    assert.ok(posLeitura > posDialogo && posLeitura < posEscrita,
+      `${fn}: precisa reler entre o diálogo e a gravação`);
+  }
+});
