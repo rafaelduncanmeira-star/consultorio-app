@@ -473,3 +473,32 @@ test('nenhuma soma de valor fica sem o guarda de campo ausente', () => {
   assert.deepStrictEqual(nuas, [],
     'registro sem valor faz `s + undefined` = NaN e contamina a tela inteira');
 });
+
+// ---------- novos + recorrentes ≠ total de pacientes ----------
+// A divisão "novo vs recorrente" no DRE é por ATENDIMENTO: `p.data ===
+// primeiraDataDoNome` — decisão declarada no código ("os demais, inclusive no
+// mesmo mês, são recorrentes"). A consequência é que quem estreou e voltou no
+// mesmo período cai nas DUAS linhas. Somar as duas para achar o total contava a
+// mesma pessoa duas vezes: com 1 paciente que veio 2x, a tabela exibia Total 2.
+test('DRE: a linha Total não soma novosUnicos + recUnicos', () => {
+  const { fonte } = require('./_extrair.js');
+  const semCom = fonte.replace(/\/\/[^\n]*/g, '');
+  assert.doesNotMatch(semCom, /novosUnicos\s*\+\s*recUnicos/,
+    'quem estreou e voltou no mesmo período está nas duas linhas — a soma conta duas vezes');
+  assert.match(semCom, /const pacsUnicos = new Set\(pacs\.map/,
+    'o total tem de sair de uma contagem de nomes distintos');
+});
+
+// A aritmética do bug, reproduzida com a mesma regra do app.
+test('a divisão por atendimento realmente coloca a mesma pessoa nas duas linhas', () => {
+  const pacs = [{ nome: 'Ana', data: '2026-08-03' }, { nome: 'Ana', data: '2026-08-20' }];
+  const primeira = {};
+  [...pacs].sort((a, b) => (a.data || '').localeCompare(b.data || '')).forEach(p => {
+    const n = p.nome.toLowerCase(); if (!(n in primeira)) primeira[n] = p.data;
+  });
+  const ehNovo = p => p.data === primeira[p.nome.toLowerCase()];
+  const nu = new Set(pacs.filter(ehNovo).map(p => p.nome)).size;
+  const ru = new Set(pacs.filter(p => !ehNovo(p)).map(p => p.nome)).size;
+  assert.strictEqual(nu + ru, 2, 'é esta soma que a tela mostrava');
+  assert.strictEqual(new Set(pacs.map(p => p.nome)).size, 1, 'e este é o número certo');
+});

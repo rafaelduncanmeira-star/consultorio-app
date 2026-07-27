@@ -8499,6 +8499,12 @@ function gerarPDF(mes) {
   const pacsRec   = pacs.filter(p => !_ehNovo(p));
   const novosUnicos = new Set(pacsNovos.map(p => (p.nome || '').toLowerCase().trim())).size;
   const recUnicos   = new Set(pacsRec.map(p =>   (p.nome || '').toLowerCase().trim())).size;
+  // O total de pacientes NÃO é novosUnicos + recUnicos. A divisão acima é por
+  // ATENDIMENTO ("esta consulta é a primeira dele?"), então quem estreou e
+  // voltou no mesmo período aparece nas duas linhas — e a soma contava a
+  // mesma pessoa duas vezes. Com 1 paciente que veio duas vezes, a tabela
+  // exibia Total = 2. Conta os nomes distintos do período de uma vez só.
+  const pacsUnicos = new Set(pacs.map(p => (p.nome || '').toLowerCase().trim()).filter(Boolean)).size;
   const fatNovos    = pacsNovos.reduce((s, p) => s + (p.valor || 0), 0);
   const fatRec      = pacsRec.reduce((s, p)   => s + (p.valor || 0), 0);
 
@@ -8672,7 +8678,7 @@ function gerarPDF(mes) {
       <tbody>
         <tr><td>🆕 Novos pacientes</td><td class="r">${novosUnicos}</td><td class="r">${pacsNovos.length}</td><td class="r">${brl(fatNovos)}</td><td class="r gray">${pct(fat ? (fatNovos/fat)*100 : 0)}</td></tr>
         <tr><td>🔄 Recorrentes</td><td class="r">${recUnicos}</td><td class="r">${pacsRec.length}</td><td class="r">${brl(fatRec)}</td><td class="r gray">${pct(fat ? (fatRec/fat)*100 : 0)}</td></tr>
-        <tr class="total"><td>Total</td><td class="r">${novosUnicos+recUnicos}</td><td class="r">${pacs.length}</td><td class="r">${brl(fat)}</td><td class="r">100%</td></tr>
+        <tr class="total"><td>Total</td><td class="r">${pacsUnicos}</td><td class="r">${pacs.length}</td><td class="r">${brl(fat)}</td><td class="r">100%</td></tr>
       </tbody>
     </table>
   </div>
