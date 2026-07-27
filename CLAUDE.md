@@ -111,6 +111,11 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- **Versão nova só entra na próxima navegação — e ninguém navega.** O SW é network-first
+  com `skipWaiting`, mas a recepção deixa o app aberto a semana toda: sem recarregar, o
+  código antigo continua rodando mesmo depois de uma correção de dado. `_observarAtualizacaoSW`
+  avisa quando um worker novo instala **com** `controller` presente (sem ele é a 1ª visita,
+  não há o que atualizar), e `_checarAtualizacaoSW` roda junto das tarefas do dia.
 - 🔴 **CSV do Excel em pt-BR vem em latin1.** Lido como UTF-8, cada acento vira `U+FFFD`:
   "José Conceição" entra "Jos� Concei��o" e o paciente nunca mais casa com o cadastro que
   já existia. Releia em `ISO-8859-1` quando aparecer `�`. **O comentário no código
