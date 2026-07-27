@@ -119,15 +119,44 @@ test('todo <select> preenchido pelo editRow recebe a opção legada antes', () =
     'valor fora das <option> deixa selectedIndex -1 e o save devolve \'\' — o campo é apagado');
 });
 
+// Dublê de <select> com <option> estáticas, como as do index.html: ninguém
+// reconstrói o innerHTML desses selects entre uma abertura e outra.
+function selectComOpcoes(fixas) {
+  const opts = fixas.map(v => ({ value: v, legado: false }));
+  const sel = {
+    get options() { return opts; },
+    querySelectorAll: (q) => opts.filter(o => q.includes('data-legado') && o.legado)
+      .map(o => ({ remove: () => opts.splice(opts.indexOf(o), 1) })),
+    insertAdjacentHTML: (_p, h) => {
+      const m = h.match(/value="([^"]*)"/);
+      opts.push({ value: m[1], legado: /data-legado/.test(h) });
+    },
+  };
+  return sel;
+}
+
 test('_opcaoLegadaSeFaltar só age quando a opção falta mesmo', () => {
   const { _opcaoLegadaSeFaltar } = carregar(['_esc', '_opcaoLegadaSeFaltar'], { Array, String });
-  const feito = [];
-  const sel = { options: [{ value: 'Aluguel' }], insertAdjacentHTML: (_p, h) => feito.push(h) };
+  const sel = selectComOpcoes(['Aluguel']);
   _opcaoLegadaSeFaltar(sel, 'Aluguel');
-  assert.deepStrictEqual(feito, [], 'opção que já existe não pode ser duplicada');
+  assert.deepStrictEqual(sel.options.map(o => o.value), ['Aluguel'],
+    'opção que já existe não pode ser duplicada');
   _opcaoLegadaSeFaltar(sel, 'Estrutura');
-  assert.match(feito[0], /Estrutura \(legado\)/);
-  _opcaoLegadaSeFaltar(sel, '');
-  _opcaoLegadaSeFaltar(null, 'x');
-  assert.strictEqual(feito.length, 1);
+  assert.deepStrictEqual(sel.options.map(o => o.value), ['Aluguel', 'Estrutura']);
+  _opcaoLegadaSeFaltar(null, 'x');   // sem select, não explode
+});
+
+test('a legada do registro ANTERIOR não fica pendurada no <select>', () => {
+  // As <option> destes selects vêm do index.html e nada as reconstrói. Sem
+  // limpar, cada registro esquisito aberto deixava uma opção pra trás até
+  // recarregar a página — e o médico podia escolher a "(legado)" de outro
+  // registro num lançamento novo, gravando de propósito fora do vocabulário.
+  const { _opcaoLegadaSeFaltar } = carregar(['_esc', '_opcaoLegadaSeFaltar'], { Array, String });
+  const sel = selectComOpcoes(['Aluguel', 'Marketing']);
+  _opcaoLegadaSeFaltar(sel, 'Estrutura');     // abriu a despesa A
+  _opcaoLegadaSeFaltar(sel, 'Pessoal');       // abriu a despesa B
+  assert.deepStrictEqual(sel.options.map(o => o.value), ['Aluguel', 'Marketing', 'Pessoal']);
+  _opcaoLegadaSeFaltar(sel, 'Marketing');     // abriu uma despesa normal
+  assert.deepStrictEqual(sel.options.map(o => o.value), ['Aluguel', 'Marketing'],
+    'volta ao vocabulário puro quando o registro está em ordem');
 });

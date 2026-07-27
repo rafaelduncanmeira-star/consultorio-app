@@ -4275,10 +4275,19 @@ function _pagamentoCanonico(valor) {
 // Acrescenta o valor guardado como <option> "(legado)" quando ele não existe no
 // <select>. Sem isso a atribuição deixa selectedIndex -1 e o save apaga o campo.
 function _opcaoLegadaSeFaltar(sel, valor) {
-  if (!sel || !valor) return;
-  const tem = Array.from(sel.options || []).some(o => o.value === valor);
-  if (tem) return;
-  sel.insertAdjacentHTML('beforeend', `<option value="${_esc(valor)}">${_esc(valor)} (legado)</option>`);
+  if (!sel) return;
+  // Tira as legadas de ANTES. Estes <select> têm as <option> escritas no
+  // index.html e ninguém os reconstrói: sem limpar, cada registro esquisito que
+  // o médico abrisse deixaria uma opção pendurada até recarregar a página, e a
+  // lista de escolha ia enchendo de "(legado)" de outros registros — que ele
+  // poderia até selecionar num lançamento novo, gravando de propósito um valor
+  // fora do vocabulário.
+  try { (sel.querySelectorAll ? sel.querySelectorAll('option[data-legado]') : [])
+          .forEach(o => o.remove()); } catch (e) {}
+  if (!valor) return;
+  if (Array.from(sel.options || []).some(o => o.value === valor)) return;
+  sel.insertAdjacentHTML('beforeend',
+    `<option value="${_esc(valor)}" data-legado="1">${_esc(valor)} (legado)</option>`);
 }
 
 function _statusPgtoCanonico(valor) {
@@ -6273,6 +6282,14 @@ function openNovoAgendamento(prefill = {}) {
   // Atualiza duração ao trocar procedimento
   form.procedimento.onchange = () => { form.duracao.value = _inferirDuracao(form.procedimento.value) || form.duracao.value; };
   form.status.value = 'Confirmado';
+  // O tipo de atividade é um input HIDDEN com botões estilizados por JS. O
+  // form.reset() lá em cima devolve o hidden pro padrão ("Consultório"), mas
+  // NÃO desfaz o estilo inline que o _setTipoAtividade pintou na última
+  // edição: o modal abria com "Visita Domiciliar" destacado e o valor gravado
+  // sendo "Consultório". A tela dizia uma coisa e o registro guardava outra —
+  // e tipoAtividade é o que separa atendimento de consultório dos demais na
+  // taxa de ocupação e na cor do quadro da agenda.
+  _setTipoAtividade(prefill.tipoAtividade || 'Consultório');
   document.querySelector('#modal-agendamento .modal-title').textContent = 'Novo Agendamento';
   document.getElementById('ag-conflito-aviso').style.display = 'none';
   const btnExcluir = document.getElementById('ag-excluir-btn');

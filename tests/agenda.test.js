@@ -280,3 +280,51 @@ test('_viewMes: sombreado de bloqueio usa o mesmo fallback do _isBloqueado', () 
     'bloqueio de um dia só sem dataFim não sombreava o dia, mas o servidor o respeita');
   assert.match(src, /_cmpHoraAsc/, 'e a ordenação dos eventos do dia tem de ser a guardada');
 });
+
+// ---------- o tipo de atividade que a tela MOSTRA é o que o registro guarda ----------
+// tipoAtividade é um <input type="hidden"> com botões estilizados por JS. O
+// form.reset() do "+ Novo Agendamento" devolve o hidden pro padrão
+// ("Consultório"), mas não desfaz o estilo inline que o _setTipoAtividade
+// pintou na última edição. O modal abria com "Visita Domiciliar" destacado e o
+// valor gravado sendo "Consultório": o médico preenchia confiando no destaque e
+// a visita entrava como atendimento de consultório — inflando a taxa de
+// ocupação (que conta só `!tipoAtividade || tipoAtividade === 'Consultório'`) e
+// saindo com a cor errada no quadro da agenda.
+test('novo agendamento repinta os botões de tipo junto com o valor', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  const src = recortarFuncao('openNovoAgendamento').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /_setTipoAtividade\(/,
+    'sem repintar, o destaque do agendamento anterior sobrevive ao form.reset()');
+  const iReset = src.indexOf('form.reset()');
+  assert.ok(iReset > -1 && src.indexOf('_setTipoAtividade(') > iReset,
+    'tem de vir DEPOIS do reset, senão o reset desfaz o valor de novo');
+});
+
+test('editar agendamento também sincroniza botões e valor', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  const src = recortarFuncao('editAgendamento');
+  assert.match(src, /_setTipoAtividade\(a\.tipoAtividade \|\| 'Consultório'\)/);
+});
+
+test('_setTipoAtividade escreve no hidden e destaca só o botão do tipo', () => {
+  const botoes = ['Consultório', 'Visita Domiciliar'].map(t => ({
+    dataset: { tipo: t }, style: {},
+  }));
+  const hidden = { value: '' };
+  const { _setTipoAtividade } = carregar(['const:_TIPO_STYLE', '_setTipoAtividade'], {
+    document: {
+      getElementById: () => hidden,
+      querySelectorAll: () => botoes,
+      querySelector: () => null,
+    },
+  });
+  _setTipoAtividade('Visita Domiciliar');
+  assert.strictEqual(hidden.value, 'Visita Domiciliar');
+  assert.notStrictEqual(botoes[1].style.background, '#f8fafc', 'o do tipo fica destacado');
+  assert.strictEqual(botoes[0].style.background, '#f8fafc', 'o outro volta ao neutro');
+
+  _setTipoAtividade('Consultório');
+  assert.strictEqual(hidden.value, 'Consultório');
+  assert.strictEqual(botoes[1].style.background, '#f8fafc',
+    'o destaque anterior TEM de ser desfeito — era ele que sobrevivia entre aberturas');
+});
