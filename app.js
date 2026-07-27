@@ -746,17 +746,45 @@ async function _acceptInviteIfPending() {
 // Resolve quem é o "dono" dos dados que esse user está vendo:
 // - Se é membro de uma equipe → owner_id do dono
 // - Caso contrário → ele mesmo (currentUser.id)
+// Este usuário tem clínica PRÓPRIA? Olha nas duas casas: o blob legado
+// (app_data) e a tabela blindada — o blob é APAGADO depois de migrado, então
+// quem só tem atendimentos gravados não aparece no app_data.
+// Devolve true, false, ou null quando não deu pra saber.
+async function _temClinicaPropria() {
+  const olhar = async (tabela, coluna, campo) => {
+    const { data, error } = await _supa.from(tabela).select(campo).eq(coluna, currentUser.id).limit(1);
+    return error ? null : !!(data && data.length);
+  };
+  const blob = await olhar('app_data', 'user_id', 'key');
+  if (blob === true) return true;
+  const linhas = await olhar('clinica_atendimentos', 'owner_id', 'id');
+  if (linhas === true) return true;
+  return (blob === null || linhas === null) ? null : false;
+}
+
 async function resolveDataOwner() {
   if (!_supa || !currentUser) return;
+  const ficarComAPropria = () => {
+    currentDataOwner = currentUser.id;
+    currentTeamRole  = 'owner';
+    currentProfissionalId = null;
+  };
   try {
-    // Quem tem clínica PRÓPRIA (já gravou dados em app_data) sempre vê a própria,
-    // mesmo sendo também membro de outra equipe. Sem isto, aceitar um convite de
-    // outra clínica trancava o dono fora da sua (resolveDataOwner adotava o
-    // vínculo de equipe por cima da própria conta). Só quem NÃO tem clínica
-    // própria adota o papel de membro.
-    const { data: propria } = await _supa.from('app_data')
-      .select('key').eq('user_id', currentUser.id).limit(1);
-    const temClinicaPropria = !!(propria && propria.length);
+    // Quem tem clínica PRÓPRIA sempre vê a própria, mesmo sendo também membro
+    // de outra equipe. Sem isto, aceitar um convite de outra clínica trancava o
+    // dono fora da sua. Só quem NÃO tem clínica própria adota o papel de membro.
+    //
+    // O supabase-js NÃO lança em erro de banco — devolve { error }. Esse erro
+    // não era checado, então uma falha de rede virava "não tem clínica
+    // própria": o dono era adotado como MEMBRO de outra clínica, passava a ver
+    // os dados dela na tela e a gravar os novos registros lá dentro. Na dúvida,
+    // fica com a própria — é o único padrão seguro aqui.
+    const temClinicaPropria = await _temClinicaPropria();
+    if (temClinicaPropria === null) {
+      console.warn('resolveDataOwner: não deu pra confirmar a clínica própria — assumindo a própria');
+      ficarComAPropria();
+      return;
+    }
 
     const { data } = await _supa.from('team_members')
       .select('owner_id, role')
@@ -771,14 +799,11 @@ async function resolveDataOwner() {
         .eq('member_id', currentUser.id).eq('owner_id', currentDataOwner).limit(1);
       if (!r2.error && r2.data && r2.data.length) currentProfissionalId = r2.data[0].profissional_id || null;
     } else {
-      currentDataOwner = currentUser.id;
-      currentTeamRole  = 'owner';
-      currentProfissionalId = null;
+      ficarComAPropria();
     }
   } catch(e) {
     console.warn('resolveDataOwner error:', e.message);
-    currentDataOwner = currentUser.id;
-    currentTeamRole  = 'owner';
+    ficarComAPropria();
   }
 }
 

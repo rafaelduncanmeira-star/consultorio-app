@@ -280,3 +280,65 @@ test('login e checkSession barram quando o 2FA não pôde ser confirmado', () =>
       'sessão em aal1 tem de ser derrubada, não deixada de pé');
   }
 });
+
+// ---------- resolveDataOwner: o dono não pode ser adotado como membro ----------
+// Se a consulta que descobre "tenho clínica própria?" falha, o código antigo
+// concluía QUE NÃO TEM — e adotava o vínculo de equipe. O dono passava a ver a
+// clínica de outra pessoa na tela e a gravar os registros novos lá dentro.
+function supaOwner({ appData, appDataErr, atend, atendErr, membroDe }) {
+  const resposta = (data, error) => Promise.resolve({ data, error: error || null });
+  return {
+    from: (tabela) => ({
+      select: () => ({
+        eq: () => ({
+          limit: () => {
+            if (tabela === 'app_data') return resposta(appDataErr ? null : (appData || []), appDataErr);
+            if (tabela === 'clinica_atendimentos') return resposta(atendErr ? null : (atend || []), atendErr);
+            if (tabela === 'team_members') return resposta(membroDe ? [{ owner_id: membroDe, role: 'secretaria' }] : []);
+            return resposta([]);
+          },
+          eq: () => ({ limit: () => resposta([]) }),
+        }),
+      }),
+    }),
+  };
+}
+function rodarOwner(supa) {
+  const s = carregar(['_temClinicaPropria', 'resolveDataOwner'], {
+    _supa: supa, currentUser: { id: 'eu' },
+    currentDataOwner: null, currentTeamRole: null, currentProfissionalId: null,
+    currentRole: 'medico', console: { warn() {}, log() {} }, Promise,
+  });
+  return s.resolveDataOwner().then(() => s);
+}
+
+test('resolveDataOwner: erro ao checar a clínica própria não entrega o dono a outra clínica', async () => {
+  const s = await rodarOwner(supaOwner({ appDataErr: { message: 'network' }, membroDe: 'outro-dono' }));
+  assert.strictEqual(s.currentDataOwner, 'eu', 'na dúvida, fica com a própria clínica');
+  assert.strictEqual(s.currentTeamRole, 'owner');
+});
+
+test('resolveDataOwner: quem tem clínica própria não vira membro, mesmo em equipe', async () => {
+  const s = await rodarOwner(supaOwner({ appData: [{ key: 'clinica_config' }], membroDe: 'outro-dono' }));
+  assert.strictEqual(s.currentDataOwner, 'eu');
+  assert.strictEqual(s.currentTeamRole, 'owner');
+});
+
+// O blob do app_data é APAGADO depois que a coleção migra pra tabela blindada.
+// Checar só o app_data fazia um dono antigo parecer "sem clínica".
+test('resolveDataOwner: clínica que só tem atendimentos na tabela blindada conta', async () => {
+  const s = await rodarOwner(supaOwner({ appData: [], atend: [{ id: 'a1' }], membroDe: 'outro-dono' }));
+  assert.strictEqual(s.currentDataOwner, 'eu', 'atendimento gravado É clínica própria');
+});
+
+test('resolveDataOwner: quem realmente não tem clínica adota a equipe', async () => {
+  const s = await rodarOwner(supaOwner({ appData: [], atend: [], membroDe: 'dono-real' }));
+  assert.strictEqual(s.currentDataOwner, 'dono-real');
+  assert.strictEqual(s.currentTeamRole, 'member');
+});
+
+test('resolveDataOwner: sem clínica e sem equipe, é dono de si mesmo', async () => {
+  const s = await rodarOwner(supaOwner({ appData: [], atend: [] }));
+  assert.strictEqual(s.currentDataOwner, 'eu');
+  assert.strictEqual(s.currentTeamRole, 'owner');
+});
