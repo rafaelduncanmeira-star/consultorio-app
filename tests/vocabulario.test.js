@@ -110,3 +110,40 @@ test('todo status de pagamento gravado existe no select do modal', () => {
       `o app grava statusPgto '${st}', mas o select só oferece: ${oferecidos.join(', ')}`);
   }
 });
+
+// ---------- status do CRM produzido por LLM ----------
+// O Kanban agrupa por igualdade: `data.filter(r => r.status === col.status)`.
+// Card com status fora das cinco colunas não cai em NENHUMA — some da tela. E
+// quem produz esse campo é o LLM (extração de conversa colada do WhatsApp e
+// ação criar_crm do copiloto), que inventa rótulo.
+const { carregar } = require('./_extrair.js');
+
+test('_statusCrmCanonico: só passa status que existe como coluna do Kanban', () => {
+  const { _statusCrmCanonico, KANBAN_COLUNAS } =
+    carregar(['const:KANBAN_COLUNAS', '_statusCrmCanonico']);
+  for (const col of KANBAN_COLUNAS) {
+    assert.strictEqual(_statusCrmCanonico(col.status), col.status, `${col.status} é coluna válida`);
+  }
+});
+
+test('_statusCrmCanonico: rótulo inventado pelo LLM cai na primeira coluna', () => {
+  const { _statusCrmCanonico } = carregar(['const:KANBAN_COLUNAS', '_statusCrmCanonico']);
+  for (const inventado of ['Novo', 'Lead', 'Primeiro contato', 'contato feito', '', null, undefined]) {
+    assert.strictEqual(_statusCrmCanonico(inventado), 'Contato feito',
+      `"${inventado}" não é coluna — o card ficaria invisível no Kanban`);
+  }
+});
+
+// Todo caminho que cria contato no CRM precisa gerar id: o _pushBlindada filtra
+// por id, então registro sem id NÃO sobe pro servidor — fica só no aparelho.
+test('todo caminho de criação no CRM gera id estável', () => {
+  // A extração do WhatsApp montava o objeto sem id — os outros quatro caminhos
+  // do CRM já geravam o id na criação.
+  const ini = app.indexOf('waExtracted = {');
+  assert.ok(ini > 0, 'o objeto do contato extraído tem de existir');
+  const bloco = app.slice(ini, ini + 700);
+  assert.match(bloco, /id:\s*_novoId\('crm'\)/,
+    'contato extraído do WhatsApp sem id não é enviado ao servidor');
+  assert.match(bloco, /status:\s*_statusCrmCanonico\(/,
+    'o status vindo do LLM tem de ser validado antes de virar card');
+});

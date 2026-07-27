@@ -4082,6 +4082,16 @@ const KANBAN_COLUNAS = [
   { status: 'Não marcou',    label: '❌ Não marcou',       cor: '#94a3b8', headerBg: '#f1f5f9' },
 ];
 
+// Status válido do CRM = exatamente uma das colunas do Kanban. O agrupamento é
+// por igualdade (`r.status === col.status`), então card com status fora dessa
+// lista não cai em coluna NENHUMA: some da tela, o usuário acha que a
+// importação falhou e cola de novo, criando duplicata. Quem produz status é o
+// LLM (extração de conversa colada e ação criar_crm do copiloto), e LLM inventa
+// rótulo — "Novo", "Lead", "Primeiro contato".
+function _statusCrmCanonico(valor) {
+  return KANBAN_COLUNAS.some(c => c.status === valor) ? valor : 'Contato feito';
+}
+
 let _crmKanbanFiltro = '';
 let _kanbanDragIdx   = null;
 
@@ -4753,6 +4763,10 @@ ${temImagem ? '- O nome do contato no print costuma estar no topo (header da con
     const dados = JSON.parse(raw);
 
     waExtracted = {
+      // id estável: sem ele o _pushBlindada IGNORA o registro (filtra por id) e
+      // o contato fica só neste aparelho até uma migração futura carimbar um id.
+      // Todos os outros caminhos do CRM já geravam o id na criação.
+      id: _novoId('crm'),
       data: hoje,
       hora: new Date().toTimeString().substring(0, 5),
       nome: dados.nome || '',
@@ -4760,7 +4774,7 @@ ${temImagem ? '- O nome do contato no print costuma estar no topo (header da con
       idade: dados.idade || '',
       canal: dados.canal || 'WhatsApp',
       tipo: dados.tipo || '1ª vez',
-      status: dados.status || 'Contato feito',
+      status: _statusCrmCanonico(dados.status),
       obs: dados.obs || ''
     };
 
@@ -10010,7 +10024,10 @@ function executeAIAction(action) {
     renderDashboard();
 
   } else if (tipo === 'criar_crm') {
-    const arr = DB.get('crm'); arr.unshift({ ...dados, id: _novoId('crm'), profissionalId: currentProfissionalId || null }); DB.set('crm', arr);
+    const arr = DB.get('crm');
+    arr.unshift({ ...dados, id: _novoId('crm'), status: _statusCrmCanonico(dados.status),
+                  profissionalId: currentProfissionalId || null });
+    DB.set('crm', arr);
     appendChatMsg('system-ok', `✅ ${dados.nome} adicionado ao CRM`);
     if (document.getElementById('page-crm').classList.contains('active')) renderCrm();
 
