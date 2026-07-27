@@ -478,6 +478,15 @@ function montarSystemPromptServer(k: any): string {
       `[[AGENDAR: AAAA-MM-DD HH:MM | procedimento]]`,
       `Não mostre esse marcador como texto normal nem o explique; ele é processado pelo sistema. Diga ao paciente que o horário será reservado e a equipe confirmará.`,
     );
+  } else {
+    // SEM esta regra, a IA não recebia instrução NENHUMA sobre agendamento
+    // quando `agendar` está desligado — que é o PADRÃO. Perguntada "podemos
+    // marcar quinta às 10?", ela responde "marquei!" e nada foi marcado: o
+    // paciente aparece na clínica num horário que não existe. O app já mostrava
+    // essa regra no preview, então o médico acreditava que ela estava valendo.
+    linhas.push(
+      `- Você NÃO marca consultas. NUNCA diga que agendou, reservou ou confirmou um horário — quem fecha na agenda é a equipe. Pode perguntar a preferência de dia/horário e dizer que a equipe confirma.`,
+    );
   }
   return linhas.join('\n');
 }

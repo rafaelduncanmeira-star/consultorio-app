@@ -160,9 +160,25 @@ test('prompt traz nome da clínica, procedimentos com preço e horário', () => 
 
 test('prompt SEMPRE contém o guardrail de não dar conselho médico', () => {
   const { _iaMontarSystemPrompt } = carregarPrompt({ enabled: true, tom: '', instrucoes: '' });
+  assert.match(_iaMontarSystemPrompt(), /NUNCA dê conselho, diagnóstico ou orientação médica/i);
+});
+
+// A regra de agendamento agora acompanha a configuração — e, sobretudo, tem de
+// ser a MESMA que o wa-webhook manda (é ele que roda). O preview mostrava
+// "não confirme" mesmo com o agendamento ligado, e o servidor não dizia nada
+// sobre agendar quando estava desligado. Ver tests/webhook.test.js.
+test('prompt: com agendamento desligado (padrão), proíbe dizer que marcou', () => {
+  const { _iaMontarSystemPrompt } = carregarPrompt({ enabled: true, agendar: false, tom: '', instrucoes: '' });
   const p = _iaMontarSystemPrompt();
-  assert.match(p, /NUNCA dê conselho, diagnóstico ou orientação médica/i);
-  assert.match(p, /NÃO confirme o agendamento como feito/i); // não fecha agenda sozinha
+  assert.match(p, /NÃO marca consultas/i);
+  assert.match(p, /NUNCA diga que agendou/i);
+});
+
+test('prompt: com agendamento ligado, o preview para de proibir o que a IA faz', () => {
+  const { _iaMontarSystemPrompt } = carregarPrompt({ enabled: true, agendar: true, tom: '', instrucoes: '' });
+  const p = _iaMontarSystemPrompt();
+  assert.match(p, /PODE marcar consultas/i);
+  assert.doesNotMatch(p, /NÃO marca consultas/i, 'as duas regras não podem coexistir');
 });
 
 test('tom e instruções extras entram no prompt quando definidos', () => {

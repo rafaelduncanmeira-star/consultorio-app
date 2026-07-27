@@ -12470,7 +12470,13 @@ function _iaMontarSystemPrompt(overrides) {
     `- NUNCA dê conselho, diagnóstico ou orientação médica/clínica. Se perguntarem sobre sintomas, exames, tratamento ou "o que eu tenho", responda com cordialidade que isso o profissional avalia na consulta e ofereça agendar.`,
     `- NUNCA invente preços, horários ou informações que não estejam listados abaixo. Se não souber, diga que vai confirmar com a equipe.`,
     `- Seja breve e natural (é WhatsApp): 1 a 3 frases, sem textão, tom humano.`,
-    `- NÃO confirme o agendamento como feito — quem fecha na agenda é a equipe. Você pode propor horários e perguntar a preferência.`,
+    // Esta regra vale só quando a IA NÃO pode marcar. Com o agendamento
+    // ligado ela mesma reserva, e mostrar "não confirme" no preview daria uma
+    // ideia errada do que está valendo. O texto tem de bater com o do
+    // wa-webhook — é ele que roda de verdade (tests/webhook.test.js compara).
+    ...(cfg.agendar
+      ? [`- Você PODE marcar consultas nos horários livres. Ao confirmar, diga que o horário será reservado e a equipe confirma.`]
+      : [`- Você NÃO marca consultas. NUNCA diga que agendou, reservou ou confirmou um horário — quem fecha na agenda é a equipe. Pode perguntar a preferência de dia/horário e dizer que a equipe confirma.`]),
     `- Se o paciente pedir para falar com humano, estiver irritado, ou for assunto delicado/fora do escopo, sugira gentilmente que a equipe assume.`,
   ];
   if (cfg.apresentarComoIA !== false) {

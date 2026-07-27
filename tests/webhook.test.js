@@ -165,3 +165,44 @@ test('_foneE164BR: número comum sem DDI recebe o 55', () => {
   assert.strictEqual(_foneE164BR('(11) 98765-4321'), '5511987654321', 'com máscara');
   assert.strictEqual(_foneE164BR(''), '');
 });
+
+// ---------- o preview do app tem de dizer a MESMA coisa que o servidor ----------
+// O médico configura e revisa a secretária de IA pela tela do app. Se o preview
+// mostra uma regra que o servidor não manda, ele acredita numa proteção que não
+// existe. Era o caso do agendamento: o app exibia "NÃO confirme o agendamento
+// como feito" sempre, e o webhook não dizia NADA sobre agendar quando
+// `agendar` está desligado — que é o PADRÃO da configuração.
+const { montarSystemPromptServer } = carregarTs(['const:TZ_CLINICA', '_dataLocal', '_dowLocal', 'montarSystemPromptServer']);
+
+const contexto = (ia) => ({
+  ia, proc: [], prog: [], clin: { nome: 'Clínica' },
+  agcfg: { horaInicio: '08:00', horaFim: '18:00', diasUteis: [1, 2, 3, 4, 5] },
+  disponibilidade: '- 2026-08-04: 09:00, 10:00',
+});
+
+test('prompt do servidor: com agendamento DESLIGADO, proíbe confirmar horário', () => {
+  const p = montarSystemPromptServer(contexto({ enabled: true, agendar: false }));
+  assert.match(p, /NÃO marca consultas/i,
+    'sem isso a IA responde "marquei!" e o paciente aparece num horário que não existe');
+  assert.match(p, /NUNCA diga que agendou/i);
+  assert.doesNotMatch(p, /\[\[AGENDAR:/, 'não pode ensinar o marcador quando não pode marcar');
+});
+
+test('prompt do servidor: com agendamento LIGADO, ensina o marcador e a lista de livres', () => {
+  const p = montarSystemPromptServer(contexto({ enabled: true, agendar: true }));
+  assert.match(p, /\[\[AGENDAR:/);
+  assert.match(p, /09:00/, 'os horários livres calculados entram no prompt');
+  assert.doesNotMatch(p, /NÃO marca consultas/i, 'a regra contrária não pode coexistir');
+});
+
+// O texto exato da regra tem de ser o mesmo dos dois lados. Se um for editado
+// sozinho, isto cai — que é o ponto: as duas metades não podem divergir de novo.
+test('a regra de agendamento é literalmente a mesma no app e no servidor', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+  const p = montarSystemPromptServer(contexto({ enabled: true, agendar: false }));
+  const regraServidor = p.split('\n').find(l => /NÃO marca consultas/i.test(l));
+  assert.ok(regraServidor, 'o servidor precisa ter a regra');
+  assert.ok(app.includes(regraServidor.replace(/^- /, '')),
+    'o preview do app tem de mostrar exatamente a regra que o servidor manda');
+});
