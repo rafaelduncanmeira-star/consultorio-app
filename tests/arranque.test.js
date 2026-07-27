@@ -81,7 +81,10 @@ function arranque({ quebrar = [] } = {}) {
   const s = carregar('_iniciarApp', {
     console: { warn() {}, log() {} },
     currentUser: { id: 'u1' }, currentRole: 'medico',
-    document: { getElementById: () => ({ style: {} }) },
+    document: {
+      getElementById: () => ({ style: {} }),
+      body: { classList: { add: (c) => rodou.push('body+' + c) } },
+    },
     window: {},
     localStorage: { getItem: () => null },
     setTimeout: (fn) => { timers.push(fn); return timers.length; },
@@ -102,9 +105,16 @@ function arranque({ quebrar = [] } = {}) {
   return { rodou, toasts };
 }
 
+test('arranque: entra com o financeiro escondido por padrão (falha fechado)', () => {
+  const a = arranque({ quebrar: ['_applyRole'] });
+  assert.strictEqual(a.rodou[0], 'body+role-no-fin',
+    'o padrão do <body> era SEM a classe: qualquer caminho em que o gate não '
+    + 'chegue a aplicá-la deixava as seções financeiras visíveis');
+});
+
 test('arranque: o gate de permissões roda ANTES de qualquer render', () => {
   const a = arranque();
-  assert.strictEqual(a.rodou[0], '_applyRole',
+  assert.strictEqual(a.rodou[1], '_applyRole',
     'com o gate depois da sidebar, uma exceção na sidebar deixava o profissional '
     + 'vendo as seções financeiras que o RLS esconde dele');
 });

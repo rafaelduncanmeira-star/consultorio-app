@@ -1401,6 +1401,11 @@ function _iniciarApp() {
   const passo = (nome, fn) => {
     try { fn(); } catch (e) { falhas.push(nome); console.warn('arranque:', nome, '—', e && e.message); }
   };
+  // Falha FECHADO: entra escondendo o financeiro, e só o _applyRole libera. O
+  // padrão do <body> era sem a classe, ou seja: qualquer caminho em que o gate
+  // não chegue a aplicá-la deixa as seções financeiras visíveis. A regra do
+  // projeto é a inversa — erro de leitura nunca é resposta positiva.
+  passo('gate padrão', () => document.body.classList.add('role-no-fin'));
   passo('permissões', _applyRole);        // gate: primeiro de todos
   passo('sidebar', _atualizarSidebar);
   passo('ícones', () => { if (window.lucide) lucide.createIcons(); });
