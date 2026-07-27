@@ -111,6 +111,12 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- ⚠️ **Repetir uma tarefa exige três coisas, não uma.** Ao passar backup e lembretes pro
+  agendador de 15 min eu quebrei duas: (1) o **aviso de erro** passou a se repetir a cada
+  volta — erro permanente vira ruído que a pessoa fecha sem ler; guarde o último motivo e
+  não repita. (2) o ciclo de lembretes não tinha **trava de reentrância** e leva ~1s por
+  paciente: dois gatilhos sobrepostos mandam a mesma mensagem duas vezes. Padrão em
+  `_drenarOutbox`; libere no `finally` ou a trava fica presa e nada mais é enviado.
 - 🔴 **Tarefa "do dia" presa ao carregamento da página não roda no 2º dia.** O app fica
   aberto a semana inteira numa recepção. Backup automático e ciclo de lembretes só
   disparavam no `_iniciarApp`. Agora saem de `_rodarTarefasDoDia()` — na abertura, a cada
