@@ -389,12 +389,15 @@ function _limparSensiveisProfissional() {
 // profissional_id, data jsonb). RLS no servidor garante que profissional só lê
 // as linhas dele. DB.get continua síncrono (cache em localStorage).
 // Só entram aqui coleções cuja TABELA já exista no banco.
+// `pref` é o prefixo do id — o DB.set carimba com ele todo registro que chegar
+// sem id (ver lá). Mesmos prefixos que o _migrarIds já usava, pra não criar
+// dois padrões de id na mesma coleção.
 const _BLINDADAS = {
-  pacientes:    { tabela: 'clinica_atendimentos', flag: 'consult_atend_migrado' },
-  agendamentos: { tabela: 'clinica_agendamentos', flag: 'consult_ag_migrado' },
-  crm:          { tabela: 'clinica_crm',          flag: 'consult_crm_migrado' },
-  inscricoes:   { tabela: 'clinica_inscricoes',   flag: 'consult_ins_migrado' },
-  followup:     { tabela: 'clinica_followup',     flag: 'consult_fu_migrado' },
+  pacientes:    { tabela: 'clinica_atendimentos', flag: 'consult_atend_migrado', pref: 'pac' },
+  agendamentos: { tabela: 'clinica_agendamentos', flag: 'consult_ag_migrado',    pref: 'ag'  },
+  crm:          { tabela: 'clinica_crm',          flag: 'consult_crm_migrado',   pref: 'crm' },
+  inscricoes:   { tabela: 'clinica_inscricoes',   flag: 'consult_ins_migrado',   pref: 'ins' },
+  followup:     { tabela: 'clinica_followup',     flag: 'consult_fu_migrado',    pref: 'fu'  },
 };
 
 function _rowBlindada(rec, owner) {
@@ -1537,6 +1540,13 @@ const DB = {
     // Blindagem: coleções sensíveis sincronizam na tabela por linha (não no "pacote único")
     const cfg = _BLINDADAS[key];
     if (cfg) {
+      // Registro sem id é DESCARTADO pelo _pushBlindada (filter(r => r && r.id)):
+      // nunca chega ao servidor. O _migrarIds carimba, mas só roda no cloudPull
+      // — ou seja, na CARGA do app. Entre criar o registro e recarregar, ele só
+      // existe neste aparelho; se o usuário abrir o app em outro celular, ou sair
+      // da conta antes de recarregar, some. Carimbar aqui fecha essa janela e
+      // cobre qualquer tela nova que esqueça o id.
+      if (Array.isArray(val)) val.forEach(r => { if (r && !r.id) r.id = _novoId(cfg.pref); });
       const old = JSON.parse(localStorage.getItem('consult_' + key) || '[]');
       localStorage.setItem('consult_' + key, JSON.stringify(val));
       // Falhou (offline/RLS)? Vai pra outbox — o pull não sobrescreve e a fila
@@ -7330,7 +7340,15 @@ function criarFollowupReativacao(nomeEnc, ultData) {
 
   // Cria o follow-up direto
   const item = {
+    // id na criação, como todo o resto do app faz. O DB.set carimba quem chegar
+    // sem id, mas contar com isso deixa o registro sem id em mão até a gravação
+    // — e qualquer código que o referencie no meio do caminho não tem por onde.
+    id: _novoId('fu'),
     nome,
+    // Sem dono explícito o registro fica fora do recorte por profissional do
+    // RLS. Estrito de propósito: migração/atribuição automática não pode chutar
+    // o profissional logado (ver _profDoPacienteEstrito).
+    profissionalId: currentProfissionalId || _profDoPacienteEstrito(nome) || null,
     ultConsulta: ultData,
     dataContato,
     tipoContato: 'WhatsApp',

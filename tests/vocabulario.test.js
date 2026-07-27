@@ -147,3 +147,88 @@ test('todo caminho de criação no CRM gera id estável', () => {
   assert.match(bloco, /status:\s*_statusCrmCanonico\(/,
     'o status vindo do LLM tem de ser validado antes de virar card');
 });
+
+// ---------- todo registro de coleção blindada nasce com id ----------
+// _pushBlindada filtra por id: `newArr.filter(r => r && r.id)`. Registro criado
+// sem id NÃO sobe pro servidor — fica só naquele aparelho, e some quando o
+// usuário troca de dispositivo. Aconteceu duas vezes: no contato extraído do
+// WhatsApp e no follow-up de reativação.
+const BLINDADAS_COL = ['pacientes', 'agendamentos', 'crm', 'inscricoes', 'followup'];
+
+test('_pushBlindada continua exigindo id (a premissa deste teste)', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  const src = recortarFuncao('_pushBlindada');
+  assert.match(src, /filter\(r => r && r\.id\)/,
+    'se isto mudar, o raciocínio dos testes abaixo precisa ser revisto');
+});
+
+test('criarFollowupReativacao gera id e dono', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  const src = recortarFuncao('criarFollowupReativacao').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /id:\s*_novoId\('fu'\)/, 'sem id o follow-up não chega ao servidor');
+  assert.match(src, /profissionalId:/, 'sem dono ele fica fora do recorte por profissional');
+  assert.match(src, /_profDoPacienteEstrito/,
+    'atribuição automática não pode chutar o profissional logado');
+});
+
+// A garantia REAL não é varrer os caminhos de criação um a um — varredura
+// estática não distingue "objeto novo" de "registro existente devolvido por
+// .find() no desfazer da exclusão", e erra dos dois lados. A garantia é o
+// DB.set carimbar o id de quem chegar sem ele, antes de gravar. Aí não importa
+// quantas telas novas apareçam: nenhuma consegue criar registro invisível.
+//
+// Antes disso, o conserto vinha só do _migrarIds — que roda dentro do
+// cloudPull, ou seja, na CARGA do app. Entre criar o registro e recarregar,
+// ele não existia pro servidor.
+
+// DB é um objeto literal: recorta como constante e roda contra um
+// localStorage e um _pushBlindada de mentira.
+function montarDB() {
+  const { carregar } = require('./_extrair.js');
+  const mem = new Map();
+  const empurrado = [];
+  const sandbox = carregar(['const:_BLINDADAS', 'const:DB', '_novoId'], {
+    JSON, Array, Object, Date, Math,
+    localStorage: {
+      getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+      setItem: (k, v) => mem.set(k, v),
+    },
+    _enfileirarPush: (k, fn) => fn(),
+    _pushBlindada: (tabela, old, novo) => { empurrado.push({ tabela, novo }); return Promise.resolve(true); },
+    _outboxRemove: () => {}, _outboxAdd: () => {}, _outboxGet: () => ({}),
+    cloudPush: () => Promise.resolve(),
+  });
+  return { DB: sandbox.DB, BLINDADAS: sandbox._BLINDADAS, empurrado,
+           lido: (k) => JSON.parse(mem.get('consult_' + k) || '[]') };
+}
+
+test('_BLINDADAS: toda coleção blindada tem prefixo de id', () => {
+  const { BLINDADAS } = montarDB();
+  for (const col of BLINDADAS_COL) {
+    assert.ok(BLINDADAS[col], `${col} deveria estar em _BLINDADAS`);
+    assert.ok(BLINDADAS[col].pref, `sem pref o DB.set não sabe carimbar ${col}`);
+  }
+});
+
+test('DB.set carimba id em registro que chega sem ele', async () => {
+  for (const col of BLINDADAS_COL) {
+    const { DB, BLINDADAS, empurrado, lido } = montarDB();
+    await DB.set(col, [{ nome: 'sem id' }, { id: 'ja_tinha', nome: 'com id' }]);
+    const salvo = lido(col);
+    assert.ok(salvo[0].id, `${col}: registro sem id continuou sem id`);
+    assert.match(salvo[0].id, new RegExp('^' + BLINDADAS[col].pref + '_'),
+      `${col}: prefixo do id fora do padrão do _migrarIds`);
+    assert.strictEqual(salvo[1].id, 'ja_tinha', `${col}: id existente não pode ser trocado`);
+    // E o que subiu pro servidor tem de ser o array JÁ carimbado — senão o
+    // filter(r => r && r.id) do _pushBlindada descarta o registro do mesmo jeito.
+    assert.strictEqual(empurrado.length, 1, `${col}: deveria ter empurrado uma vez`);
+    assert.ok(empurrado[0].novo.every(r => r.id), `${col}: subiu registro sem id`);
+  }
+});
+
+test('DB.set não carimba coleção que não é blindada', async () => {
+  const { DB, lido } = montarDB();
+  await DB.set('despesas', [{ descricao: 'aluguel' }]);
+  assert.strictEqual(lido('despesas')[0].id, undefined,
+    'despesas vai no blob e não passa pelo filtro por id — carimbar aqui seria ruído');
+});
