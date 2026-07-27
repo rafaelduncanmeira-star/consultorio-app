@@ -67,17 +67,21 @@ Estabelecidos na revisão de ponta a ponta — quebrar qualquer um destes reintr
 
 ## Backlog aberto da revisão
 
-~43 achados verificados; ~19 corrigidos (commits `2a8686a` → `baaeb10`). **Restam ~24.**
+~43 achados verificados; ~21 corrigidos (commits `2a8686a` → `HEAD`). **Restam ~22.**
 
 ### Grupo A — dá pra corrigir sozinho (próximo alvo)
 
 Sync / integridade de dados, em `app.js`:
 
-1. `_pushBlindada` faz upsert em **lote**: uma linha rejeitada pelo RLS derruba a coleção
-   inteira e a chave fica presa no outbox **para sempre** (sem teto de tentativas).
-   Dispara quando membro *profissional* cria registro com `profissionalId: null`.
-2. `_pullBlindada` sem `.limit()`/`.order()` — acima de ~1000 linhas o PostgREST corta
-   um subconjunto arbitrário e **sobrescreve o localStorage** com o recorte.
+1. ~~`_pushBlindada` upsert em lote tudo-ou-nada + outbox sem teto.~~ **Feito.**
+   Agora: lotes de 200 → se o lote é reprovado, reenvia linha a linha; a linha que
+   o servidor recusa vai pra `consult__quarentena` (nada some); `_rowBlindada` carimba
+   `profissional_id` quando quem grava é profissional (era a causa raiz da rejeição);
+   outbox conta tentativas e, passado `_OUTBOX_TETO`, **para de bloquear o pull**
+   (voltar a conexão zera o contador, pra falha de rede não gastar o orçamento).
+2. ~~`_pullBlindada` sem `.limit()`/`.order()`.~~ **Feito** — `_lerTodasBlindada` pagina
+   com `.order('id')` + `.range()` e avança pelo que voltou de fato, então funciona
+   com qualquer `max-rows` do servidor.
 3. `syncLeadsFromSupabase` marca `processado: true` sem aguardar o push do lead → lead perdido.
 4. `logoutUser` apaga `consult_*` inteiro, **incluindo o outbox** com escritas não entregues.
 5. Anti-zeramento re-sobe o array local e **ressuscita registros apagados** em outro aparelho.

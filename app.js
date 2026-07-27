@@ -169,17 +169,42 @@ function initSupabase() {
 // pula chaves pendentes (a edição local vence até ser entregue) e a fila é
 // drenada ao voltar a conexão e no início de cada cloudPull. Antes, uma edição
 // offline era engolida em silêncio e apagada pelo pull seguinte.
+// Teto de tentativas. Sem ele, uma escrita que o servidor NUNCA vai aceitar
+// (RLS, constraint) fica presa na fila pra sempre — e como o pull pula chave
+// pendente, o aparelho congela naquela coleção: nada mais entra, nada sai.
+const _OUTBOX_TETO = 5;
+
 function _outboxGet() { try { return JSON.parse(localStorage.getItem('consult__outbox') || '{}'); } catch(e) { return {}; } }
 function _outboxAdd(key, tipo) {
   const o = _outboxGet();
-  o[key] = { tipo, ts: new Date().toISOString() };
+  const ant = o[key];
+  o[key] = { tipo, ts: new Date().toISOString(), tentativas: ((ant && ant.tentativas) || 0) + 1 };
   localStorage.setItem('consult__outbox', JSON.stringify(o));
 }
 function _outboxRemove(key) {
   const o = _outboxGet();
   if (key in o) { delete o[key]; localStorage.setItem('consult__outbox', JSON.stringify(o)); }
 }
-function _outboxPendente(key) { return key in _outboxGet(); }
+function _outboxTravado(key) {
+  const e = _outboxGet()[key];
+  return !!e && (e.tentativas || 0) >= _OUTBOX_TETO;
+}
+// Bloqueia o pull só enquanto a entrega ainda é plausível. Passado o teto, a
+// entrada continua anotada (diagnóstico) mas deixa de bloquear: melhor voltar a
+// receber do servidor do que ficar cego. O que foi recusado linha a linha está
+// guardado na quarentena (consult__quarentena), então nada some sem registro.
+function _outboxPendente(key) {
+  const e = _outboxGet()[key];
+  return !!e && (e.tentativas || 0) < _OUTBOX_TETO;
+}
+// Falha de rede não deve gastar o orçamento de tentativas: ao voltar a conexão,
+// todo mundo ganha crédito novo (o que era RLS volta a estourar o teto sozinho).
+function _outboxResetTentativas() {
+  const o = _outboxGet();
+  let mudou = false;
+  for (const k of Object.keys(o)) { if (o[k].tentativas) { o[k].tentativas = 0; mudou = true; } }
+  if (mudou) localStorage.setItem('consult__outbox', JSON.stringify(o));
+}
 
 let _drenandoOutbox = false;
 async function _drenarOutbox() {
@@ -187,13 +212,15 @@ async function _drenarOutbox() {
   _drenandoOutbox = true;
   try {
     for (const [key, info] of Object.entries(_outboxGet())) {
+      // Já estourou o teto: não adianta martelar o servidor a cada pull.
+      if ((info.tentativas || 0) >= _OUTBOX_TETO) continue;
       if (info.tipo === 'blindada') {
         const cfg = _BLINDADAS[key];
         const arr = JSON.parse(localStorage.getItem('consult_' + key) || '[]');
         // Só upsert (oldArr=[] ⇒ sem deletes): não dá pra saber o que OUTRO
         // aparelho criou enquanto estávamos offline — apagar seria pior.
         const ok = cfg ? await _pushBlindada(cfg.tabela, [], arr) : true;
-        if (ok) _outboxRemove(key);
+        if (ok) _outboxRemove(key); else _outboxAdd(key, 'blindada');
       } else {
         await cloudPush(key); // remove/re-enfileira sozinho
       }
@@ -201,7 +228,7 @@ async function _drenarOutbox() {
   } finally { _drenandoOutbox = false; }
 }
 // Voltou a conexão → re-entrega o que ficou pendente (1.5s pro socket assentar).
-window.addEventListener('online', () => setTimeout(_drenarOutbox, 1500));
+window.addEventListener('online', () => { _outboxResetTentativas(); setTimeout(_drenarOutbox, 1500); });
 
 // ============ Concorrência otimista nos blobs (coluna rev — SETUP_SYNC.sql) ============
 // Sem a coluna no banco, o app cai no upsert simples (comportamento antigo).
@@ -358,8 +385,34 @@ const _BLINDADAS = {
 };
 
 function _rowBlindada(rec, owner) {
-  return { id: rec.id, owner_id: owner, profissional_id: rec.profissionalId || null, data: rec, updated_at: new Date().toISOString() };
+  // O RLS só deixa um profissional gravar linha COM o profissional_id dele.
+  // Registro que nasceu sem etiqueta (importação, tela antiga, followup de
+  // terceiro) era recusado em silêncio e — pior — derrubava o lote inteiro
+  // junto. Carimba antes de subir, e carimba também dentro do jsonb pra
+  // coluna e registro não divergirem.
+  const prof = rec.profissionalId
+    || ((currentRole === 'profissional' && currentProfissionalId) ? currentProfissionalId : null);
+  const registro = (prof && !rec.profissionalId) ? { ...rec, profissionalId: prof } : rec;
+  return { id: rec.id, owner_id: owner, profissional_id: prof, data: registro, updated_at: new Date().toISOString() };
 }
+
+// Registro que o servidor recusou individualmente fica guardado aqui em vez de
+// evaporar. Nunca apagamos dado por causa de uma rejeição — sem isso, quando o
+// outbox estoura o teto e o pull volta a rodar, a linha recusada sumiria do
+// aparelho sem deixar rastro.
+function _quarentenar(tabela, linha, motivo) {
+  try {
+    const q = JSON.parse(localStorage.getItem('consult__quarentena') || '[]');
+    const chave = tabela + ':' + linha.id;
+    const i = q.findIndex(x => x.chave === chave);
+    const item = { chave, tabela, motivo, ts: new Date().toISOString(), registro: linha.data };
+    if (i >= 0) q[i] = item; else q.push(item);
+    localStorage.setItem('consult__quarentena', JSON.stringify(q.slice(-300)));
+    console.warn('_pushBlindada: linha recusada e posta em quarentena —', chave, '—', motivo);
+  } catch(e) { console.warn('_quarentenar', e.message); }
+}
+
+const _LOTE_BLINDADA = 200;
 
 // Upsert das linhas atuais + delete das removidas (diff por id). Scope-safe:
 // um profissional só mexe nas linhas dele (RLS bloqueia o resto no servidor).
@@ -368,21 +421,57 @@ async function _pushBlindada(tabela, oldArr, newArr) {
   const owner = currentDataOwner || currentUser.id;
   try {
     const comId = (newArr || []).filter(r => r && r.id);
+    let todasEntraram = true;
     if (comId.length) {
-      // supabase-js NÃO lança em erro de banco (RLS, constraint...) — retorna {error}.
-      // Sem esta checagem, uma gravação rejeitada passava por "sucesso" e a
-      // migração apagava o blob => perda total da coleção. Checar SEMPRE.
-      const { error } = await _supa.from(tabela).upsert(comId.map(r => _rowBlindada(r, owner)), { onConflict: 'id' });
-      if (error) { console.warn('_pushBlindada upsert', tabela, error.message); return false; }
+      const linhas = comId.map(r => _rowBlindada(r, owner));
+      // Em lotes: um upsert único com a coleção inteira estoura o payload e,
+      // sobretudo, é tudo-ou-nada — UMA linha recusada pelo RLS reprovava a
+      // coleção completa, inclusive as centenas de linhas que estavam válidas.
+      for (let i = 0; i < linhas.length; i += _LOTE_BLINDADA) {
+        const lote = linhas.slice(i, i + _LOTE_BLINDADA);
+        // supabase-js NÃO lança em erro de banco (RLS, constraint...) — retorna {error}.
+        // Sem esta checagem, uma gravação rejeitada passava por "sucesso" e a
+        // migração apagava o blob => perda total da coleção. Checar SEMPRE.
+        const { error } = await _supa.from(tabela).upsert(lote, { onConflict: 'id' });
+        if (!error) continue;
+        // Lote reprovado: reenvia linha a linha pra salvar as boas e isolar a má.
+        console.warn('_pushBlindada lote', tabela, error.message, '— reenviando linha a linha');
+        for (const linha of lote) {
+          const { error: e1 } = await _supa.from(tabela).upsert([linha], { onConflict: 'id' });
+          if (e1) { todasEntraram = false; _quarentenar(tabela, linha, e1.message); }
+        }
+      }
     }
     const novos = new Set(comId.map(r => r.id));
     const removidos = (oldArr || []).filter(r => r && r.id && !novos.has(r.id)).map(r => r.id);
-    if (removidos.length) {
-      const { error } = await _supa.from(tabela).delete().in('id', removidos);
-      if (error) { console.warn('_pushBlindada delete', tabela, error.message); return false; }
+    for (let i = 0; i < removidos.length; i += _LOTE_BLINDADA) {
+      const { error } = await _supa.from(tabela).delete().in('id', removidos.slice(i, i + _LOTE_BLINDADA));
+      if (error) { console.warn('_pushBlindada delete', tabela, error.message); todasEntraram = false; }
     }
-    return true;
+    return todasEntraram;
   } catch(e) { console.warn('_pushBlindada', tabela, e.message); return false; }
+}
+
+// Lê TODAS as linhas da coleção, paginando. O PostgREST corta a resposta no
+// max-rows do projeto (1000 por padrão) e não avisa: acima disso o pull trazia
+// um recorte e gravava esse recorte por cima do localStorage — o resto da
+// coleção simplesmente desaparecia da tela. Ordem por id (chave primária) pra
+// paginação estável, e o avanço usa o que voltou de fato, então funciona
+// qualquer que seja o teto configurado no servidor.
+async function _lerTodasBlindada(tabela, owner) {
+  const PAG = 1000, TETO = 100000;
+  const linhas = [];
+  for (let de = 0; de < TETO; ) {
+    const { data, error } = await _supa.from(tabela)
+      .select('data').eq('owner_id', owner)
+      .order('id', { ascending: true }).range(de, de + PAG - 1);
+    if (error) return { error };
+    const n = (data || []).length;
+    if (!n) break;
+    linhas.push(...data);
+    de += n;
+  }
+  return { data: linhas };
 }
 
 // Pull filtrado por RLS → escreve consult_<key> (só o que o usuário pode ver).
@@ -393,7 +482,7 @@ async function _pullBlindada(key, cfg) {
   if (_outboxPendente(key)) { console.warn('_pullBlindada: outbox pendente em', key, '— pull adiado'); return; }
   const owner = currentDataOwner || currentUser.id;
   try {
-    const { data, error } = await _supa.from(cfg.tabela).select('data').eq('owner_id', owner);
+    const { data, error } = await _lerTodasBlindada(cfg.tabela, owner);
     if (error) { console.warn('_pullBlindada', cfg.tabela, error.message); return; }
     const arr = (data || []).map(row => row.data).filter(Boolean)
       .sort((a, b) => (b.data || '').localeCompare(a.data || ''));
