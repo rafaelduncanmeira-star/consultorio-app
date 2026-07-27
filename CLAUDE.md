@@ -111,7 +111,14 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
-- **CSV: o app tem de reimportar o que ele mesmo exporta.** `exportarCSV` cita campo com
+- 🔴 **Data importada tem de EXISTIR, não só ter o formato.** `impNormDate` devolvia
+  `2026-02-31` e `2026-13-13` como válidos, e a tela contava a linha como sucesso.
+  `getMes('2026-13-13')` = `'2026-13'`: o atendimento some de **todo** filtro por mês mas
+  segue nos totais da base inteira — os números param de fechar entre telas sem causa
+  visível. Valide pelo round-trip do `Date` (`_dataValidaOuVazio`).
+- **CSV: o app tem de reimportar o que ele mesmo exporta.** Vale campo a campo: o
+  `impNormStatus` conhecia `parcel` (de planilha) e não `parci` — o **`Parcial`** que o
+  próprio app grava voltava como `Pendente`. `exportarCSV` cita campo com
   `\n` e duplica aspas (`"` → `""`); o `impParseCSV` quebrava por linha **antes** de olhar
   aspas — observação de duas linhas virava um paciente fantasma, e as aspas do texto
   sumiam. Varra o arquivo inteiro respeitando aspas. (Irmão do bug do `impNormValor`.)
