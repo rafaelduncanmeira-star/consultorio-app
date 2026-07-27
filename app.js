@@ -366,12 +366,22 @@ function _limparSensiveisProfissional() {
       .filter(k => k.startsWith('consult__snapshot_'))
       .forEach(k => localStorage.removeItem(k));
   }
-  if (currentRole !== 'profissional') return;
-  ['despesas', 'metas', 'metas_proc', 'metas_proc_valor',
-   // Segredos de integração: profissional não envia pela clínica — não
-   // precisa (nem deve) ter os tokens do dono no localStorage.
-   'zapi_config', 'wa_cloud_config', 'llm_config', 'gemini_key_secure',
-  ].forEach(k => localStorage.removeItem('consult_' + k));
+  const limpar = new Set();
+  // Financeiro da clínica: o RLS não entrega 'despesas'/'metas*' a NENHUM membro
+  // — nem ao médico membro. O que sobrar aqui é lixo local (digitação que nunca
+  // vai poder ser salva, ou resto de outra conta no mesmo navegador) e a tela
+  // mostraria isso como se fosse o financeiro da clínica. Quem é dono da própria
+  // conta manda no próprio financeiro, mesmo que a UI dele não exiba a seção —
+  // a exceção é o profissional, que nunca vê financeiro nem sendo dono.
+  if ((souMembro && !_podeVerFinanceiro()) || currentRole === 'profissional') {
+    ['despesas', 'metas', 'metas_proc', 'metas_proc_valor'].forEach(k => limpar.add(k));
+  }
+  // Segredos de integração: profissional não envia pela clínica — não
+  // precisa (nem deve) ter os tokens do dono no localStorage.
+  if (currentRole === 'profissional') {
+    ['zapi_config', 'wa_cloud_config', 'llm_config', 'gemini_key_secure'].forEach(k => limpar.add(k));
+  }
+  limpar.forEach(k => localStorage.removeItem('consult_' + k));
 }
 
 // ============ BLINDAGEM Fase 2 — coleções sensíveis em tabela por linha (RLS) ============
@@ -1308,6 +1318,17 @@ function setAppMode(modo) {
   }
 }
 
+// O financeiro é do DONO da clínica. O RLS (SETUP_SEGURANCA.sql) só deixa o
+// próprio dono ler e gravar 'despesas' e 'metas*' — nem médico membro entra.
+// A sidebar, porém, liberava o financeiro pra qualquer currentRole === 'medico',
+// inclusive médico MEMBRO da equipe de outra pessoa: ele abria Despesas, lançava
+// o gasto, via a linha aparecer na tela — e o push era recusado em silêncio.
+// A tela mentia. Aqui a UI passa a seguir a mesma regra que já está no banco.
+function _podeVerFinanceiro() {
+  if (currentRole !== 'medico') return false;
+  return !currentUser || (currentDataOwner || currentUser.id) === currentUser.id;
+}
+
 function _applyRole() {
   // Sem sessão: esconde toda a sidebar (defesa extra contra bypass)
   if (!currentRole) {
@@ -1315,25 +1336,17 @@ function _applyRole() {
     document.body.classList.add('role-no-fin');
     return;
   }
-  // Blindagem financeira do Dashboard: SÓ médico vê cards/seções financeiras
-  // (Faturamento, Lucro, Despesas, Inteligência Financeira, DRE, MRR, Análise).
-  // Secretária e profissional nunca veem — nem que renderDashboard reexiba.
-  document.body.classList.toggle('role-no-fin', currentRole !== 'medico');
+  // Blindagem financeira do Dashboard: só o médico DONO vê cards/seções
+  // financeiras (Faturamento, Lucro, Despesas, Inteligência Financeira, DRE,
+  // MRR, Análise). Ninguém mais vê — nem que renderDashboard reexiba.
+  const veFinanceiro = _podeVerFinanceiro();
+  document.body.classList.toggle('role-no-fin', !veFinanceiro);
   // Garante que itens não-financeiros estão visíveis
   document.querySelectorAll('.nav-item').forEach(el => el.style.display = '');
-  if (currentRole === 'medico') {
-    // Médico vê tudo
-    _PAGES_FINANCEIRO.forEach(p => {
-      const el = document.getElementById('nav-' + p);
-      if (el) el.style.display = '';
-    });
-  } else {
-    // Secretária: oculta financeiro
-    _PAGES_FINANCEIRO.forEach(p => {
-      const el = document.getElementById('nav-' + p);
-      if (el) el.style.display = 'none';
-    });
-  }
+  _PAGES_FINANCEIRO.forEach(p => {
+    const el = document.getElementById('nav-' + p);
+    if (el) el.style.display = veFinanceiro ? '' : 'none';
+  });
   // Modo "Apenas Financeiro" — esconde CRM/Follow-Up/Programas/Agenda
   if (getAppMode() === 'financeiro') {
     _PAGES_OPERACIONAL.forEach(p => {
@@ -1621,8 +1634,9 @@ function showPage(page) {
     document.getElementById('login-page').style.display = 'flex';
     return;
   }
-  // Bloqueia acesso financeiro para secretária
-  if (currentRole !== 'medico' && _PAGES_FINANCEIRO.includes(page)) return;
+  // Bloqueia acesso financeiro pra quem não é o médico DONO (secretária,
+  // profissional e médico membro de outra clínica — ver _podeVerFinanceiro)
+  if (!_podeVerFinanceiro() && _PAGES_FINANCEIRO.includes(page)) return;
   // Bloqueia páginas operacionais no modo "Apenas Financeiro"
   if (getAppMode() === 'financeiro' && _PAGES_OPERACIONAL.includes(page)) { page = 'dashboard'; }
 

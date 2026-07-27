@@ -38,7 +38,7 @@ test('profissional perde financeiro E segredos de integração no localStorage',
     consult_llm_config: '{chaves}', consult_gemini_key_secure: '"g"',
     consult_pacientes: '[...]', // NÃO deve ser removido
   };
-  const { _limparSensiveisProfissional } = carregar('_limparSensiveisProfissional', {
+  const { _limparSensiveisProfissional } = carregar(['_podeVerFinanceiro', '_limparSensiveisProfissional'], {
     currentRole: 'profissional',
     currentUser: { id: 'membro-1' },
     currentDataOwner: 'dono-1', // é MEMBRO da equipe de outra pessoa
@@ -58,7 +58,7 @@ test('profissional perde financeiro E segredos de integração no localStorage',
 test('médico e secretária mantêm o financeiro intacto', () => {
   for (const papel of ['medico', 'secretaria']) {
     const removidas = [];
-    const { _limparSensiveisProfissional } = carregar('_limparSensiveisProfissional', {
+    const { _limparSensiveisProfissional } = carregar(['_podeVerFinanceiro', '_limparSensiveisProfissional'], {
       currentRole: papel,
       currentUser: { id: 'dono-1' },
       currentDataOwner: null, // é o próprio dono
@@ -68,6 +68,44 @@ test('médico e secretária mantêm o financeiro intacto', () => {
     _limparSensiveisProfissional();
     assert.strictEqual(removidas.length, 0, `papel ${papel} não deveria perder financeiro`);
   }
+});
+
+// ---------- _podeVerFinanceiro: a UI tem de seguir o RLS ----------
+// O RLS (SETUP_SEGURANCA.sql) só deixa o DONO ler/gravar 'despesas' e 'metas*'.
+// A sidebar liberava o financeiro pra qualquer currentRole === 'medico',
+// inclusive médico MEMBRO de outra clínica: ele lançava a despesa, via a linha
+// na tela e o push era recusado em silêncio. A tela mentia.
+test('_podeVerFinanceiro: só o médico DONO da clínica', () => {
+  const casos = [
+    { papel: 'medico',       dono: null,     esperado: true,  nota: 'médico dono' },
+    { papel: 'medico',       dono: 'outro',  esperado: false, nota: 'médico MEMBRO de outra clínica' },
+    { papel: 'secretaria',   dono: null,     esperado: false, nota: 'secretária dona' },
+    { papel: 'profissional', dono: 'outro',  esperado: false, nota: 'profissional membro' },
+  ];
+  for (const c of casos) {
+    const { _podeVerFinanceiro } = carregar('_podeVerFinanceiro', {
+      currentRole: c.papel, currentUser: { id: 'eu' }, currentDataOwner: c.dono,
+    });
+    assert.strictEqual(_podeVerFinanceiro(), c.esperado, c.nota);
+  }
+});
+
+test('médico MEMBRO não guarda o financeiro da clínica no navegador', () => {
+  const removidas = [];
+  const { _limparSensiveisProfissional } = carregar(
+    ['_podeVerFinanceiro', '_limparSensiveisProfissional'], {
+      currentRole: 'medico',
+      currentUser: { id: 'membro-1' },
+      currentDataOwner: 'dono-1', // membro da equipe de outra pessoa
+      localStorage: { removeItem: (k) => removidas.push(k) },
+      Object,
+    });
+  _limparSensiveisProfissional();
+  assert.deepStrictEqual(removidas.sort(), [
+    'consult_despesas', 'consult_metas', 'consult_metas_proc', 'consult_metas_proc_valor',
+  ].sort());
+  assert.ok(!removidas.includes('consult_zapi_config'),
+    'médico membro segue podendo enviar pela clínica — segredos são outra regra');
 });
 
 // ---------- _profDoPaciente: resolução do dono do paciente (isolamento) ----------

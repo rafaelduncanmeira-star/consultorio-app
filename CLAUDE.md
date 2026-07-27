@@ -67,27 +67,38 @@ Estabelecidos na revisão de ponta a ponta — quebrar qualquer um destes reintr
 
 ## Backlog aberto da revisão
 
-~43 achados verificados; ~21 corrigidos (commits `2a8686a` → `HEAD`). **Restam ~22.**
+~43 achados verificados; ~27 corrigidos (commits `2a8686a` → `HEAD`). **Restam ~16.**
 
-### Grupo A — dá pra corrigir sozinho (próximo alvo)
+### Grupo A — ✅ concluído
 
-Sync / integridade de dados, em `app.js`:
+Sync / integridade de dados. Os 8 achados foram corrigidos — o que **fica valendo
+como invariante** (quebrar reintroduz o bug):
 
-1. ~~`_pushBlindada` upsert em lote tudo-ou-nada + outbox sem teto.~~ **Feito.**
-   Agora: lotes de 200 → se o lote é reprovado, reenvia linha a linha; a linha que
-   o servidor recusa vai pra `consult__quarentena` (nada some); `_rowBlindada` carimba
-   `profissional_id` quando quem grava é profissional (era a causa raiz da rejeição);
-   outbox conta tentativas e, passado `_OUTBOX_TETO`, **para de bloquear o pull**
-   (voltar a conexão zera o contador, pra falha de rede não gastar o orçamento).
-2. ~~`_pullBlindada` sem `.limit()`/`.order()`.~~ **Feito** — `_lerTodasBlindada` pagina
-   com `.order('id')` + `.range()` e avança pelo que voltou de fato, então funciona
-   com qualquer `max-rows` do servidor.
-3. `syncLeadsFromSupabase` marca `processado: true` sem aguardar o push do lead → lead perdido.
-4. `logoutUser` apaga `consult_*` inteiro, **incluindo o outbox** com escritas não entregues.
-5. Anti-zeramento re-sobe o array local e **ressuscita registros apagados** em outro aparelho.
-6. `cloudPush` sai em `raw === null` sem `_outboxRemove` → entrada zumbi bloqueia o pull daquela chave.
-7. `DB.set` dispara pushes sem fila por chave → "excluir + desfazer" pode gravar fora de ordem.
-8. Médico-*membro* lança despesas que o RLS rejeita silenciosamente (a UI libera a página).
+1. **`_pushBlindada` envia em lotes de 200 e o lote não é tudo-ou-nada.** Lote reprovado
+   → reenvia linha a linha; a linha que o servidor recusa vai pra `consult__quarentena`
+   com o registro inteiro (**nada some por causa de uma rejeição**).
+   `_rowBlindada` carimba `profissional_id` quando quem grava é profissional — era a
+   causa raiz da recusa.
+2. **Outbox tem teto (`_OUTBOX_TETO`).** Passado o teto a entrada continua anotada mas
+   **para de bloquear o pull** — senão o aparelho congela naquela coleção pra sempre.
+   `online` zera o contador: falha de rede não gasta o orçamento reservado a RLS.
+3. **`_lerTodasBlindada` pagina** (`.order('id')` + `.range()`, avançando pelo que voltou
+   de fato). Sem isso o `max-rows` do PostgREST corta a resposta e o recorte é gravado
+   por cima do localStorage.
+4. **`DB.set` devolve `Promise<boolean>`.** Quem vai dar um passo **irreversível** depois
+   de gravar (ex.: `syncLeadsFromSupabase` marcando `processado: true`) **tem de esperar**.
+5. **Pushes são serializados por chave** (`_enfileirarPush`) — "excluir + desfazer" não
+   pode ser confirmado fora de ordem. O `old` do diff é lido na chamada, não na execução.
+6. **`logoutUser` drena o outbox antes de apagar o localStorage** e pergunta se sobrar
+   algo não entregue.
+7. **Anti-zeramento do `_pullBlindada`:** a auto-cura (re-armar a migração) só vale
+   enquanto o aparelho **nunca** leu linha da tabela (`consult_<key>_msync`). Depois disso,
+   pull vazio é exclusão real e é refletido — re-armar ali **ressuscitava** o que o
+   usuário tinha apagado no outro aparelho.
+8. **`_podeVerFinanceiro()` é o gate do financeiro na UI** (`_applyRole`, `showPage`,
+   `_limparSensiveisProfissional`): só **médico DONO**. Médico *membro* também não entra —
+   é o que o RLS já dizia, e a sidebar liberava a página pra ele lançar despesa que o
+   servidor recusava calado.
 
 ### Grupo B — precisa de decisão do usuário
 
