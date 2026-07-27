@@ -13104,15 +13104,40 @@ function _appendChatMessage(m, pending) {
 // Textos que ESTE navegador acabou de enviar (pra não duplicar o eco do realtime).
 const _chatEnviadasLocal = new Set();
 
+// Mesmo tratamento do canal de leads (ver initLeadsRealtime). Sem ele, quando
+// este canal caía — notebook dormiu com a conversa aberta, wi-fi trocou de ponto
+// — as mensagens do paciente PARAVAM de aparecer na conversa aberta, e nada
+// indicava isso: a secretária fica olhando um chat que parece parado enquanto o
+// paciente escreve. Pior que no caso dos leads, porque aqui não havia nenhuma
+// varredura periódica: as mensagens só eram carregadas na abertura do chat.
+let _chatRearmarTimer = null;
+let _chatJaAssinou = false;
+function _rearmarChatRealtime(phone, motivo) {
+  if (_chatRearmarTimer) return;
+  console.warn('[realtime] canal do chat caiu (' + motivo + ') — reconectando em 5s');
+  _chatRearmarTimer = setTimeout(() => {
+    _chatRearmarTimer = null;
+    if (_chatPhone === phone) _subscribeChatRealtime(phone);
+  }, 5000);
+}
+
 function _subscribeChatRealtime(phone) {
   if (!_supa) return;
-  if (_chatSub) { _supa.removeChannel(_chatSub); }
+  if (_chatSub) { _supa.removeChannel(_chatSub).catch(() => {}); }
+  _chatJaAssinou = false;
+  // O filtro do postgres_changes aceita UMA coluna só, então ele fica no
+  // telefone e a checagem do dono vai no callback. O canal de leads filtra por
+  // user_id justamente porque lá a coluna disponível é essa. Defesa em
+  // profundidade: quem deve barrar é o RLS, mas o mesmo número de telefone pode
+  // existir na base de outra clínica e não custa conferir de quem é a mensagem.
+  const owner = (currentDataOwner || (currentUser && currentUser.id)) || '';
   _chatSub = _supa
     .channel('chat-msgs-' + phone)
     .on('postgres_changes', {
       event: 'INSERT', schema: 'public', table: 'crm_messages',
       filter: `whatsapp=eq.${phone}`
     }, payload => {
+      if (owner && payload.new && payload.new.user_id && payload.new.user_id !== owner) return;
       if (_chatPhone !== phone || !payload.new) return;
       const m = payload.new;
       if (m.remetente !== 'consultorio') {
@@ -13127,7 +13152,19 @@ function _subscribeChatRealtime(phone) {
         _appendChatMessage(m);
       }
     })
-    .subscribe();
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        // REassinou: recarrega a conversa pra trazer o que chegou durante a
+        // queda. Na primeira assinatura não recarrega — quem abriu o chat já
+        // chamou o loadChatHistory, e repetir só piscaria a tela.
+        if (_chatJaAssinou && _chatPhone === phone) loadChatHistory(phone);
+        _chatJaAssinou = true;
+        return;
+      }
+      // 'CLOSED' não entra: ele também chega quando somos NÓS trocando de canal
+      // aqui em cima, e reagir criaria laço de reconexão.
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') _rearmarChatRealtime(phone, status);
+    });
 }
 
 // ====================== 🤖 SECRETÁRIA POR IA (copiloto) ======================
@@ -13556,6 +13593,12 @@ function _revisarCanalLeads() {
   syncLeadsFromSupabase();
   const estado = _leadsChannel && _leadsChannel.state;
   if (estado !== 'joined' && estado !== 'joining') initLeadsRealtime();
+  // A conversa aberta tem o mesmo problema e nenhuma varredura periódica:
+  // se o canal dela morreu, as mensagens do paciente param de aparecer.
+  if (_chatPhone) {
+    const eChat = _chatSub && _chatSub.state;
+    if (eChat !== 'joined' && eChat !== 'joining') _subscribeChatRealtime(_chatPhone);
+  }
 }
 window.addEventListener('online', () => setTimeout(_revisarCanalLeads, 2000));
 document.addEventListener('visibilitychange', () => {
