@@ -91,6 +91,47 @@ test('montarDisponibilidade: agendamento cancelado não segura o horário', () =
   assert.ok(slotsDe(wa.montarDisponibilidade(CFG, ags, []), dia).includes('08:00'));
 });
 
+// ---------- _foneChat: a chave da conversa tem de ser a MESMA dos dois lados ----------
+// O webhook grava crm_messages.whatsapp; o app procura o chat por _normPhone.
+// Regras diferentes = mensagem gravada numa chave que o app nunca procura, e o
+// chat abre vazio no CRM. O webhook aceita telefone a partir de 10 dígitos,
+// então número do DDD 55 sem o código do país está no alcance dele.
+const { _foneChat } = carregarTs('_foneChat');
+
+// Espelho da regra do app.js (_normPhone) — se as duas divergirem, o teste cai.
+const _normPhoneApp = (raw) => {
+  let d = String(raw || '').replace(/\D/g, '');
+  if (d.length >= 12 && d.startsWith('55')) d = d.slice(2);
+  return d;
+};
+
+test('_foneChat: concorda com o _normPhone do app em todo formato de número', () => {
+  const numeros = [
+    ['5511987654321', 'celular SP com DDI'],
+    ['5555987654321', 'celular DDD 55 com DDI'],
+    ['555532201234',  'fixo DDD 55 com DDI'],
+    ['55987654321',   'celular DDD 55 SEM DDI — o 55 aqui é DDD, não país'],
+    ['5532201234',    'fixo DDD 55 SEM DDI'],
+    ['11987654321',   'celular SP sem DDI'],
+    ['+55 (11) 98765-4321', 'com máscara'],
+  ];
+  for (const [n, desc] of numeros) {
+    assert.strictEqual(_foneChat(n), _normPhoneApp(n), `${desc}: ${n}`);
+  }
+});
+
+test('_foneChat: tira o DDI só quando ele é DDI mesmo', () => {
+  assert.strictEqual(_foneChat('5511987654321'), '11987654321', '13 dígitos: 55 é país');
+  assert.strictEqual(_foneChat('55987654321'), '55987654321', '11 dígitos: 55 é DDD, tem de ficar');
+  assert.strictEqual(_foneChat('5532201234'), '5532201234', '10 dígitos: 55 é DDD, tem de ficar');
+});
+
+test('_foneChat: entrada vazia ou lixo não explode', () => {
+  for (const ruim of [null, undefined, '', 'abc']) {
+    assert.strictEqual(_foneChat(ruim), '');
+  }
+});
+
 test('montarDisponibilidade: sem agenda e sem bloqueio o texto do prompt não vem vazio', () => {
   const r = wa.montarDisponibilidade(CFG, [], []);
   assert.ok(r.texto.length > 0);

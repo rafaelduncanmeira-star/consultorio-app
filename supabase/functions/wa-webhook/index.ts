@@ -106,7 +106,7 @@ Deno.serve(async (req) => {
 
     const nome     = bruto.nome || 'Contato WhatsApp';
     const mensagem = (bruto.mensagem && String(bruto.mensagem).trim()) || '[mensagem sem texto]';
-    const phoneChat = phone.replace(/^55/, '');
+    const phoneChat = _foneChat(phone);
 
     // 1) SEMPRE registra a mensagem recebida no histórico (crm_messages).
     const { data: msgRow, error: msgErr } = await supa.from('crm_messages').insert({
@@ -487,6 +487,17 @@ function montarSystemPromptServer(k: any): string {
 // à noite o "hoje" pulava pro dia seguinte e os dias da semana desalinhavam.
 // TODO: tornar configurável por clínica (Manaus/Cuiabá são UTC-4).
 const TZ_CLINICA = 'America/Sao_Paulo';
+
+// Chave da conversa no CRM. MESMA regra do _normPhone (app.js): o '55' só sai
+// quando é DDI de fato — número com 12+ dígitos. Tirar sempre comia o DDD de
+// quem é do DDD 55 (Santa Maria/RS) e mandou sem o código do país: a conversa
+// era gravada numa chave que o app nunca procura, o chat abria VAZIO no CRM, e
+// o rate limit e o histórico da IA olhavam para o telefone errado. O webhook
+// aceita telefone a partir de 10 dígitos, então esse caso está no alcance dele.
+function _foneChat(raw: string): string {
+  const d = String(raw || '').replace(/\D/g, '');
+  return (d.length >= 12 && d.startsWith('55')) ? d.slice(2) : d;
+}
 
 // Data local YYYY-MM-DD no fuso da clínica.
 function _dataLocal(d: Date): string {
