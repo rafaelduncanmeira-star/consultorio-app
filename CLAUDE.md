@@ -111,6 +111,12 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- 🔴 **No arranque, cada passo é isolado e a ORDEM é de segurança.** `_iniciarApp` era uma
+  sequência solta: o primeiro passo que lançasse levava o resto. `_applyRole` vinha depois
+  da sidebar — exceção ali e o profissional **via o financeiro**; `_agendarTarefasDoDia`
+  vinha depois do `renderDashboard` — exceção ali e backup+lembretes ficavam desarmados a
+  sessão inteira. Gate primeiro, agendador por último e fora do caminho dos renders. E o
+  `<body>` entra **com** `role-no-fin`: falhe fechado.
 - 🔴 **O app tem de ABRIR mesmo com a sincronização falhando.** Um blob corrompido fazia
   o `JSON.parse` do `_drenarOutbox` lançar → `cloudPull` (que drenava **fora** do próprio
   try) rejeitava → o `DOMContentLoaded` não tinha catch → `_iniciarApp` nunca rodava e a
