@@ -3464,18 +3464,25 @@ function _novosNoMes(pacs, mes) {
 // O status 'Parcial' (assinaturas com valor cheio, parcialmente pagas) entra em
 // "a receber" — antes sumia de todo KPI de realizado/a-receber e ainda inflava o
 // bruto, deixando "recebido + a receber + isento" sem fechar com o bruto.
+// Dinheiro aqui é sempre centavo. Somar float acumula resíduo: 60 lançamentos
+// com centavos fazem os baldes divergirem do bruto na casa de 1e-10. Não muda
+// nada na tela (o BRL já corta em 2 casas), mas suja qualquer comparação exata
+// que alguém venha a escrever em cima destes números — e a "regra de ouro"
+// documentada é exatamente uma comparação dessas. Arredonda na saída.
+function _centavos(v) { return Math.round((v + Number.EPSILON) * 100) / 100; }
+
 function _resumoFin(pacs) {
   const soma = (f) => (pacs || []).filter(f).reduce((s, p) => s + (p.valor || 0), 0);
-  const pago     = soma(p => p.statusPgto === 'Pago');
-  const parcial  = soma(p => p.statusPgto === 'Parcial');
-  const pendente = soma(p => p.statusPgto === 'Pendente');
-  const isento   = soma(p => p.statusPgto === 'Isento');
-  const bruto    = (pacs || []).reduce((s, p) => s + (p.valor || 0), 0);
+  const pago     = _centavos(soma(p => p.statusPgto === 'Pago'));
+  const parcial  = _centavos(soma(p => p.statusPgto === 'Parcial'));
+  const pendente = _centavos(soma(p => p.statusPgto === 'Pendente'));
+  const isento   = _centavos(soma(p => p.statusPgto === 'Isento'));
   return {
-    pago, parcial, pendente, isento, bruto,
-    recebido: pago,                       // CAIXA: só o que entrou de fato
-    aReceber: parcial + pendente,         // ainda a receber (inclui o resto do parcial)
-    faturado: pago + parcial + pendente,  // COMPETÊNCIA: serviço prestado (= bruto − isento)
+    pago, parcial, pendente, isento,
+    bruto:    _centavos(pago + parcial + pendente + isento),
+    recebido: pago,                                     // CAIXA: só o que entrou de fato
+    aReceber: _centavos(parcial + pendente),            // ainda a receber (inclui o resto do parcial)
+    faturado: _centavos(pago + parcial + pendente),     // COMPETÊNCIA: serviço prestado (= bruto − isento)
   };
 }
 

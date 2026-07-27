@@ -52,7 +52,10 @@ Estabelecidos na revisão de ponta a ponta — quebrar qualquer um destes reintr
   Nada mais. `Parcial` é gravado por toda inscrição parcelada em programa.
   (`Parcelado` é outra coisa: forma de pagamento de programa, não status.)
 - **`_resumoFin(pacs)` é a fonte única** de recebido / a receber / faturado / bruto.
-  Toda tela financeira usa ela. Regra de ouro: `recebido + aReceber + isento === bruto`.
+  Toda tela financeira usa ela. Regra de ouro: `recebido + aReceber + isento` **fecha com
+  `bruto` ao centavo** — não bit a bit. Os baldes saem arredondados (`_centavos`), mas somar
+  três floats fora da função sempre pode deixar resíduo na casa de 1e-13. Teste de dinheiro
+  compara **ao centavo**; exigir `===` é exigir o impossível e o teste vira teatro.
   Nunca recalcular "a receber" filtrando só `Pendente` — some o `Parcial`.
 - **Regimes:** caixa = `recebido`; competência = `faturado`. Lucro na tela = caixa − despesas.
 - **`supabase-js` NÃO lança em erro de banco** (RLS, constraint) — devolve `{ error }`.

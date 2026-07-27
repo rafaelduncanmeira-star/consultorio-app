@@ -15,7 +15,7 @@ const PACS = [
 ];
 
 test('_resumoFin: buckets fecham com o bruto (Parcial não some)', () => {
-  const { _resumoFin } = carregar('_resumoFin');
+  const { _resumoFin } = carregar(['_centavos', '_resumoFin']);
   const r = _resumoFin(PACS);
   assert.strictEqual(r.pago, 1500);
   assert.strictEqual(r.parcial, 7200);
@@ -27,7 +27,7 @@ test('_resumoFin: buckets fecham com o bruto (Parcial não some)', () => {
 });
 
 test('_resumoFin: caixa é só Pago; competência é Pago+Parcial+Pendente', () => {
-  const { _resumoFin } = carregar('_resumoFin');
+  const { _resumoFin } = carregar(['_centavos', '_resumoFin']);
   const r = _resumoFin(PACS);
   assert.strictEqual(r.recebido, 1500);          // CAIXA
   assert.strictEqual(r.aReceber, 7500);          // Parcial(7200) + Pendente(300)
@@ -35,8 +35,58 @@ test('_resumoFin: caixa é só Pago; competência é Pago+Parcial+Pendente', () 
   assert.strictEqual(r.faturado, r.bruto - r.isento);
 });
 
+// A regra de ouro com valores REAIS, com centavos. O teste acima usa números
+// redondos e por isso passava mesmo quando os baldes divergiam do bruto:
+// somar float acumula resíduo, e com 60 lançamentos a diferença chegava a
+// 1e-10. Não aparecia na tela (o BRL corta em 2 casas), mas a invariante
+// documentada é uma comparação exata — e o teste dava confiança que não tinha.
+test('_resumoFin: a regra de ouro fecha com valores em centavos', () => {
+  const { _resumoFin } = carregar(['_centavos', '_resumoFin']);
+  const comCentavos = [
+    { statusPgto: 'Pago',     valor: 1234.56 },
+    { statusPgto: 'Pago',     valor: 78.91 },
+    { statusPgto: 'Parcial',  valor: 0.1 },
+    { statusPgto: 'Parcial',  valor: 0.2 },
+    { statusPgto: 'Pendente', valor: 300.03 },
+    { statusPgto: 'Isento',   valor: 99.99 },
+  ];
+  const r = _resumoFin(comCentavos);
+  assert.strictEqual(r.recebido + r.aReceber + r.isento, r.bruto);
+  assert.strictEqual(r.parcial, 0.3, '0.1 + 0.2 tem de dar 0.3, não 0.30000000000000004');
+  assert.strictEqual(r.faturado, r.bruto - r.isento);
+});
+
+// Varredura com centenas de lançamentos aleatórios. A tolerância é MEIO CENTAVO,
+// não zero: `recebido + aReceber + isento` é uma soma de floats feita fora da
+// função, e nenhum arredondamento interno torna isso bit a bit idêntico ao
+// bruto. Exigir === aqui seria exigir o impossível — a garantia real, e a única
+// que importa pra contabilidade, é fechar ao centavo. Sem o _centavos na saída
+// a diferença passava de 1e-10; se alguém tirar o arredondamento, o teste do
+// balde individual (0.1 + 0.2 === 0.3) cai primeiro.
+test('_resumoFin: os baldes fecham com o bruto ao centavo, em qualquer volume', () => {
+  const { _resumoFin } = carregar(['_centavos', '_resumoFin']);
+  const status = ['Pago', 'Parcial', 'Pendente', 'Isento'];
+  // Sequência determinística — teste que muda de resultado a cada rodada não serve.
+  let semente = 42;
+  const proximo = () => (semente = (semente * 1103515245 + 12345) % 2147483648) / 2147483648;
+  let pior = 0;
+  for (let caso = 0; caso < 300; caso++) {
+    const n = 5 + Math.floor(proximo() * 80);
+    const pacs = Array.from({ length: n }, () => ({
+      statusPgto: status[Math.floor(proximo() * 4)],
+      valor: Math.round(proximo() * 500000) / 100,
+    }));
+    const r = _resumoFin(pacs);
+    const dif = Math.abs((r.recebido + r.aReceber + r.isento) - r.bruto);
+    pior = Math.max(pior, dif);
+    assert.ok(dif < 0.005,
+      `caso ${caso} com ${n} lançamentos: diferença de ${dif} entre os baldes e o bruto`);
+  }
+  assert.ok(pior < 0.005, `pior diferença observada: ${pior}`);
+});
+
 test('_resumoFin: lista vazia não quebra', () => {
-  const { _resumoFin } = carregar('_resumoFin');
+  const { _resumoFin } = carregar(['_centavos', '_resumoFin']);
   const r = _resumoFin([]);
   assert.deepStrictEqual(
     { recebido: r.recebido, aReceber: r.aReceber, faturado: r.faturado, bruto: r.bruto },
@@ -44,7 +94,7 @@ test('_resumoFin: lista vazia não quebra', () => {
 });
 
 test('_lucroFin: lucro caixa usa recebido; lucro competência usa faturado', () => {
-  const { _resumoFin, _lucroFin } = carregar(['_resumoFin', '_lucroFin']);
+  const { _resumoFin, _lucroFin } = carregar(['_centavos', '_resumoFin', '_lucroFin']);
   const r = _resumoFin(PACS);
   const l = _lucroFin(r, 1000); // despesas do período
   assert.strictEqual(l.caixa, 500);          // 1500 − 1000
@@ -54,7 +104,7 @@ test('_lucroFin: lucro caixa usa recebido; lucro competência usa faturado', () 
 });
 
 test('_lucroFin: margens não estouram com receita zero', () => {
-  const { _resumoFin, _lucroFin } = carregar(['_resumoFin', '_lucroFin']);
+  const { _resumoFin, _lucroFin } = carregar(['_centavos', '_resumoFin', '_lucroFin']);
   const l = _lucroFin(_resumoFin([]), 500);
   assert.strictEqual(l.margemCaixa, 0);
   assert.strictEqual(l.margemCompetencia, 0);
@@ -327,7 +377,7 @@ test('exportar e reimportar o próprio CSV preserva o valor', () => {
 // quebrava: importava, o bruto subia e "Recebido" continuava zerado.
 test('importação alimenta os baldes de _resumoFin', () => {
   const { impNormStatus } = carregar('impNormStatus');
-  const { _resumoFin } = carregar('_resumoFin');
+  const { _resumoFin } = carregar(['_centavos', '_resumoFin']);
   const importados = [
     { statusPgto: impNormStatus('pago'),      valor: 1000 },
     { statusPgto: impNormStatus('parcelado'), valor: 500 },
