@@ -512,7 +512,7 @@ test('_migrarIds usa a versão estrita, não a que chuta', () => {
 const { recortarFuncao: _rec } = require('./_extrair.js');
 
 for (const [fn, rotulo] of [['doLogin', 'Entrar'], ['doSignup', 'Criar conta gratuita'],
-                            ['confirmar2FA', 'Ativar 2FA']]) {
+                            ['confirmar2FA', 'Ativar 2FA'], ['iaSugerirNoChat', 'Sugerir']]) {
   test(`${fn}: o botão volta mesmo se o await lançar`, () => {
     const src = _rec(fn).replace(/\/\/[^\n]*/g, '');
     assert.match(src, /\bdisabled\s*=\s*true/, 'a premissa: a função trava o botão');

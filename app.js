@@ -12949,8 +12949,18 @@ async function iaSugerirNoChat(auto) {
   if (!input) return;
   if (auto && input.value.trim()) return; // já há algo digitado: não sobrescreve
   if (btn) { btn.disabled = true; btn.textContent = '✨…'; }
-  const r = await _iaSugerirResposta();
-  if (btn) { btn.disabled = false; btn.textContent = '✨ Sugerir'; }
+  // Restaurar depois do await não vale quando é o próprio await que lança — e
+  // este chama o LLM pela rede, o mais provável de todos falhar. Sem o finally,
+  // o botão ficava em '✨…' desabilitado até recarregar a página (ver doLogin).
+  let r;
+  try {
+    r = await _iaSugerirResposta();
+  } catch (e) {
+    if (!auto) toast('Não consegui gerar a sugestão agora. Tente de novo.');
+    return;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '✨ Sugerir'; }
+  }
   if (r.error) {
     if (!auto) {
       if (r.error === 'no-key' || r.error === 'no-key-claude') toast('Configure a chave do motor de IA em Configurações primeiro');
