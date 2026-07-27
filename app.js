@@ -14070,32 +14070,66 @@ function impHandleFile(file) {
     toast('⚠️ Use um arquivo .xlsx, .xls ou .csv', 3000); return;
   }
 
-  const reader = new FileReader();
-  reader.onload = e => {
-    let parsed;
-    try {
-      if (ext === 'csv') {
-        // Tenta UTF-8; se tiver caracteres estranhos, tenta re-ler como latin1
-        parsed = impParseCSV(e.target.result);
-      } else {
-        parsed = impParseXLSX(new Uint8Array(e.target.result));
-      }
-    } catch(err) {
-      toast('❌ Erro ao ler arquivo: ' + err.message, 4000); return;
-    }
-
+  const seguir = (parsed) => {
     if (!parsed || !parsed.rows.length) {
       toast('⚠️ Arquivo vazio ou sem dados reconhecidos', 3000); return;
     }
-
     _impHeaders = parsed.headers;
     _impRawData = parsed.rows;
     impBuildStep2(file.name);
     impGoStep(2);
   };
 
-  if (ext === 'csv') reader.readAsText(file, 'UTF-8');
-  else               reader.readAsArrayBuffer(file);
+  // Sem onerror, um arquivo que o navegador não consegue ler (removido do pen
+  // drive depois de escolhido, permissão negada, erro de disco) fazia o onload
+  // nunca disparar: o assistente ficava parado no passo 1, sem mensagem
+  // nenhuma. A pessoa escolhe o arquivo de novo, e de novo.
+  const lerComo = (encoding, aoTexto) => {
+    const r = new FileReader();
+    r.onerror = () => toast('❌ Não consegui ler o arquivo. Tente escolher de novo.', 4000);
+    r.onload = (e) => aoTexto(e.target.result);
+    r.readAsText(file, encoding);
+  };
+
+  if (ext === 'csv') {
+    lerComo('UTF-8', (texto) => {
+      let parsed;
+      try {
+        // O Excel em português salva CSV em Windows-1252 por padrão — é
+        // justamente por isso que o exportarCSV daqui grava BOM, pra forçar o
+        // Excel a ler UTF-8 na volta. Lendo bytes latin1 como UTF-8, cada
+        // acento vira U+FFFD: "José Conceição" chega "Jos� Concei��o" e o
+        // paciente entra na base com o nome corrompido — e nunca mais casa com
+        // o cadastro que já existia. O comentário antigo aqui PROMETIA essa
+        // releitura; o código não fazia nada.
+        if (texto.includes('\uFFFD')) {
+          lerComo('ISO-8859-1', (t2) => {
+            try { seguir(impParseCSV(t2)); }
+            catch (err) { toast('❌ Erro ao ler arquivo: ' + err.message, 4000); }
+          });
+          return;
+        }
+        parsed = impParseCSV(texto);
+      } catch (err) {
+        toast('❌ Erro ao ler arquivo: ' + err.message, 4000); return;
+      }
+      seguir(parsed);
+    });
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onerror = () => toast('❌ Não consegui ler o arquivo. Tente escolher de novo.', 4000);
+  reader.onload = e => {
+    let parsed;
+    try {
+      parsed = impParseXLSX(new Uint8Array(e.target.result));
+    } catch(err) {
+      toast('❌ Erro ao ler arquivo: ' + err.message, 4000); return;
+    }
+    seguir(parsed);
+  };
+  reader.readAsArrayBuffer(file);
 }
 
 /* ── Constrói o Step 2 (mapeamento + prévia) ── */

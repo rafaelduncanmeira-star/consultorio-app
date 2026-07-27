@@ -190,3 +190,70 @@ test('data: a linha recusada é contada como inválida, não como importada', ()
   assert.match(src, /const data = impNormDate\([\s\S]{0,40}?if \(!data\) \{ nSemData\+\+; return; \}/,
     'devolver vazio só ajuda porque o impExecute pula a linha e a conta como inválida');
 });
+
+// ---------- arquivo do Excel em português ----------
+// O Excel em pt-BR salva CSV em Windows-1252 por padrão — é justamente por isso
+// que o exportarCSV daqui grava BOM, pra forçar o Excel a ler UTF-8 na volta.
+// Lendo bytes latin1 como UTF-8, cada acento vira U+FFFD: "José Conceição"
+// chega "Jos� Concei��o" e o paciente entra na base com o nome corrompido — e
+// nunca mais casa com o cadastro que já existia. O comentário no código
+// PROMETIA a releitura em latin1; o código não fazia nada.
+function ambienteArquivo({ bytes, nome = 'planilha.csv', falharLeitura = false }) {
+  const toasts = [];
+  let step = 1, dados = null;
+  // FileReader de mentira: entrega o texto DECODIFICADO no encoding pedido,
+  // como o navegador faz.
+  class FR {
+    readAsText(_file, encoding) {
+      if (falharLeitura) { this.onerror && this.onerror(); return; }
+      const txt = new TextDecoder(encoding.toLowerCase() === 'utf-8' ? 'utf-8' : 'iso-8859-1').decode(bytes);
+      this.onload && this.onload({ target: { result: txt } });
+    }
+    readAsArrayBuffer() { if (falharLeitura) this.onerror && this.onerror(); }
+  }
+  const s = carregar(['impParseCSV', 'impHandleFile'], {
+    String, Object, Uint8Array, TextDecoder,
+    FileReader: FR,
+    toast: (t) => toasts.push(t),
+    window: {},
+    impParseXLSX: () => null,
+    impBuildStep2: () => {},
+    impGoStep: (n) => { step = n; },
+    _impHeaders: null, _impRawData: null,
+    get _dados() { return dados; },
+  });
+  // O sandbox guarda _impRawData como propriedade do contexto.
+  return { ...s, toasts, passo: () => step, linhas: () => s._impRawData };
+}
+
+const bytesLatin1 = (txt) => new Uint8Array(Buffer.from(txt, 'latin1'));
+const bytesUtf8   = (txt) => new Uint8Array(Buffer.from(txt, 'utf8'));
+
+test('CSV salvo pelo Excel em português não corrompe os acentos', () => {
+  const a = ambienteArquivo({ bytes: bytesLatin1('nome;obs\nJosé Conceição;retorno') });
+  a.impHandleFile({ name: 'planilha.csv' });
+  assert.strictEqual(a.linhas()[0].nome, 'José Conceição',
+    'lido como UTF-8, cada acento vira U+FFFD e o paciente entra com o nome quebrado');
+  assert.strictEqual(a.passo(), 2, 'e o assistente avança normalmente');
+});
+
+test('CSV em UTF-8 continua sendo lido como UTF-8', () => {
+  const a = ambienteArquivo({ bytes: bytesUtf8('nome;obs\nJosé Conceição;retorno') });
+  a.impHandleFile({ name: 'planilha.csv' });
+  assert.strictEqual(a.linhas()[0].nome, 'José Conceição');
+});
+
+test('arquivo que o navegador não consegue ler avisa em vez de travar', () => {
+  const a = ambienteArquivo({ bytes: bytesUtf8('nome\nAna'), falharLeitura: true });
+  a.impHandleFile({ name: 'planilha.csv' });
+  assert.match(a.toasts.join(' '), /Não consegui ler o arquivo/,
+    'sem onerror o onload nunca dispara e o assistente fica parado no passo 1, calado');
+  assert.strictEqual(a.passo(), 1);
+});
+
+test('extensão não suportada é recusada antes de tentar ler', () => {
+  const a = ambienteArquivo({ bytes: bytesUtf8('x') });
+  a.impHandleFile({ name: 'foto.png' });
+  assert.match(a.toasts.join(' '), /\.xlsx, \.xls ou \.csv/);
+  assert.strictEqual(a.passo(), 1);
+});
