@@ -267,6 +267,43 @@ function _sessaoCaiu() {
   if (senha) senha.value = '';
 }
 
+// De quem são os dados que estão neste aparelho.
+// O logout limpa tudo e recarrega. Mas a sessão que CAI sozinha (senha trocada
+// em outro aparelho, token revogado) não limpa nada de propósito — é ali que
+// mora o outbox. O que sobra é a tela de login com os dados do anterior no
+// localStorage, e numa recepção quem senta depois costuma ser outra pessoa:
+//  · o _drenarOutbox do primeiro cloudPull manda os registros do anterior pro
+//    servidor com o owner de QUEM ENTROU (cloudPush usa o owner atual) —
+//    prontuário de uma clínica gravado dentro da conta de outra;
+//  · o pull nem baixa as chaves que estão na fila, então a pessoa nova fica
+//    olhando (e editando por cima) o consultório alheio.
+// Ninguém entra sem passar por aqui. A troca de conta neste aparelho tem de
+// custar o mesmo que o logout já cobra: avisar o que não subiu e confirmar.
+const _CHAVE_DONO = 'consult__dono';
+
+async function _conferirDonoDoAparelho() {
+  const owner = currentDataOwner || (currentUser && currentUser.id);
+  if (!owner) return false;
+  const anterior = localStorage.getItem(_CHAVE_DONO);
+  if (!anterior || anterior === owner) {
+    localStorage.setItem(_CHAVE_DONO, owner);
+    return true;
+  }
+  const pend = Object.keys(_outboxGet());
+  if (!confirm(
+      'Este aparelho ainda tem os dados de OUTRA conta'
+      + (pend.length ? ', com alterações que nunca chegaram à nuvem (' + pend.join(', ') + ')' : '')
+      + '.\n\nEntrar agora apaga esses dados daqui'
+      + (pend.length ? ' — o que não subiu se perde' : '')
+      + '. Se eles são seus, cancele e entre primeiro na outra conta.\n\nEntrar mesmo assim?')) {
+    await _signOutIntencional();
+    return false;
+  }
+  Object.keys(localStorage).filter(k => k.startsWith('consult_')).forEach(k => localStorage.removeItem(k));
+  localStorage.setItem(_CHAVE_DONO, owner);   // depois do wipe: a chave também começa com consult_
+  return true;
+}
+
 // ============ OUTBOX — fila de escritas não confirmadas (offline/rejeitadas) ============
 // Toda escrita que o Supabase NÃO confirmou fica anotada aqui, por chave. O pull
 // pula chaves pendentes (a edição local vence até ser entregue) e a fila é
@@ -1016,6 +1053,10 @@ async function loginUser(email, password) {
     await _acceptInviteIfPending();
     // Resolve dono dos dados (própria conta ou equipe que ele é membro)
     await resolveDataOwner();
+    // ANTES de qualquer leitura/escrita: os dados que estão aqui são desta conta?
+    if (!await _conferirDonoDoAparelho()) {
+      return { error: 'Entrada cancelada — os dados da outra conta continuam neste aparelho.' };
+    }
     _auditLog('login', 'sistema', `Entrou no sistema`);
     // Sincroniza dados da nuvem
     await cloudPull();
@@ -1049,6 +1090,9 @@ async function signUpUser(email, password, nome, role) {
       // Aceita convite pendente se houver token na URL
       await _acceptInviteIfPending();
       await resolveDataOwner();
+      if (!await _conferirDonoDoAparelho()) {
+        return { error: 'Cadastro feito, mas a entrada foi cancelada — os dados da outra conta continuam neste aparelho.' };
+      }
       initLeadsRealtime();
       return { ok: true, needsConfirmation: false };
     }
@@ -1261,12 +1305,22 @@ async function logoutUser() {
   _agFiltroProf = '';
   // Limpa todas as chaves consult_* do localStorage (evita cross-pollination entre usuários)
   Object.keys(localStorage).filter(k => k.startsWith('consult_')).forEach(k => localStorage.removeItem(k));
-  document.getElementById('login-page').style.display = 'flex';
-  document.getElementById('login-email').value = '';
-  document.getElementById('login-password').value = '';
-  document.getElementById('login-btn').textContent = 'Entrar';
-  document.getElementById('login-btn').disabled = false;
-  document.getElementById('login-error').style.display = 'none';
+  // O `chatHistory` é lido do localStorage UMA vez, na carga do script: apagar a
+  // chave não esvazia a variável. Zeramos aqui porque ela é o vazamento mais
+  // direto — vai pra tela e pro prompt do LLM — e o reload abaixo pode demorar
+  // um instante. A garantia de verdade é o reload.
+  chatHistory = [];
+  // RECARREGA em vez de só trocar de tela. O logout apagava o localStorage mas
+  // a página continuava a MESMA: todo estado de módulo do usuário anterior
+  // seguia vivo — o histórico da MaestrIA (nomes de paciente, valores, quem
+  // deve), a conversa de WhatsApp aberta, os canais de realtime assinados no
+  // owner antigo, os buffers de importação. Numa recepção, onde o app fica
+  // aberto a semana toda e a troca de conta é rotina, o próximo a entrar via o
+  // que o anterior tinha — e a primeira pergunta dele mandava aquele histórico
+  // pro LLM. O reload é o único jeito de garantir isso sem depender de alguém
+  // lembrar de zerar cada variável nova.
+  // Sem sessão, a página recarregada já abre na tela de login.
+  location.reload();
 }
 
 // Verifica sessão existente
@@ -14929,6 +14983,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 2FA ok — aceita convite pendente, resolve owner, sincroniza
     await _acceptInviteIfPending();
     await resolveDataOwner();
+    if (!await _conferirDonoDoAparelho()) {
+      await barrar('Entrada cancelada — os dados da outra conta continuam neste aparelho.');
+      return;
+    }
     // O app tem de ABRIR mesmo se a sincronização falhar. Sem este try, uma
     // exceção no cloudPull (ou no resolveDataOwner) deixava o _iniciarApp sem
     // rodar: a pessoa ficava olhando uma tela que nunca monta, com os dados
