@@ -232,6 +232,13 @@ Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
   tinha percentuais que não fecham 100% (denominador real, numerador incompleto). Agrupe
   pelas categorias **reais** dos lançamentos (`_despesasPorCategoria`); a tela de Despesas já
   fazia isso e as outras duas ficaram para trás.
+- **`form.reset()` não desfaz estilo inline nem `<option>` acrescentada por JS.** O
+  `tipoAtividade` é hidden + botões pintados pelo `_setTipoAtividade`: o reset devolvia o
+  hidden pra `Consultório` e deixava "Visita Domiciliar" **destacado** — a tela dizia uma
+  coisa e o registro guardava outra, e é esse campo que separa consultório dos demais na
+  taxa de ocupação. Controle desenhado por JS precisa ser **repintado** depois do reset.
+  Mesma raiz: `_opcaoLegadaSeFaltar` marca com `data-legado` e **remove as anteriores** —
+  senão as opções de outros registros ficam penduradas até recarregar a página.
 - **Abrir formulário reinicializa TODO campo, inclusive os que estão escondidos.** O
   `openModalTemplatePrograma` zerava tudo menos a **vigência**, que só era atribuída no ramo
   "editando uma Assinatura" — e o campo mora num bloco oculto até o tipo virar Assinatura.
