@@ -111,6 +111,11 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- **Linha "Total" soma as LINHAS, nunca refaz a conta.** No PDF anual o total de lucro
+  era `bruto − despesas` enquanto cada mês mostrava `recebido − despesas`: o total não
+  fechava com a própria tabela. E em "Novos vs Recorrentes" o total somava
+  `novosUnicos + recUnicos` — a divisão ali é por *atendimento*, então quem estreou e
+  voltou no mesmo mês entra nas duas linhas e era contado duas vezes.
 - **Registro inválido do copiloto trava a tela que o percorre.** Procedimento com
   `nome: undefined` fazia `saveProc` **e** o próprio `criar_procedimento` lançarem
   (os dois fazem `p.nome.toLowerCase()` na lista inteira): a tela de Preços parava de
