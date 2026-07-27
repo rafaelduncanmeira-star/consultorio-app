@@ -226,3 +226,42 @@ test('_agIndiceContatos: paciente tem prioridade sobre CRM quando os dois têm o
   const idx = _agIndiceContatos();
   assert.strictEqual(idx.get('carla reis').whatsapp, '81911112222');
 });
+
+// ---------- ordenação por data com registro incompleto ----------
+// `undefined` não tem localeCompare. UM registro sem `data` fazia o sort inteiro
+// lançar e derrubava a tela que chamou — a busca global parava de responder pra
+// aquele nome, sem nada visível pro usuário. O resto do app já se defende de
+// `p.data` ausente em quatro lugares, então o caso é conhecido.
+test('_cmpDataDesc: registro sem data não derruba a ordenação', () => {
+  const { _cmpDataDesc } = carregar('_cmpDataDesc', { String });
+  const lista = [{ data: '2026-08-01' }, {}, { data: '2026-08-03' }, { data: null }];
+  const ordenado = lista.slice().sort(_cmpDataDesc);   // não pode lançar
+  assert.strictEqual(ordenado[0].data, '2026-08-03', 'mais recente primeiro');
+  assert.strictEqual(ordenado[1].data, '2026-08-01');
+  assert.ok(!ordenado[2].data && !ordenado[3].data, 'sem data vai pro fim');
+});
+
+test('_cmpDataAsc: mesma proteção, ordem crescente', () => {
+  const { _cmpDataAsc } = carregar('_cmpDataAsc', { String });
+  const ordenado = [{ data: '2026-08-03' }, {}, { data: '2026-08-01' }].slice().sort(_cmpDataAsc);
+  assert.ok(!ordenado[0].data, 'sem data primeiro na crescente');
+  assert.strictEqual(ordenado[1].data, '2026-08-01');
+  assert.strictEqual(ordenado[2].data, '2026-08-03');
+});
+
+test('nenhuma ordenação por data ficou com o localeCompare cru', () => {
+  const { fonte } = require('./_extrair.js');
+  assert.doesNotMatch(fonte, /\.sort\(\(\s*[a-z]\s*,\s*[a-z]\s*\)\s*=>\s*[a-z]\.data\.localeCompare\([a-z]\.data\)\s*\)/,
+    'use _cmpDataDesc/_cmpDataAsc — o literal quebra com registro sem data');
+});
+
+// A origem: o formulário exige data, o LLM não exigia. Atendimento sem data
+// some de toda tela por mês (getMes devolve '') e ainda quebrava a ordenação.
+test('copiloto: recusa atendimento sem data válida', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  const src = recortarFuncao('executeAIAction').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /tipo === 'criar_paciente' &&/,
+    'a guarda de data tem de existir no executor de ações do copiloto');
+  assert.match(src, /\\d\{4\}-\\d\{2\}-\\d\{2\}/,
+    'e tem de exigir o formato AAAA-MM-DD, não só "algo preenchido"');
+});

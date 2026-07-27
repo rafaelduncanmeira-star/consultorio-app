@@ -3707,6 +3707,13 @@ function _aplicarEfeitosMudancaStatusCrm(idx, oldStatus, newStatus) {
 }
 
 // Dropdown inline de status de pagamento (Atendidos)
+// Ordenação por data que NÃO quebra com registro sem data. `undefined` não tem
+// localeCompare: um único registro sem `data` fazia o sort inteiro lançar e
+// derrubava a tela que o chamou — a busca global parava de responder pra aquele
+// nome, sem nada visível pro usuário. Registro sem data vai pro fim.
+function _cmpDataDesc(a, b) { return String((b && b.data) || '').localeCompare(String((a && a.data) || '')); }
+function _cmpDataAsc(a, b)  { return String((a && a.data) || '').localeCompare(String((b && b.data) || '')); }
+
 // Status de FALTA do agendamento. O <select> da agenda oferece 'No-show'; três
 // pontos do código comparavam com 'Faltou', que a interface nunca gravou.
 // Centralizado pra não voltar a divergir — ver tests/agenda.test.js.
@@ -7058,7 +7065,7 @@ function renderRetencao() {
   });
 
   const pacientesUnicos = Object.values(porPaciente);
-  pacientesUnicos.forEach(p => p.consultas.sort((a, b) => a.data.localeCompare(b.data)));
+  pacientesUnicos.forEach(p => p.consultas.sort(_cmpDataAsc));
 
   // ===== Taxa de retorno em 90 dias =====
   // De quem teve a 1ª consulta há mais de 90 dias, quantos voltaram dentro de 90 dias?
@@ -9974,6 +9981,15 @@ function executeAIAction(action) {
     }
   }
 
+  // Atendimento sem data é pior que inexistente: getMes() devolve '' e ele fica
+  // FORA de todo filtro por mês — não aparece em tela nenhuma, não entra em
+  // relatório nenhum, mas ocupa lugar na coleção e quebrava a ordenação por
+  // data de quem tentasse listar. O formulário exige a data; o LLM não exigia.
+  if (tipo === 'criar_paciente' && !/^\d{4}-\d{2}-\d{2}$/.test(String(dados.data || ''))) {
+    appendChatMsg('system-ok', '⚠️ Faltou a data do atendimento (ou veio fora do formato AAAA-MM-DD) — não registrei nada.');
+    return;
+  }
+
   if (tipo === 'criar_paciente') {
     const arr = DB.get('pacientes'); arr.unshift({ ...dados, id: _novoId('pac'), profissionalId: currentProfissionalId || null }); DB.set('pacientes', arr);
     appendChatMsg('system-ok', `✅ Atendimento de ${dados.nome} registrado — ${BRL(dados.valor)}`);
@@ -10332,7 +10348,7 @@ function buscaGlobal(query) {
   const todosAtend = DB.get('pacientes');
   el.innerHTML = matches.map(nome => {
     const pacs = todosAtend.filter(p => (p.nome||'').toLowerCase().trim() === nome.toLowerCase().trim())
-      .sort((a, b) => b.data.localeCompare(a.data));
+      .sort(_cmpDataDesc);
     const sub = pacs.length
       ? `${pacs.length} consulta${pacs.length !== 1 ? 's' : ''} · última: ${formatDate(pacs[0].data)}`
       : 'Sem atendimento registrado';
@@ -10387,14 +10403,14 @@ function abrirPerfilPaciente(nomeEnc) {
   // Coleta dados por módulo
   const pacs = DB.get('pacientes')
     .filter(p => (p.nome||'').toLowerCase().trim() === nome.toLowerCase().trim())
-    .sort((a, b) => b.data.localeCompare(a.data));
+    .sort(_cmpDataDesc);
   const followups = DB.get('followup')
     .filter(f => (f.nome||'').toLowerCase().trim() === nome.toLowerCase().trim());
   const crm = DB.get('crm')
     .filter(c => (c.nome||'').toLowerCase().trim() === nome.toLowerCase().trim());
   const agenda = getAgendamentos()
     .filter(a => (a.pacienteNome||'').toLowerCase().trim() === nome.toLowerCase().trim())
-    .sort((a, b) => b.data.localeCompare(a.data));
+    .sort(_cmpDataDesc);
 
   // KPIs
   const ltv      = pacs.reduce((s, p) => s + (p.valor || 0), 0);
@@ -11144,7 +11160,7 @@ function listarSnapshots() {
         };
       } catch { return { data, chave: k.substring('consult_'.length), erro: true }; }
     })
-    .sort((a, b) => b.data.localeCompare(a.data));
+    .sort(_cmpDataDesc);
 }
 
 async function restaurarSnapshot(data) {
