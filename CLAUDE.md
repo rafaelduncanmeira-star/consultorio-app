@@ -358,6 +358,13 @@ falha de leitura.
 - **Poda antes de gravar.** O snapshot gravava e só depois podava; uma vez cheio o
   `localStorage`, o `setItem` lançava, a poda nunca rodava e o backup automático parava
   **para sempre**, calado (o chamador não tinha `.catch`).
+- **Tela que grava config faz `Object.assign` sobre o valor atual — nunca literal.** O blob
+  guarda mais campo do que qualquer tela mostra. `saveClinicaConfig` montava os 6 campos do
+  formulário e apagava o **`modo`** da clínica: `getAppMode` caía em `'completo'` e CRM,
+  Follow-up, Programas e Agenda voltavam pra sidebar de quem escolheu "Apenas Financeiro" —
+  e só na abertura seguinte, porque ela não chama `_applyRole`. `tests/config.test.js` varre
+  todo `DB.setObj`; dono legítimo do blob inteiro entra em `DONOS_DO_BLOB` **com o motivo
+  escrito**, e há teste reprovando exceção órfã.
 - **"Releia depois do gap" vale pra CONFIG, não só pra coleção — e grave só o campo que
   é seu.** `rodarCicloLembretes` lia `lembretes_config` antes do primeiro envio e a
   regravava inteira no fim, só pra carimbar `ultimoEnvio`. O laço leva meio minuto ou mais
