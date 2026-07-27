@@ -5547,17 +5547,26 @@ function toast(msg, ms = 3500) {
 // (some sempre existiu confirm() nativo, mas engano acontece; ter 6s pra
 // reverter sem precisar redigitar tudo de novo muda a experiência).
 function _toastUndo(msg, restaurarFn, ms = 6000) {
-  let t = document.getElementById('app-toast');
+  // Elemento PRÓPRIO, não o #app-toast. Os dois dividiam o mesmo nó, e o toast
+  // comum reescreve cssText e textContent: qualquer aviso que chegasse dentro
+  // dos 6 segundos apagava o botão Desfazer, e a exclusão virava definitiva sem
+  // o usuário entender por quê. Não é hipótese — os avisos que chegam sozinhos
+  // são justamente os do agendador de 15 min ("N lembretes enviados", falha de
+  // backup) e o de versão nova do service worker, que dispara quando um deploy
+  // entra com o app aberto. Numa recepção o app fica aberto a semana toda.
+  let t = document.getElementById('app-toast-undo');
   if (!t) {
     t = document.createElement('div');
-    t.id = 'app-toast';
+    t.id = 'app-toast-undo';
     document.body.appendChild(t);
   }
   // Aqui o toast PRECISA receber clique (o botão Desfazer), então ele nasce
   // clicável e é desligado quando some — senão fica um "Desfazer" invisível
   // sobre a nav inferior do mobile, e um toque ali ressuscita o registro
   // apagado minutos depois, sem o usuário entender o que aconteceu.
-  t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 10px 10px 18px;border-radius:10px;font-size:13.5px;font-weight:500;box-shadow:0 10px 30px rgba(0,0,0,0.25);z-index:9999;opacity:0;transition:opacity 0.25s;max-width:90vw;display:flex;align-items:center;gap:14px;pointer-events:auto;';
+  // Fica ACIMA do toast comum (84px) pra os dois poderem aparecer juntos sem se
+  // cobrir — e longe da nav inferior do celular.
+  t.style.cssText = 'position:fixed;bottom:84px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 10px 10px 18px;border-radius:10px;font-size:13.5px;font-weight:500;box-shadow:0 10px 30px rgba(0,0,0,0.25);z-index:9999;opacity:0;transition:opacity 0.25s;max-width:90vw;display:flex;align-items:center;gap:14px;pointer-events:auto;';
   t.innerHTML = '';
   const span = document.createElement('span');
   span.textContent = msg;

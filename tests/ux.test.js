@@ -14,11 +14,20 @@ function domFalso() {
   const criados = [];
   const novo = (tag) => {
     const el = {
-      tag, id: '', type: '', textContent: '', innerHTML: '', disabled: false,
+      tag, id: '', type: '', innerHTML: '', disabled: false,
       onclick: null, filhos: [],
       style: { cssText: '', opacity: '', pointerEvents: '' },
       appendChild(f) { this.filhos.push(f); return f; },
     };
+    // No DOM de verdade, escrever textContent APAGA os filhos. Sem modelar
+    // isso, o teste do toast comum sobre o Desfazer passava sem guardar nada:
+    // o botão continuava na lista de filhos do dublê.
+    let texto = '';
+    Object.defineProperty(el, 'textContent', {
+      get: () => texto,
+      set: (v) => { texto = String(v); el.filhos.length = 0; },
+      enumerable: true,
+    });
     criados.push(el);
     return el;
   };
@@ -72,6 +81,46 @@ test('_toastUndo: dois toques seguidos restauram uma vez só', () => {
   btn.onclick();
   btn.onclick();
   assert.strictEqual(restaurou, 1);
+});
+
+// ---------- os dois toasts não podem dividir o mesmo elemento ----------
+// O toast comum reescreve cssText e textContent do nó. Enquanto os dois usavam
+// o #app-toast, qualquer aviso que chegasse dentro dos 6 segundos do "Desfazer"
+// apagava o botão — e a exclusão virava definitiva sem o usuário entender por
+// quê. Os avisos que chegam sozinhos são justamente os do agendador de 15 min
+// ("N lembretes enviados", falha de backup) e o de versão nova do service
+// worker, que dispara quando um deploy entra com o app aberto. Numa recepção o
+// app fica aberto a semana toda.
+test('toast comum não pode matar o Desfazer que está na tela', () => {
+  const dom = domFalso(), tempo = agenda();
+  const { _toastUndo, toast } = carregar(['_toastUndo', 'toast'],
+    { document: dom.document, ...tempo });
+  let restaurou = 0;
+  _toastUndo('Agendamento excluído.', () => restaurou++);
+  const undoEl = dom.criados[0];
+  const btn = undoEl.filhos.find(f => f.textContent === 'Desfazer');
+
+  toast('📲 3 lembrete(s) WhatsApp enviado(s).');
+
+  assert.notStrictEqual(dom.criados[dom.criados.length - 1].id, undoEl.id,
+    'o aviso tem de nascer num elemento próprio');
+  assert.strictEqual(undoEl.filhos.includes(btn), true, 'o Desfazer continua no DOM');
+  assert.strictEqual(undoEl.style.opacity, '1', 'e continua visível');
+  btn.onclick();
+  assert.strictEqual(restaurou, 1, 'o usuário ainda consegue desfazer');
+});
+
+test('os dois toasts não se cobrem na tela', () => {
+  const dom = domFalso(), tempo = agenda();
+  const { _toastUndo, toast } = carregar(['_toastUndo', 'toast'],
+    { document: dom.document, ...tempo });
+  _toastUndo('Excluído.', () => {});
+  toast('Salvo');
+  const undoEl = dom.criados.find(e => e.id === 'app-toast-undo');
+  const toastEl = dom.criados.find(e => e.id === 'app-toast');
+  const bottom = (el) => Number((el.style.cssText.match(/bottom:(\d+)px/) || [])[1]);
+  assert.ok(bottom(undoEl) > bottom(toastEl),
+    'empilhados, não sobrepostos — dois avisos ao mesmo tempo é o caso normal agora');
 });
 
 // ---------- _diasDesde: idade do card no Kanban ----------
