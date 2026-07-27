@@ -111,6 +111,10 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- **CSV: o app tem de reimportar o que ele mesmo exporta.** `exportarCSV` cita campo com
+  `\n` e duplica aspas (`"` → `""`); o `impParseCSV` quebrava por linha **antes** de olhar
+  aspas — observação de duas linhas virava um paciente fantasma, e as aspas do texto
+  sumiam. Varra o arquivo inteiro respeitando aspas. (Irmão do bug do `impNormValor`.)
 - 🔴 **No arranque, cada passo é isolado e a ORDEM é de segurança.** `_iniciarApp` era uma
   sequência solta: o primeiro passo que lançasse levava o resto. `_applyRole` vinha depois
   da sidebar — exceção ali e o profissional **via o financeiro**; `_agendarTarefasDoDia`
