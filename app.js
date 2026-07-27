@@ -3736,8 +3736,16 @@ function _aplicarEfeitosMudancaStatusCrm(idx, oldStatus, newStatus) {
   // "Atendeu" → propõe registrar atendimento em Atendidos
   if (newStatus === 'Atendeu' && !c.converted) {
     setTimeout(() => {
+      // Pelo ID, não pelo índice. Este confirm() fica aberto o tempo que a
+      // pessoa levar pra decidir, e o CRM recebe leads por realtime nesse
+      // intervalo: cada um que chega desloca o array. Com o índice, o modal de
+      // atendimento abria preenchido com o nome, o WhatsApp e o profissional de
+      // OUTRO contato — e já vem com statusPgto 'Pago', então salvar registrava
+      // uma consulta paga para quem nunca foi atendido.
+      // (O ramo "Marcou" logo acima já passava o id pelo mesmo motivo, e o
+      // caminho do Kanban também. Este era o único que não.)
       if (confirm(`Marcar "${c.nome}" como Atendeu também cria o registro em Atendidos.\n\nRegistrar o atendimento agora?`)) {
-        convertCrmToAtendido(idx);
+        convertCrmToAtendido(c.id || idx);
       }
     }, 100);
     return;
