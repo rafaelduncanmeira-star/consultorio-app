@@ -11343,7 +11343,15 @@ function _agendamentosParaLembrar(horasAntes) {
 }
 
 // Roda o ciclo (chamado 1x por dia automaticamente)
+// Trava de reentrância, igual à do _drenarOutbox. Este ciclo dorme 800ms entre
+// cada paciente, então uma rodada com 10 agendamentos leva mais de 8 segundos —
+// tempo de sobra pra um segundo gatilho entrar por cima. E são TRÊS gatilhos: a
+// abertura do app, o intervalo de 15 min e a aba voltando pra frente. Duas
+// rodadas sobrepostas leem o mesmo agendamento como "não enviado" antes de
+// qualquer uma marcar, e o paciente recebe a MESMA mensagem duas vezes.
+let _cicloLembretesRodando = false;
 async function rodarCicloLembretes(forcado = false) {
+  if (_cicloLembretesRodando) return { skipped: 'ciclo já em andamento' };
   const cfg = getLembretesConfig();
   if (!cfg.ativo && !forcado) return { skipped: 'desativado' };
 
@@ -11365,6 +11373,8 @@ async function rodarCicloLembretes(forcado = false) {
   }
 
   let sucesso = 0, erro = 0;
+  _cicloLembretesRodando = true;
+  try {
   for (const ag of ags) {
     const msg = _formatarMensagemLembrete(ag, cfg.mensagem);
     let r;
@@ -11392,6 +11402,7 @@ async function rodarCicloLembretes(forcado = false) {
     // Throttle pra evitar rate limit
     await new Promise(r => setTimeout(r, 800));
   }
+  } finally { _cicloLembretesRodando = false; }
   // Só carimba "já rodou hoje" se algo foi de fato entregue. Carimbar depois de
   // uma rodada 100% falha bloqueava a retentativa pelo resto do dia (o ciclo
   // começa com `if (cfg.ultimoEnvio === hoje) return`), e no dia seguinte o

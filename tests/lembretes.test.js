@@ -28,6 +28,9 @@ function cenario({ agenda = AGENDA, aoEnviar, falharEm = [], cfg = {} } = {}) {
 
   const sandbox = {
     DB, JSON, Date, Promise, String,
+    // Trava de reentrância do ciclo. Precisa vir do sandbox: no node:vm um `let`
+    // de módulo não vira propriedade do contexto, então a função não o enxerga.
+    _cicloLembretesRodando: false,
     setTimeout: (fn) => { fn(); return 1; },          // sem throttle real no teste
     console: { log() {}, warn() {} },
     _waConnected: () => true,
@@ -279,4 +282,45 @@ test('disparo automático avisa a falha, como o do backup logo acima', () => {
     'só o sucesso gerava toast — falhar tudo não dizia nada na tela');
   assert.match(src, /\.catch\(/,
     'promise sem catch dentro de setTimeout some com o erro');
+});
+
+// ---------- duas rodadas sobrepostas mandariam a mesma mensagem duas vezes ----------
+// O ciclo dorme 800ms entre cada paciente: uma rodada com 10 agendamentos leva
+// mais de 8 segundos. E ele tem TRÊS gatilhos — a abertura do app, o intervalo
+// de 15 minutos e a aba voltando pra frente. Sem trava, duas rodadas
+// sobrepostas leem o mesmo agendamento como "não enviado" antes de qualquer uma
+// marcar, e o paciente recebe a MESMA mensagem duas vezes. O _drenarOutbox já
+// usava exatamente esta trava, pelo mesmo motivo.
+test('ciclo: segunda chamada durante a primeira é recusada', async () => {
+  const a = cenario({ agenda: [
+    { id: 'a1', pacienteNome: 'Ana', whatsapp: '11999990000', data: '2026-08-04', status: 'Confirmado' },
+    { id: 'a2', pacienteNome: 'Bruno', whatsapp: '11888880000', data: '2026-08-04', status: 'Confirmado' },
+  ] });
+  // Dispara a segunda rodada enquanto a primeira ainda está no meio do laço.
+  let segunda = null;
+  const primeira = a.rodarCicloLembretes();
+  segunda = await a.rodarCicloLembretes();
+  await primeira;
+  assert.strictEqual(segunda.skipped, 'ciclo já em andamento');
+  assert.deepStrictEqual(a.enviados, ['a1', 'a2'], 'cada paciente recebe uma vez só');
+});
+
+test('ciclo: a trava é liberada no fim, mesmo com falha de envio', async () => {
+  const a = cenario({
+    agenda: [{ id: 'a1', pacienteNome: 'Ana', whatsapp: '11999990000',
+               data: '2026-08-04', status: 'Confirmado' }],
+    falharEm: ['a1'],
+  });
+  await a.rodarCicloLembretes();
+  // Se a trava tivesse ficado presa, esta segunda rodada seria recusada.
+  const r = await a.rodarCicloLembretes();
+  assert.notStrictEqual(r.skipped, 'ciclo já em andamento',
+    'trava presa depois de uma falha impediria QUALQUER envio até recarregar a página');
+});
+
+test('a trava do ciclo segue o mesmo padrão do _drenarOutbox', () => {
+  const src = _recF('rodarCicloLembretes').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /if \(_cicloLembretesRodando\) return/);
+  assert.match(src, /finally \{ _cicloLembretesRodando = false; \}/,
+    'sem finally, uma exceção no meio deixaria a trava presa pra sempre');
 });
