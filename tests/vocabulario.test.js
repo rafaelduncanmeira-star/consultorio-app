@@ -190,8 +190,12 @@ function montarDB() {
   const { carregar } = require('./_extrair.js');
   const mem = new Map();
   const empurrado = [];
-  const sandbox = carregar(['const:_BLINDADAS', 'const:DB', '_novoId'], {
-    JSON, Array, Object, Date, Math,
+  const sandbox = carregar(
+    ['const:_BLINDADAS', 'const:SNAPSHOT_PREFIX', 'const:DB',
+     '_novoId', '_snapshotsLocais', '_gravarLocal', '_avisarSemEspaco'], {
+    JSON, Array, Object, Date, Math, Set, String,
+    console: { warn() {} }, toast: () => {},
+    _avisadoSemEspaco: new Set(),
     localStorage: {
       getItem: (k) => (mem.has(k) ? mem.get(k) : null),
       setItem: (k, v) => mem.set(k, v),

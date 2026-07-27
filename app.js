@@ -1907,6 +1907,41 @@ function _enfileirarPush(key, tarefa) {
   return atual;
 }
 
+// Grava no localStorage abrindo espaço quando o navegador recusa por cota.
+// O _gravarSnapshot já fazia isso pro backup diário; a gravação que MAIS
+// importa não fazia. Um consultório movimentado enche o localStorage (sete
+// snapshots da clínica inteira + os dados vivos + o histórico do chat), e aí o
+// setItem lança no meio do save: o modal fica aberto, nada é gravado, nada
+// entra na fila de envio e NENHUMA mensagem aparece. O atendimento que o médico
+// acabou de digitar simplesmente some, e digitar de novo dá no mesmo.
+// O espaço mais barato de liberar é o dos backups locais antigos: eles são
+// refeitos todo dia e a cópia da nuvem continua lá.
+function _gravarLocal(chaveCompleta, corpo) {
+  for (let tentativa = 0; tentativa < 4; tentativa++) {
+    try { localStorage.setItem(chaveCompleta, corpo); return true; }
+    catch (e) {
+      const antigos = _snapshotsLocais();   // do mais novo pro mais velho
+      if (!antigos.length) break;
+      const maisVelho = antigos[antigos.length - 1];
+      console.warn('sem espaço — descartando o backup local de', maisVelho);
+      localStorage.removeItem('consult_' + SNAPSHOT_PREFIX + maisVelho);
+    }
+  }
+  return false;
+}
+
+// Avisa UMA vez por chave: o alerta importa, repeti-lo a cada tecla não.
+const _avisadoSemEspaco = new Set();
+function _avisarSemEspaco(key) {
+  console.warn('localStorage sem espaço ao gravar', key);
+  if (_avisadoSemEspaco.has(key)) return;
+  _avisadoSemEspaco.add(key);
+  const msg = `⚠️ Sem espaço no navegador para salvar "${key}" neste aparelho. `
+    + 'O envio para a nuvem foi tentado assim mesmo. Apague backups antigos em Backup '
+    + 'e recarregue a página.';
+  if (typeof toast === 'function') toast(msg, 9000); else alert(msg);
+}
+
 const DB = {
   get: (key) => JSON.parse(localStorage.getItem('consult_' + key) || '[]'),
   // Devolve Promise<boolean>: true = o servidor confirmou. Quase todo mundo
@@ -1924,21 +1959,26 @@ const DB = {
       // cobre qualquer tela nova que esqueça o id.
       if (Array.isArray(val)) val.forEach(r => { if (r && !r.id) r.id = _novoId(cfg.pref); });
       const old = JSON.parse(localStorage.getItem('consult_' + key) || '[]');
-      localStorage.setItem('consult_' + key, JSON.stringify(val));
+      // O push segue mesmo se o local falhar: ele leva o `val` em memória, então
+      // é a única chance de o registro chegar a algum lugar.
+      if (!_gravarLocal('consult_' + key, JSON.stringify(val))) _avisarSemEspaco(key);
       // Falhou (offline/RLS)? Vai pra outbox — o pull não sobrescreve e a fila
       // re-entrega quando a conexão voltar.
       return _enfileirarPush(key, () => _pushBlindada(cfg.tabela, old, val)
         .then(ok => { if (ok) _outboxRemove(key); else _outboxAdd(key, 'blindada'); return ok; })
         .catch(() => { _outboxAdd(key, 'blindada'); return false; }));
     }
-    localStorage.setItem('consult_' + key, JSON.stringify(val));
+    // Aqui o cloudPush LÊ do localStorage, então uma gravação que falhou mandaria
+    // o valor antigo pro servidor. Avisar é o que resta — e é muito melhor que
+    // o silêncio de antes.
+    if (!_gravarLocal('consult_' + key, JSON.stringify(val))) _avisarSemEspaco(key);
     // cloudPush já enfileira sozinho quando falha — sair da fila é a confirmação.
     return _enfileirarPush(key, () => cloudPush(key)
       .then(() => !(key in _outboxGet())).catch(() => false));
   },
   getObj: (key, def = {}) => JSON.parse(localStorage.getItem('consult_' + key) || JSON.stringify(def)),
   setObj: (key, val) => {
-    localStorage.setItem('consult_' + key, JSON.stringify(val));
+    if (!_gravarLocal('consult_' + key, JSON.stringify(val))) _avisarSemEspaco(key);
     return _enfileirarPush(key, () => cloudPush(key)
       .then(() => !(key in _outboxGet())).catch(() => false));
   },
