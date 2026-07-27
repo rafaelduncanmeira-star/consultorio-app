@@ -111,6 +111,12 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- **Guardar o dado recusado não basta — tem de APARECER.** Outbox e quarentena existem pra
+  nada sumir, mas só apareciam no `console.warn`: da tela, o registro que o servidor
+  recusou simplesmente não existia. `renderSyncSaude()` mostra fila e quarentena (com o
+  motivo do banco) em **todo** contêiner `data-sync-saude`. São dois de propósito: a tela
+  de Backup está em `_PAGES_FINANCEIRO`, e profissional/médico membro — quem mais bate no
+  RLS — não a alcança. Aviso que só o dono vê não serve.
 - 🔴 **Classificação nunca mora em texto livre.** Lançamento de programa era reconhecido
   por `'[Programa'` dentro de `obs` — campo que o médico edita no modal. Apagar o
   colchete movia a receita de seção em seis telas, sem aviso. Use campo
