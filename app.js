@@ -5415,8 +5415,15 @@ function _isBloqueado(dataStr, horaInicio, duracaoMin) {
   const slotIni = new Date(dataStr + 'T' + horaInicio);
   const slotFim = new Date(slotIni.getTime() + duracaoMin * 60000);
   return bloqs.some(b => {
+    if (!b || !b.dataInicio) return false;
+    // `dataFim || dataInicio`: espelha o `bloqueado()` do wa-webhook, que já
+    // tinha o fallback. Sem ele, bloqueio de um dia só sem dataFim (backup
+    // antigo, registro montado à mão) vira `new Date('undefinedT23:59')` =
+    // Invalid Date, toda comparação dá false e o bloqueio não bloqueia nada —
+    // enquanto o servidor, com o fallback, o respeita. As duas pontas
+    // discordavam sobre o mesmo bloqueio.
     const bIni = new Date(b.dataInicio + 'T' + (b.horaInicio || '00:00'));
-    const bFim = new Date(b.dataFim + 'T' + (b.horaFim || '23:59'));
+    const bFim = new Date((b.dataFim || b.dataInicio) + 'T' + (b.horaFim || '23:59'));
     return slotIni < bFim && slotFim > bIni;
   });
 }
@@ -5977,7 +5984,19 @@ function saveBloqueio(e) {
     dataFim: fd.get('dataFim'),
     horaFim: fd.get('horaFim') || '23:59',
   };
+  if (!item.dataInicio || !item.dataFim) { toast('Informe as datas de início e fim'); return; }
   if (item.dataFim < item.dataInicio) { toast('Data fim antes do início'); return; }
+  // Bloqueio de um dia só precisa da checagem por HORA — a comparação de datas
+  // acima não pega nada quando as duas são iguais. Um bloqueio 14:00 → 09:00
+  // era aceito, aparecia na lista ("14:00 → 09:00") e não bloqueava NENHUM
+  // slot: a sobreposição exige `slotIni < bFim && slotFim > bIni`, e com o fim
+  // antes do início isso é impossível. O médico bloqueava a tarde pra um
+  // congresso, via o bloqueio na tela, e a agenda (e a IA) seguiam oferecendo
+  // o horário — sem erro, sem aviso.
+  if (item.dataFim === item.dataInicio && _toMin(item.horaFim) <= _toMin(item.horaInicio)) {
+    toast('Hora fim precisa ser depois da hora início');
+    return;
+  }
   const bloqs = getBloqueios();
   bloqs.push(item);
   DB.set('bloqueios', bloqs);

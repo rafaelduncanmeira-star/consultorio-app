@@ -169,3 +169,38 @@ test('6 meses: as duas telas calculam o corte do mesmo jeito', () => {
   assert.match(cortes[0], /_addMeses\(new Date\(\), -6\)/);
   assert.doesNotMatch(semCom, /setMonth\(/, 'setMonth cru transborda — use _addMeses');
 });
+
+// ---------- bloqueio que não bloqueia nada ----------
+// saveBloqueio só comparava as DATAS. Num bloqueio de um dia só as duas são
+// iguais, então nada barrava hora fim antes da hora início. O bloqueio era
+// aceito, aparecia na lista ("14:00 → 09:00") e não barrava NENHUM slot: a
+// sobreposição exige `slotIni < bFim && slotFim > bIni`, impossível com o fim
+// antes do início. O médico bloqueava a tarde, via o bloqueio na tela, e a
+// agenda seguia oferecendo o horário.
+const carregaBloq = (bloqs) => carregar('_isBloqueado', {
+  getBloqueios: () => bloqs, Date, Number,
+});
+
+test('_isBloqueado: bloqueio de tarde barra os slots da tarde', () => {
+  const { _isBloqueado } = carregaBloq([
+    { dataInicio: '2026-08-05', horaInicio: '14:00', dataFim: '2026-08-05', horaFim: '19:00' },
+  ]);
+  assert.strictEqual(_isBloqueado('2026-08-05', '15:00', 60), true);
+  assert.strictEqual(_isBloqueado('2026-08-05', '09:00', 60), false, 'a manhã continua livre');
+});
+
+test('_isBloqueado: bloqueio de um dia só sem dataFim ainda vale (igual ao webhook)', () => {
+  const { _isBloqueado } = carregaBloq([
+    { dataInicio: '2026-08-05', horaInicio: '14:00', horaFim: '19:00' },
+  ]);
+  assert.strictEqual(_isBloqueado('2026-08-05', '15:00', 60), true,
+    'sem o fallback vira Invalid Date e o app ignora um bloqueio que o servidor respeita');
+});
+
+test('saveBloqueio: recusa hora fim antes da hora início no mesmo dia', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  const src = recortarFuncao('saveBloqueio').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /dataFim === item\.dataInicio && _toMin\(item\.horaFim\) <= _toMin\(item\.horaInicio\)/,
+    'sem esta checagem o bloqueio é salvo e não bloqueia nada');
+  assert.match(src, /!item\.dataInicio \|\| !item\.dataFim/, 'e sem data nenhuma também não pode passar');
+});
