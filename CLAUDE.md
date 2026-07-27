@@ -111,6 +111,11 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- 🔴 **Classificação nunca mora em texto livre.** Lançamento de programa era reconhecido
+  por `'[Programa'` dentro de `obs` — campo que o médico edita no modal. Apagar o
+  colchete movia a receita de seção em seis telas, sem aviso. Use campo
+  (`programaInscricaoId`, o mesmo nome que agendamento e follow-up já usavam) e deixe o
+  texto só como reserva pro dado antigo: **`_ehLancamentoPrograma`**.
 - **Linha "Total" soma as LINHAS, nunca refaz a conta.** No PDF anual o total de lucro
   era `bruto − despesas` enquanto cada mês mostrava `recebido − despesas`: o total não
   fechava com a própria tabela. E em "Novos vs Recorrentes" o total somava
