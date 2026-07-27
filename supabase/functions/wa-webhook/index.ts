@@ -33,6 +33,16 @@
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
+// Marcador de versão. O deploy desta função é MANUAL (painel do Supabase),
+// então corrigir o arquivo aqui NÃO coloca a correção no ar — e não havia como
+// descobrir qual versão estava rodando. Abrindo a URL do webhook no navegador,
+// a resposta agora diz a data da versão publicada; basta comparar com esta
+// constante no repositório.
+//
+// ⚠️ AO MEXER NESTE ARQUIVO, SUBA A DATA. Há um teste que reprova se o arquivo
+//    tiver commit mais novo que a versão declarada aqui.
+const WEBHOOK_VERSAO = '2026-07-27';
+
 Deno.serve(async (req) => {
   const url = new URL(req.url);
 
@@ -48,7 +58,7 @@ Deno.serve(async (req) => {
       }
       return new Response('verify_token inválido', { status: 403 });
     }
-    return new Response('wa-webhook ativo', { status: 200 });
+    return new Response('wa-webhook ativo · versao ' + WEBHOOK_VERSAO, { status: 200 });
   }
   if (req.method !== 'POST') {
     return new Response('Método não permitido', { status: 405 });

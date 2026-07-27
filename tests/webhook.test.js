@@ -206,3 +206,33 @@ test('a regra de agendamento é literalmente a mesma no app e no servidor', () =
   assert.ok(app.includes(regraServidor.replace(/^- /, '')),
     'o preview do app tem de mostrar exatamente a regra que o servidor manda');
 });
+
+// ---------- marcador de versão do webhook ----------
+// Esta função é publicada À MÃO no painel do Supabase. Corrigir o arquivo aqui
+// não coloca nada no ar, e não havia como saber o que estava rodando. A
+// resposta do health check passou a dizer a versão.
+test('webhook: o health check informa a versão publicada', () => {
+  const { fonte } = require('./_extrairTs.js');
+  assert.match(fonte, /const WEBHOOK_VERSAO = '\d{4}-\d{2}-\d{2}'/,
+    'a versão tem de ser uma data, pra dar pra comparar com o repositório');
+  assert.match(fonte, /wa-webhook ativo.*WEBHOOK_VERSAO/,
+    'sem isso, abrir a URL não diz qual versão está no ar');
+});
+
+// Guarda de verdade: se o arquivo tiver commit mais novo que a versão
+// declarada, alguém mexeu e esqueceu de subir a data — e o usuário não teria
+// como perceber que precisa republicar.
+test('webhook: a versão declarada acompanha o último commit do arquivo', () => {
+  let ultimoCommit;
+  try {
+    ultimoCommit = require('node:child_process')
+      .execSync('git log -1 --format=%cs -- supabase/functions/wa-webhook/index.ts',
+                { cwd: require('node:path').join(__dirname, '..'), stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString().trim();
+  } catch (e) { return; }               // sem git (tarball, CI enxuto): não dá pra checar
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ultimoCommit)) return;
+  const { fonte } = require('./_extrairTs.js');
+  const versao = /const WEBHOOK_VERSAO = '([^']+)'/.exec(fonte)[1];
+  assert.ok(versao >= ultimoCommit,
+    `WEBHOOK_VERSAO é ${versao} mas o arquivo tem commit de ${ultimoCommit} — suba a data e republique a função`);
+});

@@ -29,6 +29,10 @@ CRM de WhatsApp, financeiro, programas/assinaturas e uma "secretária por IA".
 - Os `SETUP_*.sql` são rodados **à mão** pelo usuário no SQL Editor do Supabase.
   Se criar/alterar tabela ou policy, **avise explicitamente** — não presuma que rodou.
 - Edge Function `supabase/functions/wa-webhook/index.ts` — deploy pelo painel, *Verify JWT* desligado.
+  **Corrigir o arquivo NÃO coloca a correção no ar.** Ao mexer nele: suba o
+  `WEBHOOK_VERSAO` (há teste que reprova se esquecer) e **avise o usuário que precisa
+  republicar**. Pra conferir o que está rodando, abra a URL do webhook no navegador —
+  ela responde `wa-webhook ativo · versao AAAA-MM-DD`.
 
 ---
 
