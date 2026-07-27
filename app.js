@@ -8833,14 +8833,26 @@ function renderAlertasProativos({ fat, totalDesp, lucro, ocup, noshowPct, inadPc
   // paciente no dia do corte. Comparar as datas como texto 'AAAA-MM-DD' não tem
   // fuso nem hora.
   const seisStr = _ymd(_addMeses(new Date(), -6));
-  const ultimaVisita = {};
+  // Chave é o nome NORMALIZADO, igual ao resto do app (_novosNoMes,
+  // _primeiroAtendimentoDe, a tela de Retenção). Agrupar pelo nome cru fazia
+  // "Maria Silva", "maria silva" e "Maria Silva " virarem três pacientes — e é
+  // assim que o nome chega: digitado à mão em cada visita, importado de
+  // planilha, vindo do perfil do WhatsApp. A visita recente fica em UMA das
+  // grafias, então as outras apareciam no alerta como "sem retorno há +6 meses"
+  // — paciente atendido semana passada listado como sumido, enquanto a tela de
+  // Retenção (que normaliza) dizia o contrário sobre a mesma pessoa.
+  // Map, não objeto literal: `'constructor' in {}` é true por herança.
+  const ultimaVisita = new Map();
   todos.forEach(p => {
-    if (!p.nome || !p.data) return;
-    if (!ultimaVisita[p.nome] || p.data > ultimaVisita[p.nome]) ultimaVisita[p.nome] = p.data;
+    const chave = (p.nome || '').toLowerCase().trim();
+    if (!chave || !p.data) return;
+    const atual = ultimaVisita.get(chave);
+    // Guarda também a grafia da visita mais recente, que é a que vai pra tela.
+    if (!atual || p.data > atual.data) ultimaVisita.set(chave, { nome: p.nome, data: p.data });
   });
-  const sumidos = Object.entries(ultimaVisita)
-    .filter(([, d]) => d < seisStr)
-    .map(([nome]) => nome);
+  const sumidos = [...ultimaVisita.values()]
+    .filter(v => v.data < seisStr)
+    .map(v => v.nome);
   if (sumidos.length > 0) {
     const preview = sumidos.slice(0, 3).join(', ') + (sumidos.length > 3 ? ` e mais ${sumidos.length - 3}` : '');
     alertas.push({
