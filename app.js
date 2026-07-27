@@ -11951,6 +11951,7 @@ function _mesAtualLabel() {
 }
 
 function renderConfiguracoes() {
+  renderSyncSaude(); // o mesmo aviso da tela de Backup, que o profissional não alcança
   // Onboarding guiado + profissionais da clínica
   renderOnboardingClinica();
   renderProfissionais();
@@ -13374,8 +13375,14 @@ function _rotuloColecao(k) {
 }
 
 function renderSyncSaude() {
-  const el = document.getElementById('backup-sync-saude');
-  if (!el) return;
+  // TODOS os contêineres marcados, não só o da tela de Backup: essa página está
+  // em _PAGES_FINANCEIRO, ou seja, é bloqueada pro profissional e pro médico
+  // membro — exatamente quem mais bate no RLS e tem registro recusado. O aviso
+  // ficaria invisível justamente pra quem precisa dele. O segundo contêiner
+  // mora em Configurações, que todo mundo alcança.
+  const alvos = Array.from(document.querySelectorAll('[data-sync-saude]'));
+  if (!alvos.length) return;
+  const el = { set innerHTML(v) { alvos.forEach(a => { a.innerHTML = v; }); } };
   const { fila, quarentena } = _pendenciasSync();
   if (!fila.length && !quarentena.length) {
     el.innerHTML = `<div style="padding:12px 16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;font-size:12.5px;color:#15803d;">

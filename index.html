@@ -1737,7 +1737,7 @@
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:28px;" id="backup-resumo"></div>
 
       <!-- Saúde da sincronização: o que ainda não chegou ao servidor -->
-      <div id="backup-sync-saude" style="margin-bottom:24px;"></div>
+      <div id="backup-sync-saude" data-sync-saude style="margin-bottom:24px;"></div>
 
       <!-- Backups automáticos -->
       <div class="chart-card" style="margin-bottom:20px;border-left:3px solid #10b981;">
@@ -1847,6 +1847,10 @@
           <i data-lucide="shield" style="width:16px;height:16px;"></i> Privacidade (LGPD)
         </a>
       </div>
+
+      <!-- Mesmo aviso da tela de Backup: aquela página é bloqueada pro
+           profissional e pro médico membro, que são quem mais bate no RLS. -->
+      <div id="config-sync-saude" data-sync-saude style="margin-bottom:24px;"></div>
 
       <!-- Onboarding guiado da clínica (Tijolo 5) -->
       <div id="onboarding-clinica"></div>

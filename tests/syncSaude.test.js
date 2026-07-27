@@ -18,12 +18,18 @@ function ambiente({ outbox = {}, quarentena = [] } = {}) {
   mem.set('consult__quarentena', JSON.stringify(quarentena));
   let html = '';
   const el = { set innerHTML(v) { html = v; }, get innerHTML() { return html; } };
+  // Dois contêineres: o da tela de Backup e o de Configurações. O cartão tem de
+  // preencher os dois — a tela de Backup é bloqueada pro profissional.
+  const alvos = [el, { set innerHTML(v) { html = v; } }];
   const s = carregar(['const:_OUTBOX_TETO', 'const:_ROTULO_COLECAO', 'const:_BLINDADAS', '_outboxGet',
                       '_rotuloColecao', '_esc', '_pendenciasSync', 'renderSyncSaude'], {
     JSON, Object, Array, String, RegExp,
     localStorage: { getItem: (k) => (mem.has(k) ? mem.get(k) : null),
                     setItem: (k, v) => mem.set(k, v) },
-    document: { getElementById: (id) => (id === 'backup-sync-saude' ? el : null) },
+    document: {
+      getElementById: (id) => (id === 'backup-sync-saude' ? el : null),
+      querySelectorAll: () => alvos,
+    },
     console: { warn() {} },
   });
   return { ...s, get html() { return html; } };
@@ -104,10 +110,28 @@ test('renderBackup mostra o cartão sempre que a tela abre', () => {
     'de nada adianta o cartão existir se ninguém o desenha');
 });
 
-test('a tela de Backup tem o contêiner do cartão', () => {
+test('o cartão aparece também fora da tela de Backup', () => {
   const fs = require('node:fs'), path = require('node:path');
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-  assert.match(html, /id="backup-sync-saude"/);
+  const marcados = [...html.matchAll(/data-sync-saude/g)].length;
+  assert.ok(marcados >= 2,
+    'a tela de Backup está em _PAGES_FINANCEIRO: o profissional e o médico membro '
+    + 'não a alcançam, e são justamente quem mais tem registro recusado pelo RLS');
+  assert.match(html, /id="backup-sync-saude" data-sync-saude/);
+  assert.match(html, /id="config-sync-saude" data-sync-saude/);
+});
+
+test('Configurações desenha o cartão ao abrir', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  const src = recortarFuncao('renderConfiguracoes').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /renderSyncSaude\(\)/);
+});
+
+test('a página de Backup continua bloqueada pro profissional (a premissa)', () => {
+  const { carregar } = require('./_extrair.js');
+  const { _PAGES_FINANCEIRO } = carregar('const:_PAGES_FINANCEIRO', {});
+  assert.ok(_PAGES_FINANCEIRO.includes('backup'),
+    'se isto mudar, o segundo contêiner deixa de ser necessário — reveja');
 });
 
 test('tentar enviar agora zera as tentativas antes de drenar', () => {
