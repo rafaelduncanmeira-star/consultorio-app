@@ -323,6 +323,12 @@ Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
   suba `WEBHOOK_VERSAO` (há teste) e **avise o usuário pra republicar**. Pra saber o que
   está rodando, abra a URL do webhook — ela responde `wa-webhook ativo · versao AAAA-MM-DD`.
 
+- 🔴 **Só descarte a credencial quando o SERVIDOR se pronunciar.** O token do convite era
+  apagado do localStorage *antes* do aceite — e o `_checkInviteFromUrl` limpa a URL na
+  leitura, então era o único lugar onde ele existia. Uma falha de rede no primeiro login
+  queimava um convite válido. Erro de **transporte** = "não sei" (mantém, tenta de novo);
+  `data.error` do servidor = veredito (descarta). Mesmo erro do `processado: true`.
+
 #### 🔴 Padrão que mais rendeu: pergunta ao banco com o `error` descartado
 
 `supabase-js` não lança — devolve `{ error }`. Em **toda** consulta que pergunta
