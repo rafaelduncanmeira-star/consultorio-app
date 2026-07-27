@@ -11643,6 +11643,20 @@ function _agendamentosParaLembrar(horasAntes) {
 // rodadas sobrepostas leem o mesmo agendamento como "não enviado" antes de
 // qualquer uma marcar, e o paciente recebe a MESMA mensagem duas vezes.
 let _cicloLembretesRodando = false;
+// Carimba "o ciclo já rodou hoje" SEM levar junto o resto da configuração.
+// O `cfg` do ciclo é lido antes do primeiro envio, e o laço leva ~1s por
+// paciente (mais até 15s quando o provedor não responde): a tela de
+// Configurações fica viva o tempo todo. Gravar aquele objeto no fim devolvia a
+// mensagem antiga e RELIGAVA os lembretes que o médico tinha acabado de
+// desligar — e desligar no meio de uma rodada é justamente o que ele faz
+// quando percebe que estão saindo mensagens erradas. Relê e mexe só no campo
+// que é nosso.
+function _marcarLembretesRodaramHoje(hoje) {
+  const atual = getLembretesConfig();
+  atual.ultimoEnvio = hoje;
+  DB.setObj('lembretes_config', atual);
+}
+
 async function rodarCicloLembretes(forcado = false) {
   if (_cicloLembretesRodando) return { skipped: 'ciclo já em andamento' };
   const cfg = getLembretesConfig();
@@ -11654,8 +11668,7 @@ async function rodarCicloLembretes(forcado = false) {
 
   const ags = _agendamentosParaLembrar(cfg.horasAntes);
   if (!ags.length) {
-    cfg.ultimoEnvio = hoje;
-    DB.setObj('lembretes_config', cfg);
+    _marcarLembretesRodaramHoje(hoje);
     return { enviados: 0, msg: 'nenhum agendamento elegível' };
   }
 
@@ -11703,10 +11716,7 @@ async function rodarCicloLembretes(forcado = false) {
   // Uma falha total costuma ser transitória — Z-API fora do ar, internet caída —
   // e o ciclo dispara sozinho a cada abertura do app, então a retentativa é
   // barata e só alcança quem ainda não recebeu (o filtro é !_lembreteEnviado).
-  if (sucesso > 0 || erro === 0) {
-    cfg.ultimoEnvio = hoje;
-    DB.setObj('lembretes_config', cfg);
-  }
+  if (sucesso > 0 || erro === 0) _marcarLembretesRodaramHoje(hoje);
 
   if (sucesso > 0) _auditLog('configurou', 'lembretes', `Enviou ${sucesso} lembretes WhatsApp${erro > 0 ? ' (' + erro + ' falharam)' : ''}`);
   return { enviados: sucesso, erros: erro };

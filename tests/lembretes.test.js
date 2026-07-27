@@ -45,8 +45,11 @@ function cenario({ agenda = AGENDA, aoEnviar, falharEm = [], cfg = {} } = {}) {
     _agendamentosParaLembrar: () => DB.get('agendamentos').filter(a => !a._lembreteEnviado && a.whatsapp),
     _ymd: () => '2026-08-03',
   };
-  const { rodarCicloLembretes } = carregar('rodarCicloLembretes', sandbox);
-  return { rodarCicloLembretes, store, enviados };
+  const carregado = carregar(['_marcarLembretesRodaramHoje', 'rodarCicloLembretes'], sandbox);
+  // `carregado` É o contexto do vm (o carregar copia os globais), então
+  // reatribuir um stub nele muda o que a função enxerga — o `sandbox` local
+  // daqui é só o molde e não teria efeito nenhum.
+  return { rodarCicloLembretes: carregado.rodarCicloLembretes, store, enviados, sandbox: carregado };
 }
 
 const marcado = (store, id) => !!(store.agendamentos.find(a => a.id === id) || {})._lembreteEnviado;
@@ -271,9 +274,40 @@ test('card: motivo e nome passam por _esc', () => {
 
 test('ciclo: rodada 100% falha não bloqueia a retentativa do dia', () => {
   const src = _recF('rodarCicloLembretes').replace(/\/\/[^\n]*/g, '');
-  assert.match(src, /if \(sucesso > 0 \|\| erro === 0\) \{[\s\S]*?cfg\.ultimoEnvio = hoje;/,
+  assert.match(src, /if \(sucesso > 0 \|\| erro === 0\) _marcarLembretesRodaramHoje\(hoje\);/,
     'carimbar "já rodou hoje" depois de falhar tudo faz o paciente nunca ser avisado: '
     + 'no dia seguinte o agendamento já saiu da janela de lembrete');
+});
+
+// ---------- o ciclo não pode devolver a configuração de minutos atrás ----------
+// O `cfg` do ciclo é lido ANTES do primeiro envio. O laço dorme 800ms por
+// paciente e cada envio pode levar até 15s quando o provedor não responde: uma
+// rodada com 10 agendamentos passa fácil de meio minuto, com a tela viva o
+// tempo todo. Gravar aquele objeto no fim devolvia a mensagem antiga e RELIGAVA
+// os lembretes que o médico tinha acabado de desligar — e desligar no meio de
+// uma rodada é exatamente o que ele faz quando vê saindo mensagem errada.
+test('ciclo: desligar os lembretes durante a rodada não é desfeito no fim', async () => {
+  const c = cenario({ agenda: [
+    { id: 'a1', pacienteNome: 'Ana', whatsapp: '11999990000', data: '2026-08-04', status: 'Confirmado' },
+    { id: 'a2', pacienteNome: 'Bruno', whatsapp: '11888880000', data: '2026-08-04', status: 'Confirmado' },
+  ] });
+  // A configuração passa a viver no store, como no app.
+  c.sandbox.getLembretesConfig = () => Object.assign(
+    { ativo: true, horasAntes: 24, mensagem: 'texto antigo', ultimoEnvio: null },
+    c.store.lembretes_config);
+  // O médico abre Configurações no meio do laço e desliga.
+  c.sandbox._enviarLembreteZapi = async (ag) => {
+    c.enviados.push(ag.id);
+    if (ag.id === 'a1') c.store.lembretes_config = { ativo: false, horasAntes: 24, mensagem: 'texto novo', ultimoEnvio: null };
+    return { ok: true };
+  };
+  await c.rodarCicloLembretes();
+  assert.strictEqual(c.store.lembretes_config.ativo, false,
+    'o ciclo religou os lembretes que o médico desligou');
+  assert.strictEqual(c.store.lembretes_config.mensagem, 'texto novo',
+    'e devolveu a mensagem antiga por cima da que ele acabou de salvar');
+  assert.strictEqual(c.store.lembretes_config.ultimoEnvio, '2026-08-03',
+    'o campo que É do ciclo continua sendo carimbado');
 });
 
 test('disparo automático avisa a falha, como o do backup logo acima', () => {
