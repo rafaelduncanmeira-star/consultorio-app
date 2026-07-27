@@ -4490,6 +4490,15 @@ function editRow(col, ref) {
     form.nome.value = r.nome || '';
     form.whatsapp.value = r.whatsapp || '';
     form.idade.value = r.idade || '';
+    // Os três são <select>. O `tipo` é o caso mais fácil de acontecer: o
+    // copiloto grava o que o médico ditou ("Telemedicina", "avaliação") e a
+    // especificação dele nem lista vocabulário pra esse campo — mas o select só
+    // tem seis opções. Sem a opção legada, abrir o contato pra corrigir o
+    // telefone e salvar APAGA o tipo, e com ele o procedimento que o
+    // agendamento criado a partir do card ia herdar.
+    _opcaoLegadaSeFaltar(form.canal,  r.canal);
+    _opcaoLegadaSeFaltar(form.tipo,   r.tipo);
+    _opcaoLegadaSeFaltar(form.status, r.status);
     form.canal.value = r.canal || '';
     form.tipo.value = r.tipo || '';
     form.status.value = r.status || '';
@@ -4514,11 +4523,7 @@ function editRow(col, ref) {
     // procedimento logo acima. Atribuir um valor que não existe no <select>
     // deixa selectedIndex = -1, e aí o FormData devolve '' no save — a forma de
     // pagamento seria APAGADA só por abrir e salvar o atendimento.
-    if (r.pagamento && !_pagamentoCanonico(r.pagamento)) {
-      const selPg = document.getElementById('pac-pagamento');
-      if (selPg) selPg.insertAdjacentHTML('beforeend',
-        `<option value="${_esc(r.pagamento)}">${_esc(r.pagamento)} (legado)</option>`);
-    }
+    _opcaoLegadaSeFaltar(form.pagamento, r.pagamento);
     form.pagamento.value = r.pagamento || '';
     // _statusPgtoCanonico: se o valor gravado não existir no <select>, o
     // navegador deixa selectedIndex = -1 e o form devolve '' no save — apagando
@@ -4531,6 +4536,7 @@ function editRow(col, ref) {
     if (form.whatsapp) form.whatsapp.value = r.whatsapp || '';
     form.ultConsulta.value = r.ultConsulta || '';
     form.dataContato.value = r.dataContato || '';
+    _opcaoLegadaSeFaltar(form.tipoContato, r.tipoContato);
     form.tipoContato.value = r.tipoContato || '';
     form.dataReav.value = r.dataReav || '';
     form.obs.value = r.obs || '';

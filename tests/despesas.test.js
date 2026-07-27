@@ -98,6 +98,27 @@ test('o modal de despesa preserva valor fora do <select>', () => {
   }
 });
 
+// A mesma armadilha vale pra TODO <select> que o editRow preenche. O `tipo` do
+// CRM é o mais fácil de disparar: o copiloto grava o que o médico ditou
+// ("Telemedicina", "avaliação") e a especificação dele nem lista vocabulário
+// pra esse campo — mas o select só tem seis opções. Abrir o contato pra
+// corrigir o telefone e salvar apagava o tipo, e com ele o procedimento que o
+// agendamento criado a partir do card ia herdar.
+test('todo <select> preenchido pelo editRow recebe a opção legada antes', () => {
+  // Campos do editRow que são <select> no index.html — conferido no HTML, não
+  // chutado: se um deixar de ser select (ou virar select), o teste avisa.
+  const html = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'index.html'), 'utf8');
+  const src = recortarFuncao('editRow');
+  const atribuicoes = [...src.matchAll(/form\.(\w+)\.value = r\.\w+/g)].map(m => m[1]);
+  const selects = new Set([...html.matchAll(/<select[^>]*\sname="(\w+)"/g)].map(m => m[1]));
+  const desprotegidos = atribuicoes
+    .filter(c => selects.has(c))
+    .filter(c => !src.includes(`_opcaoLegadaSeFaltar(form.${c}`));
+  assert.deepStrictEqual(desprotegidos, [],
+    'valor fora das <option> deixa selectedIndex -1 e o save devolve \'\' — o campo é apagado');
+});
+
 test('_opcaoLegadaSeFaltar só age quando a opção falta mesmo', () => {
   const { _opcaoLegadaSeFaltar } = carregar(['_esc', '_opcaoLegadaSeFaltar'], { Array, String });
   const feito = [];

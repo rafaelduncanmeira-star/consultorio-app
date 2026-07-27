@@ -289,7 +289,11 @@ test('nenhuma tela reescreve a lista de formas de pagamento à mão', () => {
 test('editRow guarda forma de pagamento fora do vocabulário como opção legada', () => {
   const { recortarFuncao } = require('./_extrair.js');
   const src = recortarFuncao('editRow');
-  assert.match(src, /_pagamentoCanonico\(r\.pagamento\)/);
-  assert.match(src, /pac-pagamento[\s\S]{0,200}legado/,
-    'sem a opção, o <select> fica com selectedIndex -1 e o save APAGA a forma de pagamento');
+  // O mecanismo é o mesmo de todos os outros <select> do modal
+  // (_opcaoLegadaSeFaltar): sem a opção, o select fica com selectedIndex -1 e o
+  // save devolve '' — a forma de pagamento é APAGADA.
+  const i = src.indexOf('_opcaoLegadaSeFaltar(form.pagamento');
+  assert.ok(i > 0, 'forma de pagamento fora do vocabulário some ao abrir e salvar');
+  assert.ok(i < src.indexOf("form.pagamento.value = r.pagamento"),
+    'a opção tem de ser acrescentada ANTES da atribuição');
 });
