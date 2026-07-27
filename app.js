@@ -12651,7 +12651,7 @@ function importarJSON(input) {
   const status = document.getElementById('backup-import-status');
   status.textContent = `Lendo ${file.name}…`;
   const reader = new FileReader();
-  reader.onload = (e) => {
+  reader.onload = async (e) => {
     try {
       const dados = JSON.parse(e.target.result);
       if (!dados || typeof dados !== 'object') throw new Error('Arquivo inválido');
@@ -12659,22 +12659,44 @@ function importarJSON(input) {
       const chavesTrocar = BACKUP_KEYS.filter(k => dados[k] !== undefined);
       if (!chavesTrocar.length) throw new Error('Nenhum dado reconhecido no arquivo');
 
+      // Coleção blindada TEM de ser array. Arquivo editado à mão com um objeto
+      // no lugar era gravado assim mesmo, e toda tela que faz .filter/.reduce
+      // em cima quebrava — o app não abria mais até limpar o navegador.
+      const invalidas = chavesTrocar.filter(k => _BLINDADAS[k] && !Array.isArray(dados[k]));
+      if (invalidas.length) throw new Error('Formato inválido (esperava lista) em: ' + invalidas.join(', '));
+
       const exportadoEm = dados._meta?.exportadoEm ? new Date(dados._meta.exportadoEm).toLocaleString('pt-BR') : 'data desconhecida';
       if (!confirm(`Restaurar backup de ${exportadoEm}?\n\nIsso vai substituir:\n${chavesTrocar.join(', ')}\n\nSeus dados atuais serão apagados. Confirma?`)) {
         status.textContent = 'Importação cancelada.';
-        input.value = '';
         return;
       }
 
-      chavesTrocar.forEach(k => DB.set(k, dados[k]));
+      // ESPERA o envio terminar antes de recarregar. As coleções blindadas
+      // sobem em lotes de 200; recarregar num timer de 2s cortava o envio no
+      // meio. O que ficava pra trás só existia no localStorage, e o pull
+      // seguinte trazia os dados VELHOS por cima — o backup "restaurado com
+      // sucesso" evaporava. Pior: como o push faz upsert e só depois delete,
+      // o corte no meio deixava o servidor com uma mistura dos dois estados.
+      // (restaurarSnapshot já espera — aqui era a única porta que não esperava.)
+      status.textContent = 'Restaurando e enviando para a nuvem…';
+      const oks = await Promise.all(chavesTrocar.map(k => DB.set(k, dados[k])));
+      const falhas = chavesTrocar.filter((_, i) => oks[i] === false);
+      if (falhas.length) {
+        status.textContent = `⚠️ Restaurado neste aparelho, mas não subiu: ${falhas.join(', ')}`;
+        alert('Backup restaurado NESTE APARELHO, mas estas seções não chegaram à nuvem: '
+          + falhas.join(', ') + '.\n\nElas ficaram na fila de envio. Mantenha o app aberto '
+          + 'com internet até sincronizar — não recarregue nem feche agora.');
+        return; // recarregar aqui só apressaria o pull a sobrescrever o que faltou
+      }
       status.textContent = `✅ Restaurado com sucesso! (${chavesTrocar.length} seções)`;
       toast('✅ Backup restaurado! Recarregando…', 2000);
       setTimeout(() => location.reload(), 2000);
     } catch(err) {
       status.textContent = `❌ Erro: ${err.message}`;
       toast('❌ Arquivo inválido ou corrompido.', 3000);
+    } finally {
+      input.value = '';
     }
-    input.value = '';
   };
   reader.readAsText(file);
 }
