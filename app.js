@@ -4796,7 +4796,13 @@ function toast(msg, ms = 3500) {
     t.id = 'app-toast';
     document.body.appendChild(t);
   }
-  t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:12px 20px;border-radius:10px;font-size:13.5px;font-weight:500;box-shadow:0 10px 30px rgba(0,0,0,0.25);z-index:9999;opacity:0;transition:opacity 0.25s;max-width:90vw;text-align:center;';
+  // pointer-events:none é obrigatório. O toast é fixed, z-index 9999, e some
+  // só com opacity:0 — mas opacidade zero NÃO desliga clique. Sem isto o
+  // elemento continuava no DOM interceptando toque bem em cima da nav inferior
+  // do mobile (#mob-bottom-nav, z-index 150): depois do primeiro toast da
+  // sessão, o botão central da nav parava de responder. Aqui não há nada
+  // clicável dentro do toast, então fica desligado sempre.
+  t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:12px 20px;border-radius:10px;font-size:13.5px;font-weight:500;box-shadow:0 10px 30px rgba(0,0,0,0.25);z-index:9999;opacity:0;transition:opacity 0.25s;max-width:90vw;text-align:center;pointer-events:none;';
   t.textContent = msg;
   t.style.opacity = '1';
   clearTimeout(t._timer);
@@ -4813,7 +4819,11 @@ function _toastUndo(msg, restaurarFn, ms = 6000) {
     t.id = 'app-toast';
     document.body.appendChild(t);
   }
-  t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 10px 10px 18px;border-radius:10px;font-size:13.5px;font-weight:500;box-shadow:0 10px 30px rgba(0,0,0,0.25);z-index:9999;opacity:0;transition:opacity 0.25s;max-width:90vw;display:flex;align-items:center;gap:14px;';
+  // Aqui o toast PRECISA receber clique (o botão Desfazer), então ele nasce
+  // clicável e é desligado quando some — senão fica um "Desfazer" invisível
+  // sobre a nav inferior do mobile, e um toque ali ressuscita o registro
+  // apagado minutos depois, sem o usuário entender o que aconteceu.
+  t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 10px 10px 18px;border-radius:10px;font-size:13.5px;font-weight:500;box-shadow:0 10px 30px rgba(0,0,0,0.25);z-index:9999;opacity:0;transition:opacity 0.25s;max-width:90vw;display:flex;align-items:center;gap:14px;pointer-events:auto;';
   t.innerHTML = '';
   const span = document.createElement('span');
   span.textContent = msg;
@@ -4821,16 +4831,26 @@ function _toastUndo(msg, restaurarFn, ms = 6000) {
   btn.type = 'button';
   btn.textContent = 'Desfazer';
   btn.style.cssText = 'background:#10b981;color:#fff;border:none;border-radius:6px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;';
-  btn.onclick = () => {
-    restaurarFn();
+  // Uma restauração só. O botão continua no DOM depois do clique e dois
+  // toques seguidos chamavam restaurarFn duas vezes.
+  let usado = false;
+  const esconder = () => {
+    usado = true;
     t.style.opacity = '0';
+    t.style.pointerEvents = 'none';
+    btn.disabled = true;
     clearTimeout(t._timer);
+  };
+  btn.onclick = () => {
+    if (usado) return;
+    esconder();
+    restaurarFn();
   };
   t.appendChild(span);
   t.appendChild(btn);
   t.style.opacity = '1';
   clearTimeout(t._timer);
-  t._timer = setTimeout(() => { t.style.opacity = '0'; }, ms);
+  t._timer = setTimeout(esconder, ms);
 }
 
 function filterPacStatus(val) {

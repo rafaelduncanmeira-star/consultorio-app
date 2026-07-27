@@ -5,6 +5,75 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const { carregar } = require('./_extrair.js');
 
+// ---------- toast: o aviso invisível que bloqueava a nav do celular ----------
+// O toast é position:fixed, z-index 9999, e some só com opacity:0 — mas
+// opacidade zero NÃO desliga clique. Ele fica no DOM interceptando toque em
+// cima da #mob-bottom-nav (z-index 150), que ocupa os 58px de baixo. Depois do
+// primeiro toast da sessão, o botão central da nav parava de responder.
+function domFalso() {
+  const criados = [];
+  const novo = (tag) => {
+    const el = {
+      tag, id: '', type: '', textContent: '', innerHTML: '', disabled: false,
+      onclick: null, filhos: [],
+      style: { cssText: '', opacity: '', pointerEvents: '' },
+      appendChild(f) { this.filhos.push(f); return f; },
+    };
+    criados.push(el);
+    return el;
+  };
+  const porId = {};
+  return {
+    criados,
+    document: {
+      getElementById: (id) => porId[id] || null,
+      createElement: (tag) => novo(tag),
+      body: { appendChild: (el) => { if (el.id) porId[el.id] = el; return el; } },
+    },
+  };
+}
+const agenda = () => { const fns = []; return { setTimeout: (f) => { fns.push(f); return fns.length; }, clearTimeout: () => {}, disparar: () => fns.forEach(f => f()) }; };
+
+test('toast: não pode interceptar clique — nasce e morre com pointer-events:none', () => {
+  const dom = domFalso(), tempo = agenda();
+  const { toast } = carregar('toast', { document: dom.document, ...tempo });
+  toast('Salvo');
+  const el = dom.criados[0];
+  assert.match(el.style.cssText, /pointer-events:\s*none/,
+    'sem isto o toast invisível cobre a nav inferior do celular pra sempre');
+});
+
+test('_toastUndo: o Desfazer some de verdade quando o toast expira', () => {
+  const dom = domFalso(), tempo = agenda();
+  const { _toastUndo } = carregar('_toastUndo', { document: dom.document, ...tempo });
+  let restaurou = 0;
+  _toastUndo('Agendamento excluído.', () => restaurou++);
+  const el = dom.criados[0];
+  const btn = el.filhos.find(f => f.textContent === 'Desfazer');
+  assert.ok(btn, 'o botão existe enquanto o toast está visível');
+  assert.match(el.style.cssText, /pointer-events:\s*auto/, 'visível, tem de aceitar clique');
+
+  tempo.disparar(); // passa os 6 segundos
+  assert.strictEqual(el.style.opacity, '0');
+  assert.strictEqual(el.style.pointerEvents, 'none', 'invisível não pode receber toque');
+  assert.strictEqual(btn.disabled, true);
+
+  btn.onclick();
+  assert.strictEqual(restaurou, 0, 'clique no Desfazer expirado não pode ressuscitar o registro');
+});
+
+test('_toastUndo: dois toques seguidos restauram uma vez só', () => {
+  const dom = domFalso(), tempo = agenda();
+  const { _toastUndo } = carregar('_toastUndo', { document: dom.document, ...tempo });
+  let restaurou = 0;
+  _toastUndo('Excluído.', () => restaurou++);
+  const btn = dom.criados[0].filhos.find(f => f.textContent === 'Desfazer');
+  btn.onclick();
+  btn.onclick();
+  btn.onclick();
+  assert.strictEqual(restaurou, 1);
+});
+
 // ---------- _diasDesde: idade do card no Kanban ----------
 // 'YYYY-MM-DD' é lido pelo JS como meia-noite UTC. Comparado com Date.now()
 // (hora local), em UTC-3 isso somava o fuso à conta: das 21:00 em diante, o
