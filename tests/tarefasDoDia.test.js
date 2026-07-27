@@ -81,3 +81,61 @@ test('voltar com a aba pra frente também re-checa', () => {
     'máquina suspensa não dispara setInterval: o computador da recepção dorme na '
     + 'sexta e acorda na segunda com o timer parado no tempo');
 });
+
+// ---------- aviso repetido vira ruído ----------
+// O agendador chama as tarefas a cada 15 minutos. Um erro PERMANENTE — o
+// localStorage cheio, o provedor de WhatsApp fora do ar — repetiria o mesmo
+// toast a cada volta, o dia inteiro. Aviso assim a pessoa aprende a fechar sem
+// ler, e estes dois são justamente os que não podem virar ruído.
+function ambienteAviso(resultados) {
+  const toasts = [];
+  let i = 0;
+  const s = carregar(['_tarefaBackupDiario', '_tarefaLembretes'], {
+    console: { warn() {}, log() {} },
+    _ultimoAvisoBackup: '', _ultimoAvisoLembrete: '',
+    criarSnapshotDiario: () => Promise.resolve(resultados[Math.min(i++, resultados.length - 1)]),
+    rodarCicloLembretes: () => Promise.resolve(resultados[Math.min(i++, resultados.length - 1)]),
+    toast: (t) => toasts.push(t),
+  });
+  return { ...s, toasts };
+}
+
+test('backup: o mesmo erro não é repetido a cada volta do agendador', async () => {
+  const a = ambienteAviso([{ error: 'Sem espaço no navegador' }]);
+  await a._tarefaBackupDiario();
+  await a._tarefaBackupDiario();
+  await a._tarefaBackupDiario();
+  assert.strictEqual(a.toasts.length, 1,
+    'de 15 em 15 minutos o dia inteiro, o aviso vira ruído e para de ser lido');
+});
+
+test('backup: motivo diferente volta a avisar', async () => {
+  const a = ambienteAviso([{ error: 'Sem espaço no navegador' }, { error: 'Outra coisa' }]);
+  await a._tarefaBackupDiario();
+  await a._tarefaBackupDiario();
+  assert.strictEqual(a.toasts.length, 2);
+});
+
+test('backup: depois de dar certo, o aviso volta a valer', async () => {
+  const a = ambienteAviso([{ error: 'Sem espaço' }, { created: true, data: 'x' }, { error: 'Sem espaço' }]);
+  await a._tarefaBackupDiario();   // avisa
+  await a._tarefaBackupDiario();   // sucesso, zera
+  await a._tarefaBackupDiario();   // volta a avisar
+  assert.strictEqual(a.toasts.length, 2,
+    'se voltou a falhar depois de funcionar, é informação nova');
+});
+
+test('lembretes: mesma regra para a falha de envio', async () => {
+  const a = ambienteAviso([{ enviados: 0, erros: 2 }]);
+  await a._tarefaLembretes();
+  await a._tarefaLembretes();
+  assert.strictEqual(a.toasts.length, 1);
+  assert.match(a.toasts[0], /NÃO foram enviados/);
+});
+
+test('lembretes: sucesso sempre aparece (não é aviso repetido, é evento)', async () => {
+  const a = ambienteAviso([{ enviados: 3, erros: 0 }]);
+  await a._tarefaLembretes();
+  await a._tarefaLembretes();
+  assert.strictEqual(a.toasts.length, 2, 'cada envio bem-sucedido é um fato novo');
+});

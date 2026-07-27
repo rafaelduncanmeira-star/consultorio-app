@@ -1308,23 +1308,42 @@ function closeOnboarding() {
 // As duas funções já se protegem sozinhas contra rodar duas vezes no mesmo dia
 // (`cfg.ultimoEnvio === hoje` no ciclo, "já existe snapshot de hoje" no backup),
 // então re-checar de tempos em tempos é barato e não duplica nada.
+// Último aviso já mostrado, por tarefa. O agendador chama estas funções a cada
+// 15 minutos: um erro PERMANENTE (localStorage cheio, provedor de WhatsApp fora
+// do ar) repetiria o mesmo toast a cada volta, o dia inteiro. Aviso que se
+// repete assim vira ruído e a pessoa aprende a fechar sem ler — e estes dois
+// são justamente os que não podem virar ruído. Mostra uma vez por MOTIVO; volta
+// a mostrar se o motivo mudar, ou se a tarefa voltar a dar certo.
+let _ultimoAvisoBackup = '';
+let _ultimoAvisoLembrete = '';
+
 function _tarefaBackupDiario() {
   return criarSnapshotDiario().then(r => {
-    if (r.created) console.log('🗂️ Backup automático criado:', r.data);
+    if (r.created) { _ultimoAvisoBackup = ''; console.log('🗂️ Backup automático criado:', r.data); return; }
     // Falha de backup precisa aparecer: é a rede de segurança de todo o resto.
-    else if (r.error) toast('⚠️ ' + r.error, 6000);
+    if (r.error && r.error !== _ultimoAvisoBackup) {
+      _ultimoAvisoBackup = r.error;
+      toast('⚠️ ' + r.error, 6000);
+    }
   }).catch(e => console.warn('backup automático falhou:', e && e.message));
 }
 
 function _tarefaLembretes() {
   return rodarCicloLembretes().then(r => {
-    if (r.enviados > 0) toast(`📲 ${r.enviados} lembrete(s) WhatsApp enviado(s).`, 4000);
+    if (r.enviados > 0) { _ultimoAvisoLembrete = ''; toast(`📲 ${r.enviados} lembrete(s) WhatsApp enviado(s).`, 4000); }
     // Falha de lembrete precisa aparecer, pelo mesmo motivo da falha de backup
     // logo acima: o paciente NÃO foi avisado e ninguém sabe. Antes só o sucesso
     // gerava toast — com todos os envios falhando, a tela não dizia nada e o
     // card de lembretes continuava exibindo "✓ Ativo · último envio: hoje".
-    if (r.erros > 0) toast(`⚠️ ${r.erros} lembrete(s) NÃO foram enviados — veja em Configurações.`, 7000);
-    if (r.error) toast('⚠️ ' + r.error, 6000);
+    // (A lista completa, com paciente e motivo, fica no card de Configurações:
+    // o toast é só o chamado de atenção, e por isso não precisa repetir.)
+    const aviso = r.erros > 0
+      ? `⚠️ ${r.erros} lembrete(s) NÃO foram enviados — veja em Configurações.`
+      : (r.error ? '⚠️ ' + r.error : '');
+    if (aviso && aviso !== _ultimoAvisoLembrete) {
+      _ultimoAvisoLembrete = aviso;
+      toast(aviso, 7000);
+    }
   }).catch(e => console.warn('ciclo de lembretes falhou:', e && e.message));
 }
 

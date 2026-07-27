@@ -275,7 +275,7 @@ test('disparo automático avisa a falha, como o do backup logo acima', () => {
   // A tarefa saiu de dentro do _iniciarApp e virou função nomeada, pra poder ser
   // reexecutada pelo agendador — o _iniciarApp roda uma vez por carregamento.
   const src = _recF('_tarefaLembretes').replace(/\/\/[^\n]*/g, '');
-  assert.match(src, /r\.erros > 0[\s\S]{0,160}toast\(/,
+  assert.match(src, /r\.erros > 0[\s\S]{0,300}toast\(/,
     'só o sucesso gerava toast — falhar tudo não dizia nada na tela');
   assert.match(src, /\.catch\(/,
     'promise sem catch dentro de setTimeout some com o erro');
