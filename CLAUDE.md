@@ -225,6 +225,10 @@ Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
   já tem identidade: o telefone. `_crmPorTelefone(_chatPhone)`, resolvido na hora do uso.
   Corolário de nomes: variável que recebe `_waConnected()` **não** se chama `zapiOk` — foi
   esse nome que convidou a regressão do card de lembretes. Há teste reprovando.
+- **Telefone a partir do nome é `_telefoneDoPaciente(nome)`, uma regra só.** O botão 💬 do
+  follow-up comparava nome **cru** (`p.nome === fu.nome`) e olhava 3 coleções; o da lista de
+  pacientes normalizava e olhava 4. Grafia divergente → "WhatsApp não cadastrado" com o
+  número gravado no atendimento ao lado, e o médico redigita o que o app já tinha.
 - **Identidade de paciente é SEMPRE `(p.nome || '').toLowerCase().trim()`.** O alerta
   "sem retorno há +6 meses" do Dashboard agrupava pelo nome cru enquanto a tela de Retenção
   (de onde a regra foi copiada) normalizava — e o comentário dizia que estavam iguais. Nome
