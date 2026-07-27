@@ -71,7 +71,7 @@ test('agenda: lembrete e detecção de vínculos usam a constante', () => {
 // verbatim) ou arquivo editado à mão.
 const carregaCfg = (salvo) => carregar(['const:AG_CONFIG_PADRAO', 'getAgConfig'], {
   DB: { getObj: (k, def) => (salvo === undefined ? def : salvo) },
-  Array, Object,
+  Array, Object, Number,
 });
 
 test('getAgConfig: config parcial recebe os campos que faltam', () => {
@@ -97,6 +97,48 @@ test('getAgConfig: diasUteis vazio ou fora do formato cai no padrão', () => {
     assert.deepStrictEqual(JSON.parse(JSON.stringify(getAgConfig().diasUteis)), [1, 2, 3, 4, 5],
       `diasUteis ${JSON.stringify(ruim)} não serve pra percorrer`);
   }
+});
+
+// A config antiga guardava UM número de slots por dia (slotsConsultorioDia).
+// A migração existia em TRÊS cópias — na tela de Configurações, na ocupação do
+// Dashboard e no relatório — e nenhuma rodava: todas liam
+// `cfg.slotsSemanais || (cfg.slotsConsultorioDia ? … )` DEPOIS do getAgConfig,
+// que já tinha trocado o slotsSemanais inválido pelo padrão de fábrica. Quem
+// configurou a agenda na versão antiga passou a ver a capacidade de fábrica, e
+// a ocupação do consultório (Dashboard e PDF do contador) era calculada contra
+// ela. E as três cópias discordavam: a da tela de Configurações espalhava o
+// número de segunda a sexta ignorando o diasUteis.
+test('getAgConfig: migra a config antiga de slots por dia', () => {
+  const cfg = carregaCfg({ slotsConsultorioDia: 8, diasUteis: [2, 3, 4, 5, 6] }).getAgConfig();
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(cfg.slotsSemanais)), [0, 0, 8, 8, 8, 8, 8],
+    'o número antigo vale nos dias úteis DELE, não de segunda a sexta');
+});
+
+test('getAgConfig: slotsSemanais salvo vence o campo antigo', () => {
+  const cfg = carregaCfg({ slotsConsultorioDia: 8, slotsSemanais: [0, 4, 0, 4, 0, 4, 0] }).getAgConfig();
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(cfg.slotsSemanais)), [0, 4, 0, 4, 0, 4, 0]);
+});
+
+test('getAgConfig: campo antigo inutilizável cai no padrão, não em zeros', () => {
+  for (const ruim of [0, null, 'oito', -3]) {
+    const cfg = carregaCfg({ slotsConsultorioDia: ruim }).getAgConfig();
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(cfg.slotsSemanais)),
+      [0, 5, 0, 5, 5, 0, 0], `slotsConsultorioDia ${JSON.stringify(ruim)}`);
+  }
+});
+
+test('nenhuma tela reimplementa a migração de slots', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  // Tira o getAgConfig do fonte e varre o resto: o campo antigo não pode ser
+  // lido em nenhum outro lugar — fora dele a leitura acontece tarde demais.
+  const dentro = recortarFuncao('getAgConfig');
+  const fora = [];
+  fonte.replace(dentro, m => '\n'.repeat(m.split('\n').length - 1))
+    .split('\n').forEach((l, i) => {
+      if (l.includes('slotsConsultorioDia')) fora.push((i + 1) + ': ' + l.trim());
+    });
+  assert.deepStrictEqual(fora, [],
+    'a migração só pode existir dentro do getAgConfig — cópia fora dele nunca chega a rodar');
 });
 
 test('getAgConfig: config completa passa intacta', () => {

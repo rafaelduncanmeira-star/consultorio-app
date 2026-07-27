@@ -5889,6 +5889,25 @@ function getAgConfig() {
   const cfg = { ...AG_CONFIG_PADRAO, ...(salvo && typeof salvo === 'object' ? salvo : {}) };
   // Campos que o código percorre precisam ser lista de verdade, não só existir.
   if (!Array.isArray(cfg.diasUteis) || !cfg.diasUteis.length) cfg.diasUteis = AG_CONFIG_PADRAO.diasUteis;
+  // Config antiga guardava UM número de slots por dia (slotsConsultorioDia).
+  // A migração existia — em TRÊS cópias — mas em nenhuma delas rodava: as três
+  // liam `cfg.slotsSemanais || (cfg.slotsConsultorioDia ? … )` DEPOIS desta
+  // função, e aqui o slotsSemanais inválido já tinha sido trocado pelo padrão
+  // de fábrica. Ou seja: quem configurou a agenda na versão antiga passou a ver
+  // a capacidade de fábrica ([0,5,0,5,5,0,0]) em vez da dele, e a ocupação do
+  // consultório — no Dashboard e no PDF do contador — era calculada contra ela.
+  // As três cópias ainda discordavam entre si: a da tela de Configurações
+  // espalhava o número de segunda a sexta ignorando o diasUteis, então o número
+  // que o médico via ao editar não era o que o app usava pra calcular.
+  // A migração vive aqui agora, uma vez só, e ANTES da validação.
+  // Olha o que foi SALVO, não o objeto já mesclado: o spread com o padrão
+  // sempre entrega um slotsSemanais válido, então testar `cfg` aqui nunca
+  // dispara — era essa a razão de fundo das três cópias nunca rodarem.
+  const salvoSemanal = salvo && salvo.slotsSemanais;
+  const salvoDia = Number(salvo && salvo.slotsConsultorioDia);
+  if ((!Array.isArray(salvoSemanal) || salvoSemanal.length !== 7) && salvoDia > 0) {
+    cfg.slotsSemanais = Array(7).fill(0).map((_, i) => (cfg.diasUteis.includes(i) ? salvoDia : 0));
+  }
   if (!Array.isArray(cfg.slotsSemanais) || cfg.slotsSemanais.length !== 7) cfg.slotsSemanais = AG_CONFIG_PADRAO.slotsSemanais;
   return cfg;
 }
@@ -6388,10 +6407,8 @@ function openModalConfigHorarios() {
   form.almocoFim.value = cfg.almocoFim || '';
   form.slotDuracao.value = cfg.slotDuracao;
 
-  // Migra configs antigas que usavam slotsConsultorioDia único
-  const semanalSalvo = cfg.slotsSemanais
-    || (cfg.slotsConsultorioDia ? [0, cfg.slotsConsultorioDia, cfg.slotsConsultorioDia, cfg.slotsConsultorioDia, cfg.slotsConsultorioDia, cfg.slotsConsultorioDia, 0]
-    : [0, 5, 0, 5, 5, 0, 0]);
+  // getAgConfig já migrou a config antiga e garantiu 7 posições.
+  const semanalSalvo = cfg.slotsSemanais;
 
   // Tabela per-day
   const diasNomes = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -6697,8 +6714,7 @@ function _renderAgendaKPIs() {
 
   // Ocupação: só conta consultas no consultório vs. slots configurados por dia
   const cfg2 = getAgConfig();
-  const slotsSemanais = cfg2.slotsSemanais
-    || (cfg2.slotsConsultorioDia ? Array(7).fill(0).map((_, i) => (cfg2.diasUteis.includes(i) ? cfg2.slotsConsultorioDia : 0)) : [0,5,0,5,5,0,0]);
+  const slotsSemanais = cfg2.slotsSemanais;
   let slotsDispo = 0;
   for (let d = new Date(ini); d <= fim; d = _addDays(d, 1)) {
     slotsDispo += slotsSemanais[d.getDay()] || 0;
@@ -9578,10 +9594,7 @@ function renderRelatorio(mes) {
 
   // ===== Ocupação do consultório =====
   const cfgRel = getAgConfig();
-  const slotsSemanaisRel = cfgRel.slotsSemanais
-    || (cfgRel.slotsConsultorioDia
-        ? Array(7).fill(0).map((_, i) => cfgRel.diasUteis.includes(i) ? cfgRel.slotsConsultorioDia : 0)
-        : [0, 5, 0, 5, 5, 0, 0]);
+  const slotsSemanaisRel = cfgRel.slotsSemanais;
   // Soma slots disponíveis para cada dia do mês
   let slotsMesDisp = 0;
   const mesAno = mes.split('-');
