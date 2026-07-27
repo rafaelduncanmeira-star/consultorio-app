@@ -430,3 +430,46 @@ test('editar um atendimento Parcial e salvar preserva o Parcial', () => {
   assert.strictEqual(r.aReceber, 7200);
   assert.strictEqual(r.recebido + r.aReceber + r.isento, r.bruto);
 });
+
+// ---------- o gráfico de 12 meses tem de falar a mesma língua das outras telas ----------
+// O app tem quatro lugares que mostram lucro. P&L de Despesas, DRE e o card do
+// Dashboard calculam `recebido − despesas` (a regra escrita: competência =
+// faturado · caixa = recebido · lucro na tela = caixa − despesas). O gráfico de
+// 12 meses somava `p.valor` de TODO mundo e chamava de "Faturamento" — contando
+// o que foi isentado — e derivava o "Lucro" dessa soma. Ou seja: aparecia como
+// lucro dinheiro que nunca foi recebido e dinheiro que o médico não vai cobrar.
+test('gráfico de 12 meses: faturamento e lucro saem de _resumoFin/_lucroFin', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  const src = recortarFuncao('renderGraficos').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /const fatPorMes\s*=\s*resumoPorMes\.map\(r => r\.faturado\)/,
+    'a linha de Faturamento é o faturado — bruto conta o isento');
+  assert.match(src, /_lucroFin\(r, despPorMes\[i\]\)\.caixa/,
+    'o lucro do gráfico tem de ser a mesma conta do P&L, do DRE e do Dashboard');
+});
+
+test('_lucroFin: caixa desconta despesa do recebido, não do bruto', () => {
+  const { _resumoFin, _lucroFin, _centavos } = carregar(
+    ['_resumoFin', '_lucroFin', '_centavos'], { Array, Math, Number });
+  const pacs = [
+    { statusPgto: 'Pago',     valor: 1000 },
+    { statusPgto: 'Pendente', valor: 500 },
+    { statusPgto: 'Isento',   valor: 400 },
+  ];
+  const r = _resumoFin(pacs);
+  assert.strictEqual(r.bruto, 1900, 'bruto inclui o isento');
+  assert.strictEqual(r.faturado, 1500, 'faturado exclui o isento');
+  assert.strictEqual(r.recebido, 1000, 'caixa é só o que entrou');
+  assert.strictEqual(_centavos(_lucroFin(r, 300).caixa), 700,
+    'com a conta antiga (bruto − despesa) daria 1600: R$ 900 de lucro que não existe');
+});
+
+// Um único registro sem `valor` transformava a soma inteira em NaN, e daí o
+// Dashboard, o DRE e as metas mostravam "R$ NaN". Havia 17 somas sem o guarda
+// — algumas duas linhas abaixo de outra que tinha.
+test('nenhuma soma de valor fica sem o guarda de campo ausente', () => {
+  const { fonte } = require('./_extrair.js');
+  const semCom = fonte.replace(/\/\/[^\n]*/g, '');
+  const nuas = [...semCom.matchAll(/=>\s*\w+\s*\+\s*\w+\.valor\s*,\s*0\)/g)].map(m => m[0]);
+  assert.deepStrictEqual(nuas, [],
+    'registro sem valor faz `s + undefined` = NaN e contamina a tela inteira');
+});

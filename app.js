@@ -6707,7 +6707,7 @@ function renderDespesas() {
   const pacs = DB.get('pacientes');
   const tbody = document.getElementById('desp-tbody');
 
-  const totalDesp = data.reduce((s, r) => s + r.valor, 0);
+  const totalDesp = data.reduce((s, r) => s + (r.valor || 0), 0);
   // === MÉTRICAS PADRONIZADAS ===
   // Faturamento bruto = soma de TUDO emitido (independe de pagamento) — métrica usada em Dashboard/Relatório
   // Receita realizada = soma do que foi efetivamente PAGO — base para lucro contábil
@@ -6865,9 +6865,18 @@ function renderGraficos(mes) {
       label: `${MESES[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`
     });
   }
-  const fatPorMes  = meses12.map(m => todosPacs.filter(p => getMes(p.data) === m.key).reduce((s, p) => s + (p.valor || 0), 0));
-  const despPorMes = meses12.map(m => todosDesps.filter(d => getMes(d.data) === m.key).reduce((s, d) => s + (d.valor || 0), 0));
-  const lucroPorMes = fatPorMes.map((f, i) => f - despPorMes[i]);
+  // Sai de _resumoFin/_lucroFin, como as outras três telas que mostram lucro
+  // (P&L de Despesas, DRE e o card do Dashboard). Este gráfico era o único que
+  // fazia a própria conta: somava `p.valor` de TODO mundo e chamava de
+  // "Faturamento" — contando o que foi isentado, que o `faturado` exclui de
+  // propósito — e derivava o "Lucro" dessa soma. Ou seja, aparecia como lucro
+  // dinheiro que nunca foi recebido e dinheiro que o médico decidiu não cobrar.
+  // A regra do app é: competência = faturado · caixa = recebido · lucro na tela
+  // = caixa − despesas.
+  const despPorMes  = meses12.map(m => todosDesps.filter(d => getMes(d.data) === m.key).reduce((s, d) => s + (d.valor || 0), 0));
+  const resumoPorMes = meses12.map(m => _resumoFin(todosPacs.filter(p => getMes(p.data) === m.key)));
+  const fatPorMes   = resumoPorMes.map(r => r.faturado);
+  const lucroPorMes = resumoPorMes.map((r, i) => _centavos(_lucroFin(r, despPorMes[i]).caixa));
 
   destroyChart('chart-12meses');
   const ctx12 = document.getElementById('chart-12meses')?.getContext('2d');
@@ -6879,7 +6888,7 @@ function renderGraficos(mes) {
         datasets: [
           { label: 'Faturamento', data: fatPorMes, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', tension: 0.3, borderWidth: 2.5, fill: true, pointRadius: 3, pointHoverRadius: 5 },
           { label: 'Despesas', data: despPorMes, borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.05)', tension: 0.3, borderWidth: 2, fill: false, pointRadius: 3, pointHoverRadius: 5 },
-          { label: 'Lucro', data: lucroPorMes, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.08)', tension: 0.3, borderWidth: 2, fill: false, pointRadius: 3, pointHoverRadius: 5, borderDash: [4, 3] },
+          { label: 'Lucro (caixa)', data: lucroPorMes, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.08)', tension: 0.3, borderWidth: 2, fill: false, pointRadius: 3, pointHoverRadius: 5, borderDash: [4, 3] },
         ]
       },
       options: {
@@ -7913,13 +7922,13 @@ function renderDashboard(mes) {
   // Padronização de métricas (idem renderDespesas e renderRelatorio):
   // - fat = faturamento bruto (tudo emitido) — usado para KPI principal
   // - receitaRealizada = só pagos — base de lucro contábil
-  const fat              = pacs.reduce((s, p) => s + p.valor, 0); // bruto
+  const fat              = pacs.reduce((s, p) => s + (p.valor || 0), 0); // bruto
   const receitaRealizada = pacs.filter(p => p.statusPgto === 'Pago').reduce((s, p) => s + (p.valor || 0), 0);
-  const totalDesp = desps.reduce((s, d) => s + d.valor, 0);
+  const totalDesp = desps.reduce((s, d) => s + (d.valor || 0), 0);
   const lucro     = receitaRealizada - totalDesp; // ALINHADO com Despesas (lucro sobre realizado)
   const margem    = receitaRealizada ? (lucro / receitaRealizada) * 100 : 0;
   const ticket    = pacs.length ? fat / pacs.length : 0;
-  const inad      = pacs.filter(p => p.statusPgto === 'Pendente').reduce((s, p) => s + p.valor, 0);
+  const inad      = pacs.filter(p => p.statusPgto === 'Pendente').reduce((s, p) => s + (p.valor || 0), 0);
   const inadPct   = fat ? (inad / fat) * 100 : 0;
 
   // ===== Comparativo mês anterior =====
@@ -7931,9 +7940,9 @@ function renderDashboard(mes) {
   const prevDesps  = DB.get('despesas').filter(d => getMes(d.data) === prevMes);
   const prevAgenda = DB.get('agenda').filter(a => getMes(a.data) === prevMes);
   const prevCrm    = DB.get('crm').filter(c => getMes(c.data) === prevMes);
-  const prevFat    = prevPacs.reduce((s, p) => s + p.valor, 0);
+  const prevFat    = prevPacs.reduce((s, p) => s + (p.valor || 0), 0);
   const prevRec    = prevPacs.filter(p => p.statusPgto === 'Pago').reduce((s, p) => s + (p.valor || 0), 0);
-  const prevDesp   = prevDesps.reduce((s, d) => s + d.valor, 0);
+  const prevDesp   = prevDesps.reduce((s, d) => s + (d.valor || 0), 0);
   const prevPacN   = prevPacs.length;
   const prevLucro  = prevRec - prevDesp; // lucro sobre realizado (consistente)
   const prevTotVagas = prevAgenda.reduce((s, a) => s + a.vagas, 0);
@@ -8101,7 +8110,7 @@ function renderDashboard(mes) {
   // Chart despesas dashboard
   destroyChart('chart-despesas');
   const cats = ['Estrutura','Pessoal','Marketing','Materiais','Profissional','Impostos','Outros'];
-  const catData = cats.map(c => desps.filter(d => d.categoria === c).reduce((s, d) => s + d.valor, 0));
+  const catData = cats.map(c => desps.filter(d => d.categoria === c).reduce((s, d) => s + (d.valor || 0), 0));
   const ctx2 = document.getElementById('chart-despesas');
   if (!ctx2) return;
   const ctx2c = ctx2.getContext('2d');
@@ -8307,7 +8316,7 @@ function gerarPDF(mes) {
 
   const _rfPdf     = _resumoFin(pacs);
   const fat        = _rfPdf.bruto;
-  const totalDesp  = desps.reduce((s, d) => s + d.valor, 0);
+  const totalDesp  = desps.reduce((s, d) => s + (d.valor || 0), 0);
   // Lucro em regime de CAIXA (recebido − despesas) — igual ao Relatório na tela.
   // Antes usava o bruto e divergia do número que aparece no app.
   const lucro      = _rfPdf.recebido - totalDesp;
@@ -8937,7 +8946,7 @@ function renderRelatorio(mes) {
   // de fora da unificação e mostrava só o Pendente: o Relatório dizia "A receber
   // R$ 800" enquanto a tela de Receita dizia R$ 17.800 no mesmo mês.
   const aReceber         = _resumoFin(pacs).aReceber;
-  const totalDesp = desps.reduce((s, d) => s + d.valor, 0);
+  const totalDesp = desps.reduce((s, d) => s + (d.valor || 0), 0);
   const lucro  = receitaRealizada - totalDesp; // lucro sobre realizado (consistente com Despesas)
   const margem = receitaRealizada ? (lucro / receitaRealizada) * 100 : 0;
   const atend  = crm.filter(c => c.status === 'Atendeu').length;
@@ -9058,11 +9067,11 @@ function renderRelatorio(mes) {
   // ===== Despesas por categoria =====
   const CATS_DESP = ['Estrutura','Pessoal','Marketing','Materiais','Profissional','Impostos','Outros'];
   const catStats = CATS_DESP.map(c => {
-    const val = desps.filter(d => d.categoria === c).reduce((s, d) => s + d.valor, 0);
+    const val = desps.filter(d => d.categoria === c).reduce((s, d) => s + (d.valor || 0), 0);
     return { cat: c, val, pct: totalDesp ? (val / totalDesp) * 100 : 0 };
   }).filter(c => c.val > 0).sort((a, b) => b.val - a.val);
-  const fixas  = desps.filter(d => d.tipo === 'Fixo').reduce((s, d) => s + d.valor, 0);
-  const varRel = desps.filter(d => d.tipo === 'Variável').reduce((s, d) => s + d.valor, 0);
+  const fixas  = desps.filter(d => d.tipo === 'Fixo').reduce((s, d) => s + (d.valor || 0), 0);
+  const varRel = desps.filter(d => d.tipo === 'Variável').reduce((s, d) => s + (d.valor || 0), 0);
 
   // ===== Programas de Acompanhamento (no mês) =====
   const inscricoesAll = getInscricoes();
@@ -9483,8 +9492,8 @@ function renderMetas() {
     const mes = `2026-${String(i + 1).padStart(2, '0')}`;
     const pacs = allPacs.filter(p => getMes(p.data) === mes);
     const desps = allDesps.filter(d => getMes(d.data) === mes);
-    const fat = pacs.reduce((s, p) => s + p.valor, 0);   // bruto: compara com a meta de faturamento
-    const desp = desps.reduce((s, d) => s + d.valor, 0);
+    const fat = pacs.reduce((s, p) => s + (p.valor || 0), 0);   // bruto: compara com a meta de faturamento
+    const desp = desps.reduce((s, d) => s + (d.valor || 0), 0);
     // Lucro em regime de CAIXA (recebido − despesas), pra bater com Dashboard/
     // Relatório. Antes usava o bruto e mostrava um lucro diferente pro mesmo mês.
     const recebidoMes = _resumoFin(pacs).recebido;
@@ -9796,8 +9805,8 @@ function buildContext() {
 
   const pacMes  = pacs.filter(p => getMes(p.data) === mesAtual);
   const despMes = desps.filter(d => getMes(d.data) === mesAtual);
-  const fat     = pacMes.reduce((s, p) => s + p.valor, 0);
-  const desp    = despMes.reduce((s, d) => s + d.valor, 0);
+  const fat     = pacMes.reduce((s, p) => s + (p.valor || 0), 0);
+  const desp    = despMes.reduce((s, d) => s + (d.valor || 0), 0);
   const marcou  = crm.filter(c => c.status === 'Marcou' && !c.converted);
   const fupHoje = fup.filter(f => !f.feito && f.dataContato && f.dataContato <= today);
 
@@ -9811,7 +9820,7 @@ function buildContext() {
   // Financeiro: mês anterior para comparação
   const mesAnt   = _ymd(new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1)).substring(0, 7);
   const pacAnt   = pacs.filter(p => getMes(p.data) === mesAnt);
-  const fatAnt   = pacAnt.reduce((s, p) => s + p.valor, 0);
+  const fatAnt   = pacAnt.reduce((s, p) => s + (p.valor || 0), 0);
 
   // Projeção: ritmo atual × dias restantes
   const diaAtual   = new Date().getDate();
