@@ -1,0 +1,112 @@
+// Despesas por categoria — rode com: node --test
+//
+// O <select> de categoria do modal de despesa é agrupado por <optgroup>. O que
+// ele GRAVA é a opção — "Aluguel", "Salários", "Contador" —, não o rótulo do
+// grupo — "Estrutura", "Pessoal", "Profissional". O gráfico do Dashboard e a
+// tabela do relatório filtravam por uma lista fixa com os RÓTULOS:
+//
+//   ['Estrutura','Pessoal','Marketing','Materiais','Profissional','Impostos','Outros']
+//
+// Só quatro deles são também opções do select. Aluguel, salário, contador,
+// utilidades, equipamentos — as maiores linhas de um consultório — não caíam em
+// balde nenhum. O gráfico mostrava fatias somando uma fração do total real, e a
+// tabela do relatório calculava o percentual sobre o total VERDADEIRO, então as
+// linhas não somavam 100% e nada explicava a diferença.
+//
+// A tela de Despesas já tinha sido corrigida ("antes era lista hardcoded que
+// filtrava silenciosamente Aluguel/Salários/Utilidades"); as outras duas não.
+
+const { test } = require('node:test');
+const assert = require('node:assert');
+const { carregar, fonte, recortarFuncao } = require('./_extrair.js');
+
+const { _despesasPorCategoria } = carregar('_despesasPorCategoria', { Map, Array, String });
+const puro = (x) => JSON.parse(JSON.stringify(x));
+
+test('as categorias vêm dos lançamentos, não de uma lista fixa', () => {
+  const r = _despesasPorCategoria([
+    { categoria: 'Aluguel',  valor: 4000 },
+    { categoria: 'Salários', valor: 9000 },
+    { categoria: 'Marketing', valor: 1000 },
+  ]);
+  assert.deepStrictEqual(puro(r), [
+    { cat: 'Salários', val: 9000 },
+    { cat: 'Aluguel',  val: 4000 },
+    { cat: 'Marketing', val: 1000 },
+  ]);
+});
+
+test('o total das categorias fecha com o total das despesas', () => {
+  const desps = [
+    { categoria: 'Aluguel', valor: 4000 }, { categoria: 'Salários', valor: 9000 },
+    { categoria: 'Contador', valor: 800 }, { categoria: 'Equipamentos', valor: 1200 },
+    { categoria: 'Impostos', valor: 2000 },
+  ];
+  const total = desps.reduce((s, d) => s + d.valor, 0);
+  const soma  = _despesasPorCategoria(desps).reduce((s, c) => s + c.val, 0);
+  assert.strictEqual(soma, total,
+    'percentual calculado sobre o total real com numerador incompleto nunca soma 100%');
+});
+
+test('mesma categoria digitada com espaço é o mesmo balde', () => {
+  const r = _despesasPorCategoria([
+    { categoria: 'Aluguel',   valor: 1000 },
+    { categoria: ' Aluguel ', valor: 500 },
+  ]);
+  assert.deepStrictEqual(puro(r), [{ cat: 'Aluguel', val: 1500 }]);
+});
+
+test('despesa sem categoria cai em Outros, não some', () => {
+  const r = _despesasPorCategoria([{ valor: 300 }, { categoria: '', valor: 200 }]);
+  assert.deepStrictEqual(puro(r), [{ cat: 'Outros', val: 500 }]);
+});
+
+test('categoria com valor zero não polui o gráfico', () => {
+  const r = _despesasPorCategoria([{ categoria: 'Limpeza', valor: 0 }, { categoria: 'Aluguel', valor: 10 }]);
+  assert.deepStrictEqual(puro(r), [{ cat: 'Aluguel', val: 10 }]);
+});
+
+test('lista vazia não quebra', () => {
+  assert.deepStrictEqual(puro(_despesasPorCategoria([])), []);
+  assert.deepStrictEqual(puro(_despesasPorCategoria(null)), []);
+});
+
+test('nenhuma tela mantém a lista fixa de rótulos de grupo', () => {
+  const ruins = [];
+  fonte.split('\n').forEach((l, i) => {
+    if (/'Estrutura'\s*,\s*'Pessoal'/.test(l)) ruins.push((i + 1) + ': ' + l.trim().slice(0, 110));
+  });
+  assert.deepStrictEqual(ruins, [],
+    'os rótulos dos <optgroup> não são valores gravados — filtrar por eles perde quase tudo');
+});
+
+test('as três telas de categoria usam a mesma regra', () => {
+  // Nomes conferidos no fonte: a tela de Despesas, o gráfico do Dashboard e a
+  // tabela do relatório. Nada de try/continue aqui — função que sumiu tem de
+  // reprovar, senão o teste vira decoração.
+  for (const fn of ['renderDespesas', 'renderDashboard', 'renderRelatorio']) {
+    assert.match(recortarFuncao(fn), /_despesasPorCategoria\(/,
+      `${fn} agrupa despesa por categoria e tem de usar a regra única`);
+  }
+});
+
+test('o modal de despesa preserva valor fora do <select>', () => {
+  const src = recortarFuncao('editRow');
+  for (const campo of ['form.categoria', 'form.tipo', 'form.formaPgto']) {
+    assert.ok(src.includes(`_opcaoLegadaSeFaltar(${campo}`),
+      `${campo} sem a opção legada é apagado ao abrir e salvar a despesa`);
+  }
+});
+
+test('_opcaoLegadaSeFaltar só age quando a opção falta mesmo', () => {
+  const { _opcaoLegadaSeFaltar } = carregar(['_esc', '_opcaoLegadaSeFaltar'], { Array, String });
+  const feito = [];
+  const sel = { options: [{ value: 'Aluguel' }], insertAdjacentHTML: (_p, h) => feito.push(h) };
+  _opcaoLegadaSeFaltar(sel, 'Aluguel');
+  assert.deepStrictEqual(feito, [], 'opção que já existe não pode ser duplicada');
+  _opcaoLegadaSeFaltar(sel, 'Estrutura');
+  assert.match(feito[0], /Estrutura \(legado\)/);
+  _opcaoLegadaSeFaltar(sel, '');
+  _opcaoLegadaSeFaltar(null, 'x');
+  assert.strictEqual(feito.length, 1);
+});

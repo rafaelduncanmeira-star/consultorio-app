@@ -2354,9 +2354,30 @@ function _metaCategoria(tipo) {
   return 'Consulta';
 }
 
+// Despesas agrupadas pelas categorias que EXISTEM nos lançamentos, do maior pro
+// menor. Nunca por uma lista fixa: o <select> do modal grava a OPÇÃO (Aluguel,
+// Salários, Utilidades…), não o rótulo do <optgroup> (Estrutura, Pessoal…). Uma
+// lista fixa com os rótulos casa com quase nada — o gráfico e a tabela ficavam
+// sem aluguel, sem salário, sem contador, e as fatias somavam uma fração do
+// total real sem nada explicando a diferença. A tela de Despesas já tinha sido
+// corrigida assim; o gráfico do Dashboard e a tabela do relatório não.
+function _despesasPorCategoria(desps) {
+  const mapa = new Map();
+  (desps || []).forEach(d => {
+    const c = String((d && d.categoria) || 'Outros').trim() || 'Outros';
+    mapa.set(c, (mapa.get(c) || 0) + ((d && d.valor) || 0));
+  });
+  return [...mapa.entries()]
+    .map(([cat, val]) => ({ cat, val }))
+    .filter(c => c.val > 0)
+    .sort((a, b) => b.val - a.val);
+}
+
 // ====================== PROFISSIONAIS (CLÍNICA) ======================
 // Modelo: consult_profissionais: [{ id, nome, tipo, especialidade, cor, ativo }]
 // Base do "Plano Clínica": cada agendamento/receita é etiquetado por profissional.
+const _CORES_CATEGORIA = ['#ef4444','#f97316','#eab308','#10b981','#3b82f6','#8b5cf6','#94a3b8','#ec4899','#14b8a6','#0ea5e9'];
+
 const _PROF_CORES = ['#10b981','#3b82f6','#8b5cf6','#f59e0b','#ec4899','#14b8a6','#ef4444','#0ea5e9','#65a30d','#d946ef'];
 
 function getProfissionais() {
@@ -4252,6 +4273,15 @@ function _pagamentoCanonico(valor) {
 
 // Devolve sempre um status canônico. 'Pendente' é o padrão seguro: assumir
 // 'Pago' por omissão conta como recebido dinheiro que não entrou.
+// Acrescenta o valor guardado como <option> "(legado)" quando ele não existe no
+// <select>. Sem isso a atribuição deixa selectedIndex -1 e o save apaga o campo.
+function _opcaoLegadaSeFaltar(sel, valor) {
+  if (!sel || !valor) return;
+  const tem = Array.from(sel.options || []).some(o => o.value === valor);
+  if (tem) return;
+  sel.insertAdjacentHTML('beforeend', `<option value="${_esc(valor)}">${_esc(valor)} (legado)</option>`);
+}
+
 function _statusPgtoCanonico(valor) {
   return STATUS_PGTO.includes(valor) ? valor : 'Pendente';
 }
@@ -4513,6 +4543,15 @@ function editRow(col, ref) {
     form.obs.value = r.obs || '';
   } else if (col === 'despesas') {
     form.data.value = r.data || '';
+    // Valor fora das <option> deixa o <select> com selectedIndex -1, e o
+    // FormData devolve '' no save: abrir e salvar a despesa APAGARIA a
+    // categoria, o tipo ou a forma de pagamento. Acontece com lançamento do
+    // copiloto (o prompt lista os rótulos dos grupos, que não são opções), com
+    // backup importado e com registro de versão antiga. Mesmo tratamento que o
+    // procedimento e a forma de pagamento do atendimento já recebem.
+    _opcaoLegadaSeFaltar(form.categoria, r.categoria);
+    _opcaoLegadaSeFaltar(form.tipo,      r.tipo);
+    _opcaoLegadaSeFaltar(form.formaPgto, r.formaPgto);
     form.categoria.value = r.categoria || '';
     form.descricao.value = r.descricao || '';
     form.tipo.value = r.tipo || '';
@@ -7363,16 +7402,11 @@ function renderDespesas() {
   document.getElementById('pl-lucro').textContent = BRL(lucro);
   document.getElementById('pl-margem').textContent = PCT(margem);
 
-  // Por categoria — agrupa pelas categorias REAIS existentes nas despesas
-  // (antes era lista hardcoded que filtrava silenciosamente Aluguel/Salários/Utilidades)
-  const catMap = {};
-  data.forEach(r => {
-    const c = (r.categoria || 'Outros').trim();
-    catMap[c] = (catMap[c] || 0) + (r.valor || 0);
-  });
-  // Ordena desc por valor
-  const catTotais = Object.entries(catMap)
-    .map(([cat, val]) => ({ cat, val }))
+  // Por categoria — agrupa pelas categorias REAIS existentes nas despesas.
+  // (Regra única em _despesasPorCategoria: esta tela já fazia certo, mas o
+  // gráfico do Dashboard e a tabela do relatório mantinham cada um a sua lista
+  // fixa com os rótulos dos <optgroup>, que o select nunca grava.)
+  const catTotais = _despesasPorCategoria(data)
     .sort((a, b) => b.val - a.val);
 
   document.getElementById('desp-categorias').innerHTML = catTotais.length
@@ -8748,8 +8782,9 @@ function renderDashboard(mes) {
 
   // Chart despesas dashboard
   destroyChart('chart-despesas');
-  const cats = ['Estrutura','Pessoal','Marketing','Materiais','Profissional','Impostos','Outros'];
-  const catData = cats.map(c => desps.filter(d => d.categoria === c).reduce((s, d) => s + (d.valor || 0), 0));
+  const porCat  = _despesasPorCategoria(desps);
+  const cats    = porCat.map(c => c.cat);
+  const catData = porCat.map(c => c.val);
   const ctx2 = document.getElementById('chart-despesas');
   if (!ctx2) return;
   const ctx2c = ctx2.getContext('2d');
@@ -8758,7 +8793,11 @@ function renderDashboard(mes) {
       type: 'doughnut',
       data: {
         labels: cats,
-        datasets: [{ data: catData, backgroundColor: ['#ef4444','#f97316','#eab308','#10b981','#3b82f6','#8b5cf6','#94a3b8'], borderWidth: 0, hoverOffset: 6 }]
+        // A paleta cicla: o número de categorias agora vem do dado, não de uma
+        // lista fixa de 7, e sem o ciclo as fatias extras sairiam sem cor.
+        datasets: [{ data: catData,
+          backgroundColor: catData.map((_, i) => _CORES_CATEGORIA[i % _CORES_CATEGORIA.length]),
+          borderWidth: 0, hoverOffset: 6 }]
       },
       options: {
         responsive: true, maintainAspectRatio: false,
@@ -9719,11 +9758,11 @@ function renderRelatorio(mes) {
   const totalAgs = todasAgs.length;
 
   // ===== Despesas por categoria =====
-  const CATS_DESP = ['Estrutura','Pessoal','Marketing','Materiais','Profissional','Impostos','Outros'];
-  const catStats = CATS_DESP.map(c => {
-    const val = desps.filter(d => d.categoria === c).reduce((s, d) => s + (d.valor || 0), 0);
-    return { cat: c, val, pct: totalDesp ? (val / totalDesp) * 100 : 0 };
-  }).filter(c => c.val > 0).sort((a, b) => b.val - a.val);
+  // Pelas categorias reais dos lançamentos: com a lista fixa, o denominador era
+  // o total VERDADEIRO e o numerador só a fatia reconhecida — os percentuais da
+  // tabela que vai pro contador não somavam 100 e ninguém sabia o que faltava.
+  const catStats = _despesasPorCategoria(desps)
+    .map(c => ({ ...c, pct: totalDesp ? (c.val / totalDesp) * 100 : 0 }));
   const fixas  = desps.filter(d => d.tipo === 'Fixo').reduce((s, d) => s + (d.valor || 0), 0);
   const varRel = desps.filter(d => d.tipo === 'Variável').reduce((s, d) => s + (d.valor || 0), 0);
 
