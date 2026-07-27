@@ -5453,6 +5453,14 @@ function savePaciente(e) {
   const editIdx = (editState.col !== 'pacientes') ? -1
     : (editState.id ? data.findIndex(p => p && p.id === editState.id)
                     : (editState.idx ?? -1));
+  // Guardado AQUI, não depois: o closeModal lá embaixo zera o editState, e o
+  // _auditLog vinha depois dele lendo editState.idx — sempre null. Toda edição
+  // era registrada no histórico como "Cadastrou consulta", ou seja: a alteração
+  // ficava invisível e ainda aparecia uma criação que não existiu. É o registro
+  // que a clínica consulta justamente pra entender uma mudança de valor.
+  // E o sinal certo é o que a função REALMENTE fez — se o registro editado
+  // sumiu, ela cai no ramo de inserção e aí foi criação mesmo.
+  const foiEdicao = editIdx >= 0 && !!data[editIdx];
   if (editIdx >= 0 && data[editIdx]) {
     item.id = data[editIdx].id || _novoId('pac');
     data[editIdx] = item;
@@ -5510,8 +5518,8 @@ function savePaciente(e) {
   closeModal('modal-paciente');
   renderPacientes();
   setTimeout(() => checkAchievements(), 300);
-  _auditLog(editState.idx != null ? 'editou' : 'criou', 'paciente',
-    `${editState.idx != null ? 'Editou' : 'Cadastrou'} consulta de ${item.nome} (${item.tipo}, ${BRL(item.valor)})`);
+  _auditLog(foiEdicao ? 'editou' : 'criou', 'paciente',
+    `${foiEdicao ? 'Editou' : 'Cadastrou'} consulta de ${item.nome} (${item.tipo}, ${BRL(item.valor)})`);
 
   // MELHORIA-02: avisa se o procedimento não tem preço cadastrado na Tabela de Preços
   if (item.tipo) {
@@ -7077,6 +7085,10 @@ function saveDespesa(e) {
   const despIdx = (editState.col !== 'despesas') ? -1
     : (editState.id ? data.findIndex(d => d && d.id === editState.id)
                     : (editState.idx ?? -1));
+  // Mesmo cuidado do savePaciente: o closeModal abaixo zera o editState, então
+  // o sinal de "foi edição" tem de ser capturado antes — e vem do ramo que a
+  // função realmente tomou, não de um campo que já foi limpo.
+  const foiEdicao = despIdx >= 0 && !!data[despIdx];
   if (despIdx >= 0 && data[despIdx]) {
     item.id = data[despIdx].id || _novoId('desp'); // id estável sobrevive à edição
     data[despIdx] = item;
@@ -7086,7 +7098,7 @@ function saveDespesa(e) {
   renderDespesas();
   // Atualiza dashboard se estiver visível (despesas afetam lucro/burn/runway)
   if (document.getElementById('page-dashboard')?.classList.contains('active')) renderDashboard();
-  _auditLog(editState.idx != null ? 'editou' : 'criou', 'despesa', `${editState.idx != null ? 'Editou' : 'Lançou'} despesa: ${item.descricao} (${BRL(item.valor)})`);
+  _auditLog(foiEdicao ? 'editou' : 'criou', 'despesa', `${foiEdicao ? 'Editou' : 'Lançou'} despesa: ${item.descricao} (${BRL(item.valor)})`);
 }
 
 // ====================== RECEITA ======================
