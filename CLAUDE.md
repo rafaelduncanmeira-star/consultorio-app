@@ -232,6 +232,13 @@ Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
   tinha percentuais que não fecham 100% (denominador real, numerador incompleto). Agrupe
   pelas categorias **reais** dos lançamentos (`_despesasPorCategoria`); a tela de Despesas já
   fazia isso e as outras duas ficaram para trás.
+- 🔴 **Toda gravação local passa por `_gravarLocal`.** `localStorage.setItem` cru lança
+  quando a cota estoura — e este app enche o storage por construção (7 snapshots da clínica
+  inteira + dados vivos + chat). Quem chama `DB.set` é um `onsubmit` sem catch: o modal
+  ficava aberto, nada era gravado, o `_enfileirarPush` nem era alcançado (o registro não
+  existia **em lugar nenhum**) e nada aparecia na tela. `_gravarLocal` descarta o backup
+  local mais antigo e tenta de novo; falhando, devolve **false** em vez de lançar — o push
+  segue (leva o `val` em memória) e o aviso sai uma vez por chave.
 - **`form.reset()` não desfaz estilo inline nem `<option>` acrescentada por JS.** O
   `tipoAtividade` é hidden + botões pintados pelo `_setTipoAtividade`: o reset devolvia o
   hidden pra `Consultório` e deixava "Visita Domiciliar" **destacado** — a tela dizia uma
