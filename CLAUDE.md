@@ -232,6 +232,12 @@ Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
   tinha percentuais que não fecham 100% (denominador real, numerador incompleto). Agrupe
   pelas categorias **reais** dos lançamentos (`_despesasPorCategoria`); a tela de Despesas já
   fazia isso e as outras duas ficaram para trás.
+- **Abrir formulário reinicializa TODO campo, inclusive os que estão escondidos.** O
+  `openModalTemplatePrograma` zerava tudo menos a **vigência**, que só era atribuída no ramo
+  "editando uma Assinatura" — e o campo mora num bloco oculto até o tipo virar Assinatura.
+  Criar um programa anual logo depois de editar um mensal o salvava como **Mensal**, e
+  vigência define `_vigenciaDias`: vencimento de toda inscrição, aviso de renovação e MRR.
+  Campo atribuído **dentro de um `if`** é campo que sobrevive de uma abertura pra outra.
 - 🔴 **Lista de ESCOLHA ≠ lista de EXIBIÇÃO.** `_popularProfissionalSelect` monta só os
   ativos (certo: não se atribui trabalho novo a quem saiu) — mas sem `<option>` pro
   profissional **do registro**, o `.value` não casava: no CRM o vínculo era apagado, e no
