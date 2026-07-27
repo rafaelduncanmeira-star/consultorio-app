@@ -10688,24 +10688,33 @@ async function rodarCicloLembretes(forcado = false) {
   }
 
   let sucesso = 0, erro = 0;
-  const todosAgs = DB.get('agendamentos');
   for (const ag of ags) {
     const msg = _formatarMensagemLembrete(ag, cfg.mensagem);
-    const r = await _enviarLembreteZapi(ag, msg);
+    let r;
+    try { r = await _enviarLembreteZapi(ag, msg); }
+    catch (e) { r = { error: (e && e.message) || 'falha no envio' }; }
+
+    // Marca IMEDIATAMENTE, antes do próximo envio. Guardar isso pro fim do laço
+    // significava que interromper o ciclo no meio perdia o registro de tudo que
+    // JÁ TINHA SIDO ENVIADO — e o ciclo seguinte mandava a mesma mensagem de
+    // novo pros mesmos pacientes. O ciclo dispara sozinho 5s depois de abrir o
+    // app e leva ~1s por paciente, então basta fechar o app enquanto ele roda.
+    // Relê a coleção a cada volta pra não sobrescrever o que o pull trouxe.
+    const todosAgs = DB.get('agendamentos');
     const idx = todosAgs.findIndex(a => a.id === ag.id);
     if (idx >= 0) {
-      if (r.ok) {
+      if (r && r.ok) {
         todosAgs[idx]._lembreteEnviado = new Date().toISOString();
         sucesso++;
       } else {
-        todosAgs[idx]._lembreteErro = r.error;
+        todosAgs[idx]._lembreteErro = (r && r.error) || 'desconhecido';
         erro++;
       }
+      DB.set('agendamentos', todosAgs);
     }
     // Throttle pra evitar rate limit
     await new Promise(r => setTimeout(r, 800));
   }
-  DB.set('agendamentos', todosAgs);
   cfg.ultimoEnvio = hoje;
   DB.setObj('lembretes_config', cfg);
 

@@ -122,6 +122,15 @@ Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
   ficava numa chave que o app nunca procura e o chat abria vazio.
 - **Bloqueio de agenda tem HORA, não só data** (`_isBloqueado` e o `bloqueado()` do
   webhook). O webhook olhava só a data e apagava o dia inteiro da disponibilidade da IA.
+- 🔴 **`'texto'.includes('')` é sempre `true`.** Todo campo de texto opcional usado como
+  filtro de busca vira **coringa universal** quando chega vazio. Apareceu em **5** lugares
+  do copiloto, todos gravando no banco: registro sem nome casava com qualquer paciente, e
+  `cancelar_agendamento`/`mover_agendamento` sem nome pegavam o **primeiro da agenda**.
+  Busca por nome agora é só via **`_acharPorNome`** — exato, parcial por palavra inteira,
+  e **-1 na dúvida** (inclusive homônimo). Nunca voltar a usar `findIndex` + `includes`.
+- **Ação destrutiva que sai do app (mensagem, e-mail) grava a marca de "já fiz" ANTES do
+  próximo item.** Guardar pro fim do laço perde tudo se o app fechar no meio — e
+  `rodarCicloLembretes` dispara sozinho 5s depois de abrir, ~1s por paciente.
 
 #### Sobre os testes
 
