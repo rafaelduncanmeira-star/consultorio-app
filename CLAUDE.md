@@ -431,6 +431,11 @@ falha de leitura.
   de conexão ficava eterno em "Testando…". `AbortController` à mão (não
   `AbortSignal.timeout`, que não existe no Safari < 16) + corrida com timer; rejeita
   **antes** de abortar pra a mensagem ser legível. `tests/rede.test.js` varre `fetch()` cru.
+- **Aviso efêmero e ação desfazível não dividem elemento.** `toast()` e `_toastUndo()`
+  usavam o mesmo `#app-toast`; escrever `textContent` **apaga os filhos**, então qualquer
+  aviso que chegasse nos 6s do "Desfazer" matava o botão e a exclusão virava definitiva,
+  calada. Os avisos que chegam sozinhos são justamente os do agendador de 15 min e o de
+  versão nova do SW. Elementos separados (`#app-toast-undo`, 84px acima).
 - **`opacity: 0` não desliga clique.** O toast ficava sobre a nav inferior do celular e
   matava o botão central. Elemento que some precisa de `pointer-events: none`.
 - **SQL: `SETUP_EQUIPE.sql` sobrescreve policies que arquivos posteriores restringem.**
