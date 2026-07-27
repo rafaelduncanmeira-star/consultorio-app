@@ -3778,6 +3778,13 @@ function _aplicarEfeitosMudancaStatusCrm(idx, oldStatus, newStatus) {
 // nome, sem nada visível pro usuário. Registro sem data vai pro fim.
 function _cmpDataDesc(a, b) { return String((b && b.data) || '').localeCompare(String((a && a.data) || '')); }
 function _cmpDataAsc(a, b)  { return String((a && a.data) || '').localeCompare(String((b && b.data) || '')); }
+// Mesma razão dos dois de cima, para a HORA do agendamento. `a.hora.localeCompare`
+// cru lança em registro sem hora — e um registro basta pra derrubar a ordenação
+// inteira, ou seja, a tela toda que dependia dela. Registro assim chega por
+// backup importado ou por versão antiga do app; o próprio código já sabe disso
+// em outros pontos (`form.hora.value = r.hora || ''`, `_toMin(h || '0:0')`,
+// e o webhook que pula agendamento sem hora ao montar a disponibilidade).
+function _cmpHoraAsc(a, b) { return String((a && a.hora) || '').localeCompare(String((b && b.hora) || '')); }
 
 // Status de FALTA do agendamento. O <select> da agenda oferece 'No-show'; três
 // pontos do código comparavam com 'Faltou', que a interface nunca gravou.
@@ -5725,7 +5732,7 @@ function editAgendamento(id) {
   _agPopularDatalist();
   form.pacienteNome.oninput = _agAutocompletarContato;
   form.data.value = a.data;
-  form.hora.value = a.hora;
+  form.hora.value = a.hora || '';
   form.duracao.value = a.duracao || 60;
   form.pacienteNome.value = a.pacienteNome || '';
   form.whatsapp.value = a.whatsapp || '';
@@ -6342,8 +6349,11 @@ function _viewMes() {
     const outside = d.getMonth() !== mes;
     const today = ds === hojeStr;
     const naoUtil = !cfg.diasUteis.includes(d.getDay());
-    const bloqDay = bloqs.some(b => ds >= b.dataInicio && ds <= b.dataFim);
-    const events = ags.filter(a => a.data === ds).sort((a, b) => a.hora.localeCompare(b.hora));
+    // `dataFim || dataInicio`: mesmo fallback do _isBloqueado. Sem ele, bloqueio
+    // de um dia só sem dataFim compara com undefined, dá false, e o dia não
+    // aparece sombreado no mês — enquanto o servidor o respeita.
+    const bloqDay = bloqs.some(b => b && b.dataInicio && ds >= b.dataInicio && ds <= (b.dataFim || b.dataInicio));
+    const events = ags.filter(a => a.data === ds).sort(_cmpHoraAsc);
     const evtHtml = events.slice(0, 3).map(a => {
       const cls = (a.status || 'confirmado').toLowerCase().replace('no-show', 'noshow');
       const lbl = `${_esc(a.hora)} ${_esc(a.pacienteNome)}`;
@@ -9936,9 +9946,10 @@ function buildContext() {
   // Agenda: hoje, amanhã e próximos 7 dias
   const amanha   = _ymd(_addDays(new Date(), 1));
   const proxDate = _ymd(_addDays(new Date(), 7));
-  const agHoje   = ags.filter(a => a.data === today  && a.status !== 'Cancelado').sort((a,b) => a.hora.localeCompare(b.hora));
-  const agAmanha = ags.filter(a => a.data === amanha && a.status !== 'Cancelado').sort((a,b) => a.hora.localeCompare(b.hora));
-  const agSemana = ags.filter(a => a.data > today && a.data <= proxDate && a.status !== 'Cancelado').sort((a,b) => a.data.localeCompare(b.data) || a.hora.localeCompare(b.hora));
+  const agHoje   = ags.filter(a => a.data === today  && a.status !== 'Cancelado').sort(_cmpHoraAsc);
+  const agAmanha = ags.filter(a => a.data === amanha && a.status !== 'Cancelado').sort(_cmpHoraAsc);
+  const agSemana = ags.filter(a => a.data > today && a.data <= proxDate && a.status !== 'Cancelado')
+                      .sort((a, b) => _cmpDataAsc(a, b) || _cmpHoraAsc(a, b));
 
   // Financeiro: mês anterior para comparação
   const mesAnt   = _ymd(new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1)).substring(0, 7);

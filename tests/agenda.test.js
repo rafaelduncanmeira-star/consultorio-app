@@ -204,3 +204,37 @@ test('saveBloqueio: recusa hora fim antes da hora início no mesmo dia', () => {
     'sem esta checagem o bloqueio é salvo e não bloqueia nada');
   assert.match(src, /!item\.dataInicio \|\| !item\.dataFim/, 'e sem data nenhuma também não pode passar');
 });
+
+// ---------- um registro sem hora não pode derrubar a tela ----------
+// `a.hora.localeCompare(b.hora)` lança em registro sem hora, e um basta pra
+// quebrar a ordenação inteira — ou seja, tudo que dependia dela. O app já
+// sabia que o campo pode faltar em outros pontos (`form.hora.value = r.hora
+// || ''`, `_toMin(h || '0:0')`, e o webhook que pula agendamento sem hora ao
+// montar a disponibilidade); faltava nas ordenações.
+test('_cmpHoraAsc: ordena e aguenta hora ausente', () => {
+  const { _cmpHoraAsc } = carregar('_cmpHoraAsc', { String });
+  const lista = [{ hora: '14:00' }, {}, { hora: '08:30' }, { hora: null }];
+  assert.doesNotThrow(() => lista.sort(_cmpHoraAsc));
+  const ordenada = lista.slice().sort(_cmpHoraAsc).map(a => a.hora ?? '(sem)');
+  assert.deepStrictEqual(ordenada, ['(sem)', '(sem)', '08:30', '14:00'],
+    'sem hora vai pro começo, mas nada explode');
+});
+
+test('nenhuma ordenação lê .hora ou .data sem guarda', () => {
+  const semCom = fonte.replace(/\/\/[^\n]*/g, '');
+  // `[^)]*` NÃO serve aqui: ele para no `)` de `(a, b)` e o teste nunca casa
+  // — passava nas duas versões, guardando nada. Procura a leitura crua direto.
+  for (const re of [/\ba\.hora\.localeCompare/, /\bb\.hora\.localeCompare/,
+                    /\ba\.data\.localeCompare/, /\bb\.data\.localeCompare/]) {
+    assert.doesNotMatch(semCom, re,
+      'um registro sem o campo derruba a ordenação inteira — use _cmpHoraAsc/_cmpDataAsc');
+  }
+});
+
+test('_viewMes: sombreado de bloqueio usa o mesmo fallback do _isBloqueado', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  const src = recortarFuncao('_viewMes').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /b\.dataFim \|\| b\.dataInicio/,
+    'bloqueio de um dia só sem dataFim não sombreava o dia, mas o servidor o respeita');
+  assert.match(src, /_cmpHoraAsc/, 'e a ordenação dos eventos do dia tem de ser a guardada');
+});
