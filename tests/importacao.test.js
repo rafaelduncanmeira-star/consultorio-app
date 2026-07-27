@@ -90,3 +90,59 @@ test('o exportarCSV continua citando quebra de linha e aspas', () => {
   assert.match(src, /includes\('\\n'\)/, 'é o que torna o campo multilinha possível');
   assert.match(src, /replace\(\/"\/g,\s*'""'\)/, 'e a aspa duplicada');
 });
+
+// ---------- ida e volta campo a campo ----------
+// O CSV que o app exporta tem de voltar idêntico pelos normalizadores da
+// importação. Foi assim que apareceu o 'Parcial' virando 'Pendente': o regex
+// conhecia 'parcel' (de "Parcelado", vocabulário de planilha) e não 'parci' —
+// ou seja, não reconhecia o valor que o PRÓPRIO app grava.
+const normalizadores = () => carregar(
+  ['impParseCSV', 'impNormDate', 'impNormValor', 'impNormStatus', 'impNormTipo', '_normPhone'],
+  { String, Object, Number, Date, Math, parseFloat, parseInt, isNaN, RegExp });
+
+// Espelha exatamente a citação do exportarCSV.
+const csvDe = (obj) => {
+  const cols = Object.keys(obj);
+  const esc = (v) => {
+    const t = v === undefined || v === null ? '' : String(v);
+    return t.includes(';') || t.includes('"') || t.includes('\n')
+      ? `"${t.replace(/"/g, '""')}"` : t;
+  };
+  return cols.join(';') + '\n' + cols.map(c => esc(obj[c])).join(';');
+};
+
+test('ida e volta: os QUATRO status canônicos voltam iguais', () => {
+  const s = normalizadores();
+  for (const st of ['Pago', 'Parcial', 'Pendente', 'Isento']) {
+    const row = s.impParseCSV(csvDe({ nome: 'Ana', statusPgto: st })).rows[0];
+    assert.strictEqual(s.impNormStatus(row.statusPgto), st,
+      `${st} é gravado pelo app e exportado — tem de voltar como ${st}`);
+  }
+});
+
+test('"parcialmente pago" é Parcial, não Pago', () => {
+  const { impNormStatus } = normalizadores();
+  assert.strictEqual(impNormStatus('parcialmente pago'), 'Parcial',
+    'a checagem de parcial vem antes justamente por causa do "pago" no fim da frase');
+  assert.strictEqual(impNormStatus('Parcelado'), 'Parcial', 'vocabulário de planilha continua valendo');
+  assert.strictEqual(impNormStatus('Pago'), 'Pago');
+});
+
+test('ida e volta: os tipos que o app oferece voltam iguais', () => {
+  const s = normalizadores();
+  for (const t of ['1ª vez', 'Consulta', 'Retorno', 'Domiciliar', 'Hospitalar',
+                   'Telemedicina', 'Programa', 'Cortesia']) {
+    const row = s.impParseCSV(csvDe({ nome: 'Ana', tipo: t })).rows[0];
+    assert.strictEqual(s.impNormTipo(row.tipo), t);
+  }
+});
+
+test('ida e volta: data, valor e telefone voltam iguais', () => {
+  const s = normalizadores();
+  const orig = { nome: 'Ana', data: '2026-08-05', valor: 1200.5, whatsapp: '11999998888' };
+  const row = s.impParseCSV(csvDe(orig)).rows[0];
+  assert.strictEqual(s.impNormDate(row.data), orig.data);
+  assert.strictEqual(s.impNormValor(row.valor), orig.valor,
+    'o separador da DIREITA é o decimal — é o formato que o exportarCSV grava');
+  assert.strictEqual(s._normPhone(row.whatsapp), orig.whatsapp);
+});

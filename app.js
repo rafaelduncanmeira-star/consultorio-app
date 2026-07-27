@@ -14276,8 +14276,15 @@ function impNormStatus(s) {
   // 'Parcelado' não existia em lugar nenhum do app: o valor caía fora de todos
   // os baldes de pagamento e o dinheiro ficava invisível.
   if (/isent|cortesia|gratui|free/.test(lc)) return 'Isento';
+  // ANTES do 'pago': o regex só conhecia 'parcel' (de "Parcelado", vocabulário
+  // de planilha) e não 'parci' — ou seja, não reconhecia o próprio 'Parcial'
+  // que o app grava em toda inscrição parcelada e exporta no CSV. Exportar e
+  // reimportar rebaixava o status pra Pendente e a informação de que uma parte
+  // já tinha sido paga sumia do registro.
+  // Vem antes do 'pago' pra que "parcialmente pago" caia em Parcial, que é o
+  // que ele é — e não em Pago, pelo 'pago' no fim da frase.
+  if (/parci|parcel/.test(lc)) return 'Parcial';
   if (/pago|recebi|paid|quit|ok|sim|yes/.test(lc)) return 'Pago';
-  if (/parcel/.test(lc)) return 'Parcial';
   return 'Pendente';
 }
 
