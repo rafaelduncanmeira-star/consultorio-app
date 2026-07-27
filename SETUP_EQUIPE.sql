@@ -2,6 +2,21 @@
 -- CONSULTÓRIO APP — Multi-usuário (equipe na mesma clínica)
 -- Execute este script no SQL Editor do Supabase
 -- DEPOIS de já ter rodado o SETUP_SUPABASE.sql
+--
+-- ⚠️ ESTE ARQUIVO SOBRESCREVE COISAS. Ele dá `create or replace` na função
+--    accept_invite e `drop policy` nas policies de app_data / crm_leads /
+--    crm_messages. Arquivos POSTERIORES redefinem essas mesmas coisas de
+--    forma mais restrita. Rodar este aqui de novo, sozinho, REVERTE aquilo.
+--
+--    Se precisar re-rodar, rode na ordem completa depois:
+--      SETUP_SUPABASE → SETUP_EQUIPE → SETUP_EQUIPE_PROFISSIONAL
+--      → SETUP_CRM_PROFISSIONAL → SETUP_SEGURANCA → SETUP_LGPD_CRM
+--
+--    O accept_invite abaixo já foi alinhado com a versão do
+--    SETUP_EQUIPE_PROFISSIONAL.sql nas duas partes que importam (checagem de
+--    e-mail do convite e não sobrescrever profiles.role), então re-rodar este
+--    arquivo não reabre mais esses dois buracos. O que ele ainda reverte são
+--    as POLICIES — por isso a ordem acima.
 -- ============================================================
 
 -- ------------------------------------------------------------
@@ -95,6 +110,15 @@ begin
     return json_build_object('error', 'Você não pode aceitar um convite seu mesmo.');
   end if;
 
+  -- Convite é NOMINAL: só a conta com o e-mail convidado pode aceitar. Sem
+  -- isto, QUALQUER pessoa que receba o link entra na clínica com o papel do
+  -- convite — e o app manda esse link por WhatsApp, que é encaminhável.
+  -- (Convites antigos, gravados sem e-mail, seguem abertos.)
+  if inv.email is not null and inv.email <> ''
+     and lower(inv.email) <> lower(coalesce(auth.email(), '')) then
+    return json_build_object('error', 'Este convite é para outro e-mail. Entre com a conta convidada.');
+  end if;
+
   -- Adiciona como membro (idempotente)
   insert into team_members (owner_id, member_id, role)
     values (inv.owner_id, auth.uid(), inv.role)
@@ -105,8 +129,10 @@ begin
     set accepted_at = now(), accepted_by = auth.uid()
     where id = inv.id;
 
-  -- Atualiza o papel do perfil de quem aceitou
-  update profiles set role = inv.role where id = auth.uid();
+  -- NÃO sobrescreve profiles.role (papel GLOBAL da conta). O papel do convite
+  -- vale só DENTRO da equipe e já fica em team_members.role, que é o que o
+  -- resolveDataOwner lê. Antes, um DONO que aceitasse convite de outra clínica
+  -- virava "secretária" na PRÓPRIA e perdia acesso ao próprio financeiro.
 
   return json_build_object('ok', true, 'owner_id', inv.owner_id, 'role', inv.role);
 end $$;

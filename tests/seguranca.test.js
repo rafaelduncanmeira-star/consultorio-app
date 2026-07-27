@@ -427,3 +427,29 @@ test('renderEquipeCard: distingue lista vazia de lista que não pôde ser lida',
   assert.match(src, /membros === null \|\| convites === null/,
     'sem esta distinção a tela mostra "compartilhe seu consultório" pra quem já tem equipe');
 });
+
+// ---------- os dois arquivos SQL não podem discordar do accept_invite ----------
+// accept_invite é definido em SETUP_EQUIPE.sql e redefinido em
+// SETUP_EQUIPE_PROFISSIONAL.sql. Como os dois usam `create or replace`, rodar o
+// primeiro depois do segundo REVERTE as correções. Duas delas eram graves:
+// sem a checagem de e-mail, qualquer um que recebesse o link (mandado por
+// WhatsApp, que é encaminhável) entrava na clínica; e o `update profiles set
+// role` trancava o dono fora do próprio financeiro.
+test('SETUP_EQUIPE.sql: accept_invite não pode reverter as correções de segurança', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const sql = fs.readFileSync(path.join(__dirname, '..', 'SETUP_EQUIPE.sql'), 'utf8');
+  const fn = sql.slice(sql.indexOf('create or replace function accept_invite'));
+  assert.ok(fn.length > 0, 'a função tem de estar no arquivo');
+  assert.doesNotMatch(fn, /update\s+profiles\s+set\s+role/,
+    'sobrescrever profiles.role tranca o dono fora da própria clínica');
+  assert.match(fn, /auth\.email\(\)/,
+    'o convite é nominal: sem checar o e-mail, o link entra em qualquer mão');
+});
+
+test('SETUP_EQUIPE.sql: avisa que sobrescreve o que arquivos posteriores restringem', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const sql = fs.readFileSync(path.join(__dirname, '..', 'SETUP_EQUIPE.sql'), 'utf8');
+  const cabecalho = sql.slice(0, 1400);
+  assert.match(cabecalho, /SETUP_SEGURANCA/, 'a ordem de execução tem de estar no topo');
+  assert.match(cabecalho, /REVERTE|reverte/, 'o risco de re-rodar tem de estar explícito');
+});

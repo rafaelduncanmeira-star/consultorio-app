@@ -135,6 +135,41 @@ Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
   próximo item.** Guardar pro fim do laço perde tudo se o app fechar no meio — e
   `rodarCicloLembretes` dispara sozinho 5s depois de abrir, ~1s por paciente.
 
+#### 🔴 Padrão que mais rendeu: pergunta ao banco com o `error` descartado
+
+`supabase-js` não lança — devolve `{ error }`. Em **toda** consulta que pergunta
+*"quem é você"* ou *"o que você pode"*, descartar o erro faz a resposta vazia ser lida
+como **permissão**. Quatro achados seguidos, todos deste mesmo formato:
+
+- `listFactors()` falhando devolvia `{ ok: true }` → **login entrava sem 2FA**.
+- `"tenho clínica própria?"` falhando → o **dono virava membro da clínica alheia**,
+  gravando os registros novos lá dentro.
+- perfil ilegível caía no ramo de "primeiro login" → papel vinha do `user_metadata`
+  (que o usuário controla, padrão `'medico'`) e era **gravado por cima** do perfil.
+- `listarMembros`/`listarConvites` devolvendo `[]` → tela dizia que a **equipe estava vazia**.
+
+Regra: erro de leitura **nunca** é resposta negativa. Falhe fechado (barre, derrube a
+sessão) ou devolva `null` como "não sei" — distinto de `[]`/`false`, que são respostas.
+Com `.single()`, só **`PGRST116`** significa "não existe linha"; qualquer outro código é
+falha de leitura.
+
+#### Outras regras aprendidas
+
+- **Ação irreversível espera confirmação da nuvem.** `importarJSON` recarregava a página
+  num timer de 2s enquanto os pushes voavam; o pull seguinte trazia os dados velhos e o
+  backup "restaurado" evaporava. `restaurarSnapshot` já esperava — quando duas funções
+  fazem a mesma coisa de jeitos diferentes, **uma delas é o bug**. Esse sinal apareceu
+  em quase todo achado desta série (Z-API × Cloud API, `_isBloqueado` × webhook,
+  `renderStatus2FA` × portão de 2FA, `_normPhone` × importação).
+- **Poda antes de gravar.** O snapshot gravava e só depois podava; uma vez cheio o
+  `localStorage`, o `setItem` lançava, a poda nunca rodava e o backup automático parava
+  **para sempre**, calado (o chamador não tinha `.catch`).
+- **`opacity: 0` não desliga clique.** O toast ficava sobre a nav inferior do celular e
+  matava o botão central. Elemento que some precisa de `pointer-events: none`.
+- **SQL: `SETUP_EQUIPE.sql` sobrescreve policies que arquivos posteriores restringem.**
+  O `accept_invite` dele já foi alinhado, mas as policies não — re-rodar sozinho reverte.
+  A ordem completa está no cabeçalho do arquivo.
+
 #### Sobre os testes
 
 - `node --test` roda 99 testes. **Rode também em outro fuso** quando mexer em data:
