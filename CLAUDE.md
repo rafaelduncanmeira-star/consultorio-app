@@ -111,6 +111,12 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- 🔴 **Tarefa "do dia" presa ao carregamento da página não roda no 2º dia.** O app fica
+  aberto a semana inteira numa recepção. Backup automático e ciclo de lembretes só
+  disparavam no `_iniciarApp`. Agora saem de `_rodarTarefasDoDia()` — na abertura, a cada
+  15 min e no `visibilitychange` (máquina suspensa não dispara `setInterval`). Só é
+  seguro porque as duas se protegem contra repetir no mesmo dia; **há teste cobrando
+  essas guardas** — elas sustentam o agendador.
 - 🔴 **`SIGNED_OUT` involuntário tem de aparecer — e NÃO pode limpar o localStorage.**
   Sessão derrubada pelo servidor (senha trocada em outro aparelho, token rotacionado)
   deixava a tela inteira de pé com `currentUser` preenchido, e toda gravação passava a
