@@ -342,3 +342,39 @@ test('resolveDataOwner: sem clínica e sem equipe, é dono de si mesmo', async (
   assert.strictEqual(s.currentDataOwner, 'eu');
   assert.strictEqual(s.currentTeamRole, 'owner');
 });
+
+// ---------- perfil ilegível não pode virar "primeiro login" ----------
+// Os dois caminhos de login liam profiles com o error descartado. Falha de
+// leitura ficava indistinguível de "não existe perfil" — e nesse ramo o papel
+// vem do user_metadata (que o próprio usuário controla via auth.updateUser, e
+// cujo padrão aqui é 'medico') e é GRAVADO por cima do perfil real. Uma falha
+// de rede promovia o usuário, de forma permanente.
+test('login: erro de leitura do perfil não pode cair no ramo de primeiro login', () => {
+  const { fonte } = require('./_extrair.js');
+  // Ancora no destructuring, que e onde o error apareceria — comecar no
+  // from('profiles') deixaria justamente essa parte de fora do trecho.
+  // Só os dois de login: `profile` (singular) lendo role+nome. O
+  // `const { data: profiles }` da listagem de equipe nao entra aqui.
+  const trechos = [...fonte.matchAll(/const \{ data: profile\b[\s\S]{0,900}/g)]
+    .filter(m => m[0].includes("'role, nome'"));
+  assert.ok(trechos.length >= 2, 'esperava os dois pontos de login');
+  for (const t of trechos) {
+    const bloco = t[0];
+    assert.match(bloco, /error:\s*errPerfil/,
+      'o error da consulta de perfil tem de ser lido');
+    assert.match(bloco, /PGRST116/,
+      'só "linha inexistente" (PGRST116) é primeiro login; o resto é falha de leitura');
+    // O upsert que grava o papel do metadata não pode ser alcançado por erro.
+    const posGuarda = bloco.indexOf('PGRST116');
+    const posUpsert = bloco.indexOf("upsert({ id: currentUser.id");
+    assert.ok(posUpsert === -1 || posGuarda < posUpsert,
+      'a guarda tem de vir ANTES do upsert que grava o papel');
+  }
+});
+
+test('login: o papel padrão do metadata é privilegiado — por isso a guarda importa', () => {
+  const { fonte } = require('./_extrair.js');
+  // Se um dia o padrão deixar de ser 'medico', este teste avisa que o risco mudou.
+  assert.match(fonte, /meta\.role \|\| 'medico'/,
+    'o ramo de primeiro login assume medico quando o metadata não diz nada');
+});

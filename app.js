@@ -815,7 +815,18 @@ async function loginUser(email, password) {
     if (error) return { error: _traduzirErroAuth(error.message) };
     currentUser = data.user;
     // Busca role do perfil
-    const { data: profile } = await _supa.from('profiles').select('role, nome').eq('id', currentUser.id).single();
+    const { data: profile, error: errPerfil } = await _supa.from('profiles')
+      .select('role, nome').eq('id', currentUser.id).single();
+    // `.single()` devolve erro PGRST116 quando NÃO EXISTE linha — isso sim é
+    // primeiro login. Qualquer outro erro é "não consegui ler", e tratar isso
+    // como "não tem perfil" era grave: o papel passava a vir do user_metadata,
+    // que o próprio usuário controla (auth.updateUser) e cujo padrão aqui é
+    // 'medico' — e o upsert logo abaixo GRAVAVA isso por cima do perfil real.
+    // Ou seja, uma falha de rede promovia o usuário, de forma permanente.
+    if (errPerfil && errPerfil.code !== 'PGRST116') {
+      await _supa.auth.signOut().catch(() => {});
+      return { error: 'Não foi possível carregar seu perfil. Tente novamente.' };
+    }
     if (!profile) {
       // Primeiro login após signup com confirmação por email — cria perfil a partir do metadata
       const meta = currentUser.user_metadata || {};
@@ -1080,7 +1091,15 @@ async function checkSession() {
     const { data: { session } } = await _supa.auth.getSession();
     if (!session) return false;
     currentUser = session.user;
-    const { data: profile } = await _supa.from('profiles').select('role, nome').eq('id', currentUser.id).single();
+    // Mesmo cuidado do loginUser: erro de leitura NÃO é "perfil não existe".
+    // Tratar assim fazia o papel vir do user_metadata (controlado pelo próprio
+    // usuário, padrão 'medico') e ser gravado por cima do perfil real.
+    const { data: profile, error: errPerfil } = await _supa.from('profiles')
+      .select('role, nome').eq('id', currentUser.id).single();
+    if (errPerfil && errPerfil.code !== 'PGRST116') {
+      console.warn('checkSession: perfil ilegível —', errPerfil.message);
+      return false;   // volta pra tela de login em vez de entrar com papel chutado
+    }
     if (!profile) {
       const meta = currentUser.user_metadata || {};
       const nomeMeta = meta.nome || session.user.email.split('@')[0];
