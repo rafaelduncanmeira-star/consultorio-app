@@ -130,3 +130,57 @@ test('nenhum ponto volta a testar o vínculo com o falsy do índice', () => {
   assert.doesNotMatch(semCom, /!\s*\w+\.pacIdx\b/,
     'pacIdx 0 é vínculo válido — teste com != null ou use _agVirouAtendimento');
 });
+
+// ---------- lançamento de programa não pode depender de texto livre ----------
+// Seis telas classificavam um atendimento como lançamento de programa
+// procurando '[Programa' dentro de `obs` — campo de TEXTO LIVRE, editável no
+// modal de atendimento. Bastava o médico abrir o lançamento pra anotar alguma
+// coisa e apagar aquele colchete (que parece lixo) para a receita mudar de
+// seção sozinha: sumia da seção Programas do Relatório, saía da linha
+// "assinatura" do PDF e passava a contar duas vezes no breakdown por
+// procedimento. Nada avisava.
+test('_ehLancamentoPrograma: reconhece pelo campo, não só pelo texto', () => {
+  const { _ehLancamentoPrograma } = carregar('_ehLancamentoPrograma', { String });
+  assert.strictEqual(_ehLancamentoPrograma({ programaInscricaoId: 'ins_1', obs: '' }), true,
+    'obs apagada não pode desclassificar o lançamento');
+  assert.strictEqual(_ehLancamentoPrograma({ programaInscricaoId: 'ins_1', obs: 'paciente pediu recibo' }), true);
+  assert.strictEqual(_ehLancamentoPrograma({ obs: '[Programa Assinatura]' }), true,
+    'dado antigo, que só tem a marca no texto, continua valendo');
+  assert.strictEqual(_ehLancamentoPrograma({ obs: '[Programa Assinatura — Renovação]' }), true);
+});
+
+test('_ehLancamentoPrograma: atendimento comum continua fora', () => {
+  const { _ehLancamentoPrograma } = carregar('_ehLancamentoPrograma', { String });
+  for (const p of [{}, { obs: '' }, { obs: 'consulta de rotina' }, null, undefined,
+                   { programaInscricaoId: null, obs: 'nada' }]) {
+    assert.strictEqual(_ehLancamentoPrograma(p), false, JSON.stringify(p));
+  }
+});
+
+test('todo lançamento de programa carimba o vínculo', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  const inscr = recortarFuncao('inscreverEmPrograma').replace(/\/\/[^\n]*/g, '');
+  // Quatro no total: os DOIS lançamentos financeiros (assinatura e fixo/contínuo)
+  // mais o agendamento e o follow-up de cada marco, que já usavam o campo.
+  assert.strictEqual((inscr.match(/programaInscricaoId: inscricao\.id/g) || []).length, 4);
+  // O que importa aqui é que os dois `pacs.push` carimbam.
+  const lancamentos = inscr.split('pacs.push(').slice(1)
+    .map(t => t.slice(0, t.indexOf('});')));
+  assert.strictEqual(lancamentos.length, 2, 'assinatura e fixo/contínuo');
+  for (const l of lancamentos) {
+    assert.match(l, /programaInscricaoId: inscricao\.id/,
+      'lançamento financeiro sem o vínculo volta a depender do texto de obs');
+  }
+  const renov = recortarFuncao('saveRenovacao').replace(/\/\/[^\n]*/g, '');
+  assert.match(renov, /programaInscricaoId: ins\.id/, 'a renovação também gera um lançamento');
+});
+
+test('nenhuma tela volta a classificar programa pelo texto de obs', () => {
+  const semCom = fonte.replace(/\/\/[^\n]*/g, '');
+  // O próprio _ehLancamentoPrograma contém essa leitura (é a reserva pro dado
+  // antigo) — tira a função da varredura antes de procurar.
+  const semHelper = semCom.replace(/function _ehLancamentoPrograma[\s\S]*?\n}/, '');
+  const crus = [...semHelper.matchAll(/\(p\.obs\s*\|\|\s*''\)\.includes\('\[Programa'\)/g)];
+  assert.deepStrictEqual(crus.map(m => m[0]), [],
+    'obs é editável pelo médico — o vínculo tem de ser campo');
+});

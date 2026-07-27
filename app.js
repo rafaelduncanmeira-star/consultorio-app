@@ -2512,6 +2512,7 @@ function inscreverEmPrograma(programaId, pacienteRef, dataInicio, horaPadrao = '
       valor: valorTotal,
       statusPgto: formaPagamento === 'À vista' ? 'Pago' : 'Parcial',
       obs: '[Programa Assinatura]',
+      programaInscricaoId: inscricao.id,
       pacIdx,
     });
     DB.set('pacientes', pacs);
@@ -2598,6 +2599,7 @@ function inscreverEmPrograma(programaId, pacienteRef, dataInicio, horaPadrao = '
       valor: valorTotal,
       statusPgto: formaPagamento === 'À vista' ? 'Pago' : 'Parcial',
       obs: `[Programa ${prog.tipo}]`,
+      programaInscricaoId: inscricao.id,
       pacIdx,
     });
     DB.set('pacientes', pacs);
@@ -2725,6 +2727,7 @@ function saveRenovacao(e) {
     valor: valorTotal,
     statusPgto: formaPagamento === 'À vista' ? 'Pago' : 'Parcial',
     obs: '[Programa Assinatura — Renovação]',
+    programaInscricaoId: ins.id,
     pacIdx: ins.pacIdx,
   });
   DB.set('pacientes', pacs);
@@ -3581,6 +3584,19 @@ function _ticketMedio(pacs) {
     qtdPagas:        pagas.length,
     qtdGratuitos:    lista.length - pagas.length,
   };
+}
+
+// Este atendimento é um lançamento de PROGRAMA (assinatura/pacote)?
+// Seis telas precisavam saber isso e todas procuravam a marca '[Programa' dentro
+// de `obs` — que é campo de TEXTO LIVRE, editável no modal de atendimento. Bastava
+// o médico abrir o lançamento pra escrever uma observação e apagar aquele colchete
+// (que parece lixo) pra receita mudar de seção sozinha: sumia da seção Programas do
+// Relatório, saía da linha "assinatura" do PDF e passava a contar duas vezes no
+// breakdown por procedimento. Nada avisava.
+// Agora o vínculo é um CAMPO — o mesmo nome que agendamentos e follow-ups de
+// programa já usam. A marca em `obs` fica como reserva pro que já está gravado.
+function _ehLancamentoPrograma(p) {
+  return !!(p && (p.programaInscricaoId || String(p.obs || '').includes('[Programa')));
 }
 
 // PACIENTE NOVO = pessoa que NUNCA foi atendida antes neste consultório, ou
@@ -6746,12 +6762,12 @@ function renderReceita() {
   const procMap = {};
   pacs.forEach(p => {
     let k;
-    if ((p.obs || '').includes('[Programa')) {
+    if (_ehLancamentoPrograma(p)) {
       k = p.procedimento || 'Programa de assinatura';
     } else {
       k = p.tipo || p.procedimento || '(sem procedimento)';
     }
-    if (!procMap[k]) procMap[k] = { qtd: 0, total: 0, isProg: (p.obs||'').includes('[Programa') };
+    if (!procMap[k]) procMap[k] = { qtd: 0, total: 0, isProg: _ehLancamentoPrograma(p) };
     procMap[k].qtd++;
     procMap[k].total += (p.valor || 0);
   });
@@ -7686,7 +7702,7 @@ function renderFinanceiro(mes) {
   // (antes era lista fixa que filtrava silenciosamente procedimentos com outros nomes)
   const tiposMap = {};
   pacs.forEach(p => {
-    if ((p.obs || '').includes('[Programa')) return; // programas têm seção própria
+    if (_ehLancamentoPrograma(p)) return; // programas têm seção própria
     const t = (p.tipo || '(sem tipo)').trim();
     if (!tiposMap[t]) tiposMap[t] = { qtd: 0, total: 0 };
     tiposMap[t].qtd++;
@@ -8466,13 +8482,13 @@ function gerarPDF(mes) {
   const procMap = {};
   pacs.forEach(p => {
     let k;
-    if ((p.obs || '').includes('[Programa')) {
+    if (_ehLancamentoPrograma(p)) {
       // Lançamento de programa: usa o nome do programa (ex: "Programa Compagni")
       k = p.procedimento || 'Programa de assinatura';
     } else {
       k = p.tipo || p.procedimento || '(sem procedimento)';
     }
-    if (!procMap[k]) procMap[k] = { qtd: 0, total: 0, isProg: (p.obs||'').includes('[Programa') };
+    if (!procMap[k]) procMap[k] = { qtd: 0, total: 0, isProg: _ehLancamentoPrograma(p) };
     procMap[k].qtd++; procMap[k].total += (p.valor || 0);
   });
   const procStats = Object.entries(procMap)
@@ -9114,12 +9130,12 @@ function renderRelatorio(mes) {
   const procMap = {};
   pacs.forEach(p => {
     let k;
-    if ((p.obs || '').includes('[Programa')) {
+    if (_ehLancamentoPrograma(p)) {
       k = p.procedimento || 'Programa de assinatura';
     } else {
       k = p.tipo || p.procedimento || '(sem procedimento)';
     }
-    if (!procMap[k]) procMap[k] = { qtd: 0, total: 0, isProg: (p.obs||'').includes('[Programa') };
+    if (!procMap[k]) procMap[k] = { qtd: 0, total: 0, isProg: _ehLancamentoPrograma(p) };
     procMap[k].qtd++;
     procMap[k].total += (p.valor || 0);
   });
@@ -9240,7 +9256,7 @@ function renderRelatorio(mes) {
     }
   });
   // Faturamento de programas LANÇADO neste mês (receitas reais)
-  const lancamentosProgramaMes = pacs.filter(p => (p.obs || '').includes('[Programa'));
+  const lancamentosProgramaMes = pacs.filter(_ehLancamentoPrograma);
   const faturamentoProgsBruto    = lancamentosProgramaMes.reduce((s, p) => s + (p.valor || 0), 0);
   const faturamentoProgsRecebido = lancamentosProgramaMes.filter(p => p.statusPgto === 'Pago').reduce((s, p) => s + (p.valor || 0), 0);
   // Novas inscrições no mês
