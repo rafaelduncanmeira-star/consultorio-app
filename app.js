@@ -13452,7 +13452,9 @@ function _revisarCanalLeads() {
 window.addEventListener('online', () => setTimeout(_revisarCanalLeads, 2000));
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
-  _revisarCanalLeads();
+  // Isolado: se a revisão do canal lançar, as tarefas do dia ainda têm de rodar.
+  // Duas coisas independentes no mesmo handler não podem derrubar uma à outra.
+  try { _revisarCanalLeads(); } catch (e) { console.warn('revisão do canal:', e && e.message); }
   // Máquina suspensa não dispara setInterval: o computador da recepção dorme na
   // sexta e acorda na segunda com o timer parado no tempo. Ao voltar pra frente,
   // re-checa as tarefas do dia — que se protegem sozinhas contra repetição.
@@ -13635,7 +13637,17 @@ async function _tentarSincronizarAgora() {
   // não pra impedir que a pessoa peça explicitamente.
   _outboxResetTentativas();
   toast('Enviando…', 2000);
-  await _drenarOutbox();
+  // O _drenarOutbox tem `finally` mas não tem `catch`: uma exceção lá dentro
+  // (JSON corrompido no localStorage, por exemplo) sobe até aqui. E quem chama
+  // esta função é um onclick, que não tem catch nenhum — a promise seria
+  // rejeitada em silêncio, o toast "Enviando…" seria a última coisa na tela e o
+  // botão pareceria morto. Justamente na tela que existe pra dizer o que está
+  // errado com a sincronização.
+  try {
+    await _drenarOutbox();
+  } catch (e) {
+    toast('⚠️ Não consegui enviar agora: ' + ((e && e.message) || 'erro inesperado'), 6000);
+  }
   const { fila } = _pendenciasSync();
   toast(fila.length ? `Ainda faltam ${fila.length} — veja o motivo abaixo.` : '✅ Tudo enviado!', 3500);
   renderSyncSaude();

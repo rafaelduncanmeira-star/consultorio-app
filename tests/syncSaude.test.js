@@ -142,3 +142,52 @@ test('tentar enviar agora zera as tentativas antes de drenar', () => {
   assert.ok(iReset > 0 && iDrena > iReset,
     'o teto existe pra não martelar o servidor a cada pull, não pra ignorar um pedido explícito');
 });
+
+// ---------- o botão da própria tela de diagnóstico não pode morrer calado ----------
+// _tentarSincronizarAgora é async e é chamada por um onclick, que não tem catch.
+// O _drenarOutbox tem `finally` mas NÃO tem `catch`: uma exceção lá dentro
+// (JSON corrompido no localStorage) sobe até aqui e a promise é rejeitada em
+// silêncio — o toast "Enviando…" fica sendo a última coisa na tela e o botão
+// parece morto. Justamente na tela que existe pra dizer o que está errado.
+function ambienteBotao({ drenarLanca = false, filaDepois = {} } = {}) {
+  const toasts = [];
+  let redesenhou = 0;
+  const s = carregar('_tentarSincronizarAgora', {
+    Object,
+    _supa: {}, currentUser: { id: 'u1' },
+    _outboxResetTentativas: () => {},
+    _drenarOutbox: async () => { if (drenarLanca) throw new Error('localStorage corrompido'); },
+    _pendenciasSync: () => ({ fila: Object.keys(filaDepois).map(k => ({ key: k })) }),
+    renderSyncSaude: () => { redesenhou++; },
+    toast: (t) => toasts.push(t),
+  });
+  return { ...s, toasts, redesenhou: () => redesenhou };
+}
+
+test('botão: exceção no envio vira mensagem, não promise perdida', async () => {
+  const a = ambienteBotao({ drenarLanca: true });
+  await assert.doesNotReject(() => a._tentarSincronizarAgora());
+  assert.match(a.toasts.join(' '), /Não consegui enviar agora/);
+  assert.match(a.toasts.join(' '), /localStorage corrompido/, 'o motivo real ajuda a agir');
+});
+
+test('botão: mesmo falhando, a tela é redesenhada com o estado atual', async () => {
+  const a = ambienteBotao({ drenarLanca: true, filaDepois: { pacientes: 1 } });
+  await a._tentarSincronizarAgora();
+  assert.strictEqual(a.redesenhou(), 1,
+    'a pessoa precisa ver o que continua pendente depois da tentativa');
+  assert.match(a.toasts.join(' '), /Ainda faltam 1/);
+});
+
+test('botão: caminho feliz avisa que terminou', async () => {
+  const a = ambienteBotao({ filaDepois: {} });
+  await a._tentarSincronizarAgora();
+  assert.match(a.toasts.join(' '), /Tudo enviado/);
+});
+
+test('visibilitychange: falha na revisão do canal não derruba as tarefas do dia', () => {
+  const { fonte } = require('./_extrair.js');
+  const semCom = fonte.replace(/\/\/[^\n]*/g, '');
+  assert.match(semCom, /try \{ _revisarCanalLeads\(\); \} catch/,
+    'duas coisas independentes no mesmo handler não podem derrubar uma à outra');
+});
