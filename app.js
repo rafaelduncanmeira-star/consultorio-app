@@ -261,15 +261,29 @@ async function _drenarOutbox() {
     for (const [key, info] of Object.entries(_outboxGet())) {
       // Já estourou o teto: não adianta martelar o servidor a cada pull.
       if ((info.tentativas || 0) >= _OUTBOX_TETO) continue;
-      if (info.tipo === 'blindada') {
-        const cfg = _BLINDADAS[key];
-        const arr = JSON.parse(localStorage.getItem('consult_' + key) || '[]');
-        // Só upsert (oldArr=[] ⇒ sem deletes): não dá pra saber o que OUTRO
-        // aparelho criou enquanto estávamos offline — apagar seria pior.
-        const ok = cfg ? await _pushBlindada(cfg.tabela, [], arr) : true;
-        if (ok) _outboxRemove(key); else _outboxAdd(key, 'blindada');
-      } else {
-        await cloudPush(key); // remove/re-enfileira sozinho
+      // UMA chave não pode derrubar a fila inteira. O JSON.parse abaixo lança
+      // quando o blob local está corrompido (gravação cortada por falta de
+      // espaço, por exemplo), e essa exceção subia por _drenarOutbox →
+      // cloudPull → DOMContentLoaded, que não tinha catch: o _iniciarApp nunca
+      // rodava e o app simplesmente NÃO ABRIA. A única saída era limpar o
+      // navegador, levando junto tudo que ainda não tinha sincronizado.
+      // (Mesma lição do snapshot: "chave corrompida não derruba o backup inteiro".)
+      try {
+        if (info.tipo === 'blindada') {
+          const cfg = _BLINDADAS[key];
+          const arr = JSON.parse(localStorage.getItem('consult_' + key) || '[]');
+          // Só upsert (oldArr=[] ⇒ sem deletes): não dá pra saber o que OUTRO
+          // aparelho criou enquanto estávamos offline — apagar seria pior.
+          const ok = cfg ? await _pushBlindada(cfg.tabela, [], arr) : true;
+          if (ok) _outboxRemove(key); else _outboxAdd(key, 'blindada');
+        } else {
+          await cloudPush(key); // remove/re-enfileira sozinho
+        }
+      } catch (e) {
+        // Fica na fila (e visível no cartão de saúde da sincronização) em vez de
+        // sumir. Não apagamos a chave: dado ilegível ainda é dado do usuário.
+        console.warn('_drenarOutbox: chave', key, 'não pôde ser enviada —', e && e.message);
+        _outboxAdd(key, info.tipo || 'blob');
       }
     }
   } finally { _drenandoOutbox = false; }
@@ -372,10 +386,12 @@ async function _pushComRev(owner, key, value, tentativa = 0) {
 async function cloudPull() {
   if (!_supa || !currentUser) return;
   const owner = currentDataOwner || currentUser.id;
-  // Entrega primeiro o que ficou pendente (offline/rejeitado) — senão o pull
-  // sobrescreveria a edição local que nunca chegou ao servidor.
-  await _drenarOutbox();
   try {
+    // Entrega primeiro o que ficou pendente (offline/rejeitado) — senão o pull
+    // sobrescreveria a edição local que nunca chegou ao servidor. DENTRO do try:
+    // fora dele, uma exceção aqui rejeitava o cloudPull inteiro e derrubava o
+    // arranque do app.
+    await _drenarOutbox();
     let { data, error } = await _supa.from('app_data')
       .select('key, value, rev')
       .eq('user_id', owner);
@@ -14573,9 +14589,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 2FA ok — aceita convite pendente, resolve owner, sincroniza
     await _acceptInviteIfPending();
     await resolveDataOwner();
-    await cloudPull();
-    initLeadsRealtime();
-    syncLeadsFromSupabase();
+    // O app tem de ABRIR mesmo se a sincronização falhar. Sem este try, uma
+    // exceção no cloudPull (ou no resolveDataOwner) deixava o _iniciarApp sem
+    // rodar: a pessoa ficava olhando uma tela que nunca monta, com os dados
+    // dela intactos no localStorage e inalcançáveis. Falhar a sincronização é
+    // ruim; não abrir é pior — offline o app precisa funcionar assim mesmo.
+    try {
+      await cloudPull();
+      initLeadsRealtime();
+      syncLeadsFromSupabase();
+    } catch (e) {
+      console.warn('sincronização inicial falhou:', e && e.message);
+      toast('⚠️ Não consegui sincronizar agora — trabalhando com os dados deste aparelho.', 6000);
+    }
     _iniciarApp();
   } else {
     // Mostra tela de login (já visível por padrão)
