@@ -255,3 +255,43 @@ test('restaurarSnapshot: snapshot corrompido avisa em vez de não fazer nada', (
     'parse solto dentro de async vira promise rejeitada em silêncio: o botão não faz nada');
   assert.match(src, /_backupFormatoInvalido/, 'e o formato tem de ser conferido antes de gravar');
 });
+
+// ---------- arquivo ilegível não pode congelar a tela ----------
+// Sem onerror, um arquivo que o navegador não consegue ler (pen drive removido
+// depois de escolhido, permissão negada) deixava o status em "Lendo…" PARA
+// SEMPRE. Pior: o `input.value = ''` só acontece no fim do onload, que nunca
+// chegava — e sem essa limpeza, escolher o MESMO arquivo de novo não dispara
+// evento nenhum. A tela congela e nada que a pessoa faça parece ter efeito.
+test('importarJSON: falha de leitura avisa e libera o seletor de arquivo', () => {
+  const { carregar } = require('./_extrair.js');
+  const toasts = [];
+  const statusEl = { textContent: '' };
+  const input = { files: [{ name: 'backup.json' }], value: 'backup.json' };
+  class FR {
+    readAsText() { this.onerror && this.onerror(); }
+  }
+  const { importarJSON } = carregar('importarJSON', {
+    FileReader: FR, JSON, Object, Array,
+    document: { getElementById: () => statusEl },
+    toast: (t) => toasts.push(t),
+    BACKUP_KEYS: [], _BLINDADAS: {}, DB: { set: () => Promise.resolve(true) },
+  });
+  importarJSON(input);
+  assert.match(statusEl.textContent, /Não consegui ler o arquivo/,
+    'o status não pode ficar preso em "Lendo…"');
+  assert.strictEqual(input.value, '',
+    'sem limpar, escolher o mesmo arquivo de novo não dispara evento nenhum');
+});
+
+test('todo FileReader do app tem onerror', () => {
+  const { fonte } = require('./_extrair.js');
+  const linhas = fonte.replace(/\/\/[^\n]*/g, '').split('\n');
+  const semTratamento = [];
+  linhas.forEach((l, i) => {
+    if (!/new FileReader\(\)/.test(l)) return;
+    const bloco = linhas.slice(i, i + 30).join('\n');
+    if (!/onerror/.test(bloco)) semTratamento.push(i + 1);
+  });
+  assert.deepStrictEqual(semTratamento, [],
+    'sem onerror o onload nunca dispara e a tela fica esperando para sempre, calada');
+});

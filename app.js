@@ -4938,6 +4938,9 @@ function handleWAFile(e) {
 
 function lerImagemWA(blob) {
   const reader = new FileReader();
+  // Sem onerror, uma imagem que o navegador não consegue ler não gera nada: a
+  // miniatura não aparece e não há mensagem. A pessoa acha que não clicou.
+  reader.onerror = () => toast('❌ Não consegui ler essa imagem. Tente outra.', 4000);
   reader.onload = (ev) => {
     waImageDataUrl = ev.target.result;
     document.getElementById('wa-image-thumb').src = waImageDataUrl;
@@ -13776,6 +13779,16 @@ function importarJSON(input) {
   const status = document.getElementById('backup-import-status');
   status.textContent = `Lendo ${file.name}…`;
   const reader = new FileReader();
+  // Sem onerror, um arquivo ilegível (pen drive removido, permissão negada)
+  // deixava o status em "Lendo…" PARA SEMPRE — e o `input.value = ''` só
+  // acontece no fim do onload, que nunca chegava. Sem essa limpeza, escolher o
+  // MESMO arquivo de novo não dispara evento nenhum: a tela fica congelada e
+  // nada que a pessoa faça parece ter efeito.
+  reader.onerror = () => {
+    status.textContent = '❌ Não consegui ler o arquivo. Tente escolher de novo.';
+    toast('❌ Não consegui ler o arquivo.', 4000);
+    input.value = '';
+  };
   reader.onload = async (e) => {
     try {
       const dados = JSON.parse(e.target.result);
