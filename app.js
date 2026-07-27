@@ -3569,21 +3569,20 @@ function openModalTemplatePrograma(id) {
   // Preenche preço (comum a todos os tipos)
   const avEl = document.getElementById('tpl-preco-avista');
   if (avEl) avEl.value = p && p.precoAVista ? p.precoAVista : '';
-  // Campos específicos de Assinatura
-  if (p && p.tipo === 'Assinatura') {
-    const vigEl = document.getElementById('tpl-vigencia');
-    if (vigEl) vigEl.value = p.vigencia || 'Anual';
-    const caEl = document.getElementById('tpl-consulta-avulsa');
-    if (caEl) caEl.value = p.consultaAvulsa || '';
-    const polEl = document.getElementById('tpl-politicas');
-    if (polEl) polEl.value = p.politicas || '';
-  } else {
-    // Limpa campos de Assinatura
-    const caEl = document.getElementById('tpl-consulta-avulsa');
-    if (caEl) caEl.value = '';
-    const polEl = document.getElementById('tpl-politicas');
-    if (polEl) polEl.value = '';
-  }
+  // Campos específicos de Assinatura — SEMPRE reatribuídos, inclusive no ramo
+  // "programa novo". A vigência ficava de fora: ela mora dentro de um bloco que
+  // só aparece quando o tipo é Assinatura, então criar um programa logo depois
+  // de editar outro reabria o formulário com a vigência do anterior. E vigência
+  // não é enfeite — é ela que define _vigenciaDias, ou seja, o vencimento de
+  // toda inscrição, o aviso de renovação e o MRR. Um programa anual salvo como
+  // Mensal vence em 30 dias e cobra renovação no primeiro mês.
+  const ehAssinatura = !!(p && p.tipo === 'Assinatura');
+  const vigEl = document.getElementById('tpl-vigencia');
+  if (vigEl) vigEl.value = (ehAssinatura && p.vigencia) || 'Anual';
+  const caEl = document.getElementById('tpl-consulta-avulsa');
+  if (caEl) caEl.value = ehAssinatura ? (p.consultaAvulsa || '') : '';
+  const polEl = document.getElementById('tpl-politicas');
+  if (polEl) polEl.value = ehAssinatura ? (p.politicas || '') : '';
   _atualizarTipoPrograma();
   _renderMarcoBuffer();
   _renderCamposBuffer();

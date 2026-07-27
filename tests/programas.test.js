@@ -237,3 +237,79 @@ test('os check-ins continuam ancorados no início do período', () => {
   const boasVindas = fus.find(f => f.obs.startsWith('Boas-vindas'));
   assert.strictEqual(boasVindas.dataContato, '2026-01-08');
 });
+
+// ---------- o formulário de programa não pode carregar campo do anterior ----------
+// A vigência mora dentro do bloco #tpl-assinatura-wrap, que só aparece quando o
+// tipo é Assinatura — e ela só era reatribuída no ramo "editando uma
+// Assinatura". Criar um programa logo depois de editar outro reabria o
+// formulário com a vigência do anterior. E vigência define _vigenciaDias: o
+// vencimento de toda inscrição, o aviso de renovação e o MRR. Um programa anual
+// salvo como Mensal vence em 30 dias e cobra renovação no primeiro mês.
+function abrirTemplate(programa) {
+  const campos = {};
+  const els = {};
+  const el = (id) => (els[id] || (els[id] = { id, value: '', style: {}, textContent: '', placeholder: '' }));
+  const { recortarFuncao } = require('./_extrair.js');
+  const vm = require('node:vm');
+  const corpo = recortarFuncao('openModalTemplatePrograma');
+  const s = carregar([], {
+    document: { getElementById: (id) => el(id), querySelector: () => null },
+    getProgramas: () => (programa ? [programa] : []),
+    _marcoBuffer: [], _camposBuffer: [], _beneficiosBuffer: [], _parcelasBuffer: [],
+    _atualizarTipoPrograma: () => {}, _renderMarcoBuffer: () => {},
+    _renderCamposBuffer: () => {}, _renderBeneficiosBuffer: () => {},
+    _renderParcelasBuffer: () => {}, openModal: () => {},
+    Array, Object, String,
+  });
+  vm.runInContext(corpo + '\nglobalThis.__abrir = openModalTemplatePrograma;', s, { filename: 'recorte' });
+  s.__abrir(programa ? programa.id : null);
+  Object.keys(els).forEach(k => { campos[k] = els[k].value; });
+  return campos;
+}
+
+test('programa novo não herda a vigência do que foi editado antes', () => {
+  const campos = abrirTemplate(null);
+  assert.strictEqual(campos['tpl-vigencia'], 'Anual',
+    'vigência define vencimento, aviso de renovação e MRR — herdar a do anterior erra os três');
+});
+
+test('programa novo não herda consulta avulsa nem políticas', () => {
+  const campos = abrirTemplate(null);
+  assert.strictEqual(campos['tpl-consulta-avulsa'], '');
+  assert.strictEqual(campos['tpl-politicas'], '');
+});
+
+test('editar uma Assinatura carrega os campos dela', () => {
+  const campos = abrirTemplate({ id: 'pg1', nome: 'X', tipo: 'Assinatura',
+                                 vigencia: 'Trimestral', consultaAvulsa: 300, politicas: 'texto' });
+  assert.strictEqual(campos['tpl-vigencia'], 'Trimestral');
+  assert.strictEqual(campos['tpl-consulta-avulsa'], 300);
+  assert.strictEqual(campos['tpl-politicas'], 'texto');
+});
+
+test('editar um programa Fixo zera os campos de Assinatura', () => {
+  const campos = abrirTemplate({ id: 'pg2', nome: 'Y', tipo: 'Fixo' });
+  assert.strictEqual(campos['tpl-vigencia'], 'Anual');
+  assert.strictEqual(campos['tpl-consulta-avulsa'], '');
+  assert.strictEqual(campos['tpl-politicas'], '');
+});
+
+test('todo campo que o save lê é inicializado ao abrir o formulário', () => {
+  // Rede a mais, não a que pegou a vigência: esta acusa campo que o opener NÃO
+  // TOCA em lugar nenhum. A vigência era tocada, só que dentro de um ramo — o
+  // caso condicional é coberto pelos testes de comportamento acima, que são os
+  // que reprovam a versão antiga.
+  const { recortarFuncao } = require('./_extrair.js');
+  const save  = recortarFuncao('saveTemplatePrograma');
+  const abrir = recortarFuncao('openModalTemplatePrograma');
+  const lidos = new Set([...save.matchAll(/fd\.get\('(\w+)'\)/g)].map(m => m[1]));
+  // name= no HTML → id= no JS; o mapa cobre só onde os dois diferem.
+  const idDoCampo = { programaId: 'tpl-id', precoAVista: 'tpl-preco-avista',
+                      consultaAvulsa: 'tpl-consulta-avulsa', intervaloDias: 'tpl-intervalo' };
+  const faltando = [...lidos].filter(nome => {
+    const id = idDoCampo[nome] || ('tpl-' + nome);
+    return !abrir.includes(`'${id}'`);
+  });
+  assert.deepStrictEqual(faltando, [],
+    'campo lido no save e não inicializado ao abrir carrega o valor do programa anterior');
+});
