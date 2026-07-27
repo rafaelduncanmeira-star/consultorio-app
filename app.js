@@ -3887,6 +3887,35 @@ function _novosNoMes(pacs, mes) {
   };
 }
 
+// Predicado "este ATENDIMENTO é a estreia da pessoa em toda a base?".
+// É a outra leitura de "novo", e existe de propósito: _novosNoMes responde por
+// PESSOA no mês (aquisição — alimenta CAC e ROI de marketing), enquanto o DRE
+// precisa fatiar o faturamento em novos + recorrentes somando exatamente 100%,
+// o que só fecha se a divisão for por atendimento.
+// O DRE e o relatório de tela mantinham cada um a sua cópia inline desta regra,
+// e as duas esqueciam a guarda que o _novosNoMes tem: `if (!n || !p.data)`.
+// Um único atendimento gravado SEM data envenenava o mapa — a ordenação por
+// `(p.data || '')` joga o registro sem data pra frente, então a "primeira data"
+// da pessoa virava `undefined` e daí em diante NENHUM atendimento dela batia.
+// O paciente aparecia como recorrente até na consulta de estreia, e a linha
+// "Novos pacientes" da seção 5 do PDF que vai pro contador saía a menos.
+function _primeiroAtendimentoDe(todosPacs) {
+  const chave = p => (p.nome || '').toLowerCase().trim();
+  // Map, não objeto: `'constructor' in {}` é true por herança, e a checagem
+  // `!(n in obj)` descartava silenciosamente nomes assim.
+  const primeira = new Map();
+  for (const p of (todosPacs || [])) {
+    const n = chave(p);
+    if (!n || !p.data) continue;
+    const atual = primeira.get(n);
+    if (!atual || p.data < atual) primeira.set(n, p.data);
+  }
+  return p => {
+    const n = chave(p);
+    return !!(n && p.data && primeira.get(n) === p.data);
+  };
+}
+
 // Resumo financeiro PADRONIZADO — uma única definição p/ todas as telas (Receita,
 // Dashboard, DRE, Relatório, PDF, Metas) baterem entre si. Distingue os DOIS
 // regimes: CAIXA (o que já entrou) e COMPETÊNCIA (o que foi faturado/prestado).
@@ -8769,13 +8798,10 @@ function gerarPDF(mes) {
   }).filter(s => s.qtd > 0).sort((a, b) => b.total - a.total);
   const totalTaxas = formasStats.reduce((s, f) => s + f.taxaValor, 0);
 
-  // Novos vs recorrentes — "novo" = 1º atendimento do paciente em toda a base
-  const _primeiraData = {};
-  [...todosPacs].sort((a, b) => (a.data || '').localeCompare(b.data || '')).forEach(p => {
-    const n = (p.nome || '').toLowerCase().trim();
-    if (n && !(n in _primeiraData)) _primeiraData[n] = p.data;
-  });
-  const _ehNovo = p => p.data === _primeiraData[(p.nome || '').toLowerCase().trim()];
+  // Novos vs recorrentes — "novo" = 1º atendimento do paciente em toda a base.
+  // Regra única em _primeiroAtendimentoDe (esta tela e o relatório mantinham
+  // cópias inline que divergiam no atendimento sem data).
+  const _ehNovo = _primeiroAtendimentoDe(todosPacs);
   const pacsNovos = pacs.filter(_ehNovo);
   const pacsRec   = pacs.filter(p => !_ehNovo(p));
   const novosUnicos = new Set(pacsNovos.map(p => (p.nome || '').toLowerCase().trim())).size;
@@ -9441,12 +9467,7 @@ function renderRelatorio(mes) {
   // ===== Novos vs recorrentes =====
   // Um atendimento é "novo" se é o PRIMEIRO atendimento do paciente em toda a base
   // (1ª vez na vida). Os demais — inclusive no mesmo mês — são "recorrentes".
-  const primeiraDataPorNome = {};
-  [...todosPacs].sort((a, b) => (a.data || '').localeCompare(b.data || '')).forEach(p => {
-    const n = (p.nome || '').toLowerCase().trim();
-    if (n && !(n in primeiraDataPorNome)) primeiraDataPorNome[n] = p.data;
-  });
-  const ehNovo = p => p.data === primeiraDataPorNome[(p.nome || '').toLowerCase().trim()];
+  const ehNovo = _primeiroAtendimentoDe(todosPacs);
   const pacsNovos = pacs.filter(ehNovo);
   const pacsRecorrentes = pacs.filter(p => !ehNovo(p));
   const fatNovos = pacsNovos.reduce((s, p) => s + (p.valor || 0), 0);
