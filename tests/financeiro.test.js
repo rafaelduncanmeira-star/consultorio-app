@@ -502,3 +502,39 @@ test('a divisão por atendimento realmente coloca a mesma pessoa nas duas linhas
   assert.strictEqual(nu + ru, 2, 'é esta soma que a tela mostrava');
   assert.strictEqual(new Set(pacs.map(p => p.nome)).size, 1, 'e este é o número certo');
 });
+
+// ---------- toda linha "Total" tem de fechar com as linhas acima ----------
+// No relatório anual em PDF cada mês mostra `lucro = recebido − despesas` (o
+// regime de caixa, como o resto do app), mas o total refazia a conta como
+// `totFat − totDesp` com totFat sendo o BRUTO. A linha Total não batia com a
+// soma das doze linhas logo acima dela, e vinha inflada por tudo pendente e
+// isento — no relatório que o médico manda pro contador.
+test('relatório anual: o lucro total é a soma dos meses, não uma conta nova', () => {
+  const { fonte } = require('./_extrair.js');
+  const semCom = fonte.replace(/\/\/[^\n]*/g, '');
+  assert.match(semCom, /const totLucro = dadosMes\.reduce\(\(s,d\) => s \+ d\.lucro, 0\)/,
+    'recalcular sobre o bruto faz o total divergir das próprias linhas');
+  assert.doesNotMatch(semCom, /const totLucro = totFat - totDesp/);
+});
+
+test('relatório anual: cada mês usa o regime de caixa', () => {
+  const { fonte } = require('./_extrair.js');
+  assert.match(fonte, /const lucro = _resumoFin\(pacs\)\.recebido - desp;/,
+    'a premissa do teste acima: as linhas mensais são caixa − despesas');
+});
+
+// A aritmética do bug: um mês com pendente e isento.
+test('a conta antiga inflava o total em tudo que não entrou no caixa', () => {
+  const { _resumoFin } = carregar(['_resumoFin', '_centavos'], { Array, Math, Number });
+  const pacs = [
+    { statusPgto: 'Pago',     valor: 1000 },
+    { statusPgto: 'Pendente', valor: 500 },
+    { statusPgto: 'Isento',   valor: 400 },
+  ];
+  const fat = pacs.reduce((s, p) => s + (p.valor || 0), 0); // bruto, como totFat
+  const desp = 300;
+  const lucroLinha = _resumoFin(pacs).recebido - desp;      // o que o mês mostra
+  const lucroTotalAntigo = fat - desp;                      // o que o Total mostrava
+  assert.strictEqual(lucroLinha, 700);
+  assert.strictEqual(lucroTotalAntigo, 1600, 'R$ 900 de lucro que a linha do mês não mostrava');
+});

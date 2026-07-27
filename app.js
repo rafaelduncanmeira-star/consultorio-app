@@ -8502,8 +8502,9 @@ function gerarPDF(mes) {
   // O total de pacientes NÃO é novosUnicos + recUnicos. A divisão acima é por
   // ATENDIMENTO ("esta consulta é a primeira dele?"), então quem estreou e
   // voltou no mesmo período aparece nas duas linhas — e a soma contava a
-  // mesma pessoa duas vezes. Com 1 paciente que veio duas vezes, a tabela
-  // exibia Total = 2. Conta os nomes distintos do período de uma vez só.
+  // mesma pessoa duas vezes. Com 1 paciente que veio duas vezes, a seção 5 do
+  // RELATÓRIO EM PDF (o que o médico exporta e manda pro contador) exibia
+  // Total = 2. Conta os nomes distintos do período de uma vez só.
   const pacsUnicos = new Set(pacs.map(p => (p.nome || '').toLowerCase().trim()).filter(Boolean)).size;
   const fatNovos    = pacsNovos.reduce((s, p) => s + (p.valor || 0), 0);
   const fatRec      = pacsRec.reduce((s, p)   => s + (p.valor || 0), 0);
@@ -8842,8 +8843,15 @@ function gerarRelatorioAnual() {
   // Totais
   const totFat   = dadosMes.reduce((s,d) => s + d.fat, 0);
   const totDesp  = dadosMes.reduce((s,d) => s + d.desp, 0);
-  const totLucro = totFat - totDesp;
+  // Soma o lucro DAS LINHAS, não recalcula sobre o bruto. Cada mês acima usa
+  // `recebido − despesas` (o regime de caixa, como o resto do app), e o total
+  // fazia `totFat − totDesp` com totFat sendo o BRUTO: a linha Total não batia
+  // com a soma das doze linhas logo acima dela, e vinha inflada por tudo que
+  // está pendente ou isento. É o relatório que o médico exporta e manda pro
+  // contador — a coluna de lucro precisa fechar com ela mesma.
+  const totLucro = dadosMes.reduce((s,d) => s + d.lucro, 0);
   const totPacs  = dadosMes.reduce((s,d) => s + d.pacs.length, 0);
+  // Margem na mesma base das linhas mensais (lucro sobre o faturamento do mês).
   const margem   = totFat ? (totLucro/totFat)*100 : 0;
   const ticketMedio = totPacs ? totFat/totPacs : 0;
 
