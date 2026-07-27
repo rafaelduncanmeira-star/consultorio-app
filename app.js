@@ -528,6 +528,11 @@ async function cloudPull() {
         // o médico esvaziou de propósito volta como `[]`, e isso é uma
         // resposta ("já existiu, está vazia"), não ausência.
         _chavesNaNuvem.add(row.key);
+        // Log de auditoria e histórico do chat são deste APARELHO e nunca
+        // sobem. Se existe linha deles no servidor, ela veio de uma restauração
+        // antiga — aplicar sobrescreveria o log local com um retrato congelado,
+        // a cada abertura do app, para sempre.
+        if (_CHAVES_SO_LOCAIS.has(row.key)) return;
         // Chave com escrita local não confirmada: local vence até drenar.
         if (_outboxPendente(row.key)) return;
         localStorage.setItem('consult_' + row.key, JSON.stringify(row.value));
@@ -12053,7 +12058,8 @@ async function restaurarSnapshot(data) {
       if (!ok) { falhas.push(k); _outboxAdd(k, 'blindada'); }
     } else {
       localStorage.setItem('consult_' + k, JSON.stringify(snap[k]));
-      if (typeof cloudPush === 'function') await cloudPush(k);
+      // Chave que nunca sobe: subir aqui a faria voltar por cima em todo pull.
+      if (!_CHAVES_SO_LOCAIS.has(k) && typeof cloudPush === 'function') await cloudPush(k);
     }
   }
   if (falhas.length) {
@@ -12101,6 +12107,22 @@ const BACKUP_KEYS = [
   // Histórico do chat (não-crítico, mas útil)
   'chat_history'
 ];
+
+// Chaves que o app grava SÓ no localStorage (localStorage.setItem cru, nunca
+// DB.set): elas não sincronizam de propósito — o log de auditoria é o que
+// aconteceu NESTE aparelho, e o histórico do chat é uma conversa local que
+// carrega nome de paciente, valor e "quem deve".
+// Elas entram no backup (é dado do usuário, tem de poder ser exportado), e é aí
+// que morava o problema: restaurar/importar gravava as duas com DB.set /
+// cloudPush, criando uma linha delas no app_data. A partir daí TODO cloudPull —
+// em todo aparelho, a cada abertura — sobrescrevia o log e o histórico locais
+// com aquele retrato congelado no momento da restauração. O médico perdia, sem
+// aviso e repetidamente, o registro de tudo que foi feito desde então. E o
+// histórico do chat passava a viver na nuvem, num blob que o RLS de app_data
+// entrega a mais gente do que a conversa dele.
+// Restaurar essas duas é gravação LOCAL. E o pull não as aplica, o que também
+// desarma a linha que já tenha sido criada.
+const _CHAVES_SO_LOCAIS = new Set(['audit_log', 'chat_history']);
 
 // Formato esperado de cada chave do backup. Serve pra recusar arquivo com o
 // tipo trocado ANTES de gravar: uma coleção que o app percorre com
@@ -14122,7 +14144,15 @@ function importarJSON(input) {
       // o corte no meio deixava o servidor com uma mistura dos dois estados.
       // (restaurarSnapshot já espera — aqui era a única porta que não esperava.)
       status.textContent = 'Restaurando e enviando para a nuvem…';
-      const oks = await Promise.all(chavesTrocar.map(k => DB.set(k, dados[k])));
+      const oks = await Promise.all(chavesTrocar.map(k => {
+        // Local-only: gravar com DB.set criaria a linha no app_data que faz o
+        // pull devolver este retrato por cima do log real em toda abertura.
+        if (_CHAVES_SO_LOCAIS.has(k)) {
+          localStorage.setItem('consult_' + k, JSON.stringify(dados[k]));
+          return Promise.resolve(true);
+        }
+        return DB.set(k, dados[k]);
+      }));
       const falhas = chavesTrocar.filter((_, i) => oks[i] === false);
       if (falhas.length) {
         status.textContent = `⚠️ Restaurado neste aparelho, mas não subiu: ${falhas.join(', ')}`;

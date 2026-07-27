@@ -35,13 +35,14 @@ function ambiente({ conteudo, confirmar = true, atraso = 0, falharEm = [] }) {
     toast: () => {},
     setTimeout: (fn) => { eventos.push('reload-agendado'); fn(); return 1; },
     location: { reload: () => eventos.push('RELOAD') },
-    JSON, Date, Promise, Array, Error, String, Object,
-    BACKUP_KEYS: ['pacientes', 'crm', 'agendamentos', 'despesas', 'clinica_config'],
+    JSON, Date, Promise, Array, Error, String, Object, Set,
+    localStorage: { setItem: (k, v) => { eventos.push('local:' + k); }, getItem: () => null, removeItem() {} },
+    BACKUP_KEYS: ['pacientes', 'crm', 'agendamentos', 'despesas', 'clinica_config', 'audit_log'],
     _BLINDADAS: { pacientes: {}, crm: {}, agendamentos: {} },
     DB,
   };
   const { importarJSON } = carregar(
-    ['const:BACKUP_FORMATO', '_backupFormatoInvalido', 'importarJSON'], sandbox);
+    ['const:BACKUP_FORMATO', 'const:_CHAVES_SO_LOCAIS', '_backupFormatoInvalido', 'importarJSON'], sandbox);
   return { importarJSON, input, statusEl, gravadas, eventos };
 }
 
@@ -198,6 +199,60 @@ test('importarJSON: recusa objeto em coleção NÃO blindada (despesas)', async 
   assert.deepStrictEqual(puro(a.gravadas), [], 'nada pode ser gravado quando o formato está errado');
   assert.match(a.statusEl.textContent, /Formato inválido.*despesas/);
   assert.ok(!a.eventos.includes('RELOAD'), 'e não recarrega');
+});
+
+// ---------- chaves que existem só neste aparelho ----------
+// audit_log e chat_history são as ÚNICAS chaves do backup que o app grava com
+// localStorage.setItem cru — elas não sincronizam de propósito. Mas restaurar e
+// importar as gravavam com DB.set/cloudPush, criando uma linha delas no
+// app_data; a partir daí todo cloudPull, em todo aparelho, a cada abertura,
+// sobrescrevia o log e o histórico locais com aquele retrato congelado. O
+// médico perdia repetidamente o registro do que foi feito desde a restauração.
+test('local-only: são exatamente as chaves que o app nunca grava com DB.set', () => {
+  const { fonte } = require('./_extrair.js');
+  const { BACKUP_KEYS, _CHAVES_SO_LOCAIS } = carregar(
+    ['const:BACKUP_KEYS', 'const:_CHAVES_SO_LOCAIS'], { Set });
+  const semDbSet = BACKUP_KEYS.filter(k =>
+    !new RegExp("DB\\.set(?:Obj)?\\('" + k + "'").test(fonte));
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(semDbSet)), [..._CHAVES()],
+    'chave que o app nunca sincroniza tem de estar declarada como local — e vice-versa');
+  function _CHAVES() { return _CHAVES_SO_LOCAIS; }
+});
+
+test('local-only: o pull não aplica linha dessas chaves', () => {
+  const { fonte } = require('./_extrair.js');
+  const { recortarFuncao } = require('./_extrair.js');
+  const corpo = recortarFuncao('cloudPull');
+  const guarda = corpo.indexOf('_CHAVES_SO_LOCAIS');
+  const grava  = corpo.indexOf("localStorage.setItem('consult_' + row.key");
+  assert.ok(guarda > -1, 'sem a guarda, uma linha antiga volta por cima do log a cada abertura');
+  assert.ok(guarda < grava, 'a guarda tem de vir ANTES da gravação');
+  assert.ok(fonte.length > 0);
+});
+
+test('local-only: restaurar e importar gravam sem empurrar pra nuvem', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  for (const fn of ['restaurarSnapshot', 'impHandleJSON']) {
+    let corpo;
+    try { corpo = recortarFuncao(fn); } catch (e) { continue; }
+    if (!corpo.includes('cloudPush') && !corpo.includes('DB.set')) continue;
+    assert.ok(corpo.includes('_CHAVES_SO_LOCAIS'),
+      `${fn} grava e empurra: precisa pular as chaves locais, senão cria a linha no app_data`);
+  }
+});
+
+test('local-only: importar grava o log SEM criar linha na nuvem', async () => {
+  const a = ambiente({ conteudo: JSON.stringify({
+    _meta: { exportadoEm: '2026-08-03T10:00:00Z' },
+    pacientes: [{ id: 'p1', nome: 'Ana' }],
+    audit_log: [{ acao: 'criou' }],
+  }) });
+  a.importarJSON(a.input);
+  await assentar();
+  assert.ok(!a.gravadas.includes('audit_log'),
+    'DB.set aqui cria a linha no app_data, e o pull passa a devolver este retrato por cima do log real');
+  assert.ok(a.eventos.includes('local:consult_audit_log'), 'mas o log TEM de ser restaurado localmente');
+  assert.ok(a.gravadas.includes('pacientes'), 'as demais seções continuam subindo');
 });
 
 test('formato: o mapa cobre todas as chaves do backup', () => {
