@@ -40,7 +40,8 @@ function ambiente({ conteudo, confirmar = true, atraso = 0, falharEm = [] }) {
     _BLINDADAS: { pacientes: {}, crm: {}, agendamentos: {} },
     DB,
   };
-  const { importarJSON } = carregar('importarJSON', sandbox);
+  const { importarJSON } = carregar(
+    ['const:BACKUP_FORMATO', '_backupFormatoInvalido', 'importarJSON'], sandbox);
   return { importarJSON, input, statusEl, gravadas, eventos };
 }
 
@@ -169,4 +170,88 @@ test('backup: internos de sincronização NÃO podem entrar no backup', () => {
     assert.ok(!BACKUP_KEYS.includes(k),
       `${k} é estado de sincronização — restaurar isso reenvia ou requarentena coisa velha`);
   }
+});
+
+// ---------- formato do arquivo restaurado ----------
+// Arquivo com o tipo trocado numa coleção era GRAVADO assim mesmo. Toda tela
+// que faz .filter/.reduce em cima quebra na hora de abrir — e como o dado ruim
+// já está no localStorage, o app não volta a abrir até limpar o navegador. A
+// checagem existia, mas só para as coleções blindadas: despesas,
+// procedimentos, programas, profissionais e bloqueios passavam batido, e são
+// percorridos exatamente do mesmo jeito.
+const puro = (x) => JSON.parse(JSON.stringify(x));
+const carregaFormato = () => require('./_extrair.js').carregar(
+  ['const:BACKUP_KEYS', 'const:BACKUP_FORMATO', '_backupFormatoInvalido'],
+  { Array, Object });
+
+// Pelo caminho REAL do usuário: arquivo com despesas como objeto. Antes a
+// validação só olhava as coleções blindadas, então isto era gravado — e a tela
+// de Despesas (que faz .filter/.reduce) quebrava toda vez que abrisse.
+test('importarJSON: recusa objeto em coleção NÃO blindada (despesas)', async () => {
+  const a = ambiente({ conteudo: JSON.stringify({
+    _meta: { exportadoEm: '2026-08-03T10:00:00Z' },
+    pacientes: [{ id: 'p1' }],
+    despesas: { aluguel: 2000 },
+  }) });
+  a.importarJSON(a.input);
+  await assentar();
+  assert.deepStrictEqual(puro(a.gravadas), [], 'nada pode ser gravado quando o formato está errado');
+  assert.match(a.statusEl.textContent, /Formato inválido.*despesas/);
+  assert.ok(!a.eventos.includes('RELOAD'), 'e não recarrega');
+});
+
+test('formato: o mapa cobre todas as chaves do backup', () => {
+  const { BACKUP_KEYS, BACKUP_FORMATO } = carregaFormato();
+  // Realm do node:vm: o array volta com outro protótipo e o deepStrictEqual
+  // reprova por isso, não pelo conteúdo. Normaliza antes de comparar.
+  const semFormato = JSON.parse(JSON.stringify(BACKUP_KEYS.filter(k => !BACKUP_FORMATO[k])));
+  assert.deepStrictEqual(semFormato, [],
+    'chave sem formato declarado passa sem validação nenhuma');
+});
+
+// O mapa não pode virar folclore: tem de bater com como o app REALMENTE lê.
+test('formato: lista = DB.get · objeto = DB.getObj, conferido no fonte', () => {
+  const { fonte } = require('./_extrair.js');
+  const { BACKUP_FORMATO } = carregaFormato();
+  const lidasLista = new Set([...fonte.matchAll(/DB\.get\('([a-z_0-9]+)'/g)].map(m => m[1]));
+  const lidasObj   = new Set([...fonte.matchAll(/DB\.getObj\('([a-z_0-9]+)'/g)].map(m => m[1]));
+  const erros = [];
+  for (const [k, esperado] of Object.entries(BACKUP_FORMATO)) {
+    if (lidasLista.has(k) && esperado !== 'lista') erros.push(`${k}: lido com DB.get mas marcado ${esperado}`);
+    if (lidasObj.has(k)   && esperado !== 'objeto') erros.push(`${k}: lido com DB.getObj mas marcado ${esperado}`);
+  }
+  assert.deepStrictEqual(erros, []);
+});
+
+test('formato: recusa coleção que veio como objeto', () => {
+  const { _backupFormatoInvalido } = carregaFormato();
+  for (const k of ['despesas', 'procedimentos', 'programas', 'profissionais', 'bloqueios']) {
+    assert.deepStrictEqual(puro(_backupFormatoInvalido({ [k]: {} }, [k])), [k],
+      `${k} é percorrido com .filter/.reduce — objeto ali derruba a tela`);
+    assert.deepStrictEqual(puro(_backupFormatoInvalido({ [k]: [] }, [k])), [],
+      'lista vazia é válida: é o estado de quem ainda não cadastrou nada');
+  }
+});
+
+test('formato: recusa configuração que veio como lista ou nula', () => {
+  const { _backupFormatoInvalido } = carregaFormato();
+  for (const ruim of [[], null, 'texto', 7]) {
+    assert.deepStrictEqual(puro(_backupFormatoInvalido({ agenda_config: ruim }, ['agenda_config'])),
+      ['agenda_config'], `agenda_config como ${JSON.stringify(ruim)} não é objeto`);
+  }
+  assert.deepStrictEqual(puro(_backupFormatoInvalido({ agenda_config: { horaInicio: '08:00' } }, ['agenda_config'])), []);
+});
+
+test('formato: chave ausente no arquivo não é julgada', () => {
+  const { _backupFormatoInvalido } = carregaFormato();
+  assert.deepStrictEqual(puro(_backupFormatoInvalido({}, [])), [],
+    'backup parcial é legítimo — só as seções presentes são substituídas');
+});
+
+test('restaurarSnapshot: snapshot corrompido avisa em vez de não fazer nada', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  const src = recortarFuncao('restaurarSnapshot').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /try \{ snap = JSON\.parse\(raw\); \}/,
+    'parse solto dentro de async vira promise rejeitada em silêncio: o botão não faz nada');
+  assert.match(src, /_backupFormatoInvalido/, 'e o formato tem de ser conferido antes de gravar');
 });

@@ -11345,7 +11345,20 @@ async function restaurarSnapshot(data) {
   const chave = SNAPSHOT_PREFIX + data;
   const raw = localStorage.getItem('consult_' + chave);
   if (!raw) { alert('Snapshot não encontrado.'); return; }
-  const snap = JSON.parse(raw);
+  // O snapshot nasce no app, mas vai e volta pela nuvem. Sem este try, um
+  // JSON truncado fazia o parse lançar dentro de uma função async cujo
+  // chamador é um onclick sem catch: a promise era rejeitada em silêncio e o
+  // botão "Restaurar" simplesmente não fazia NADA — sem erro, sem toast. A
+  // pessoa clica de novo, e de novo, achando que a interface travou.
+  let snap;
+  try { snap = JSON.parse(raw); }
+  catch (e) { alert(`O backup de ${data} está corrompido e não pode ser lido. Tente outra data.`); return; }
+  const ruins = _backupFormatoInvalido(snap, BACKUP_KEYS.filter(k => snap[k] !== undefined));
+  if (ruins.length) {
+    alert(`O backup de ${data} tem seções com formato inválido (${ruins.join(', ')}) `
+      + 'e restaurar assim deixaria o app sem abrir. Nada foi alterado.');
+    return;
+  }
   if (!confirm(`Restaurar backup de ${data}?\n\nSeus dados atuais serão substituídos. Esta ação não pode ser desfeita.`)) return;
 
   const falhas = [];
@@ -11411,6 +11424,38 @@ const BACKUP_KEYS = [
   // Histórico do chat (não-crítico, mas útil)
   'chat_history'
 ];
+
+// Formato esperado de cada chave do backup. Serve pra recusar arquivo com o
+// tipo trocado ANTES de gravar: uma coleção que o app percorre com
+// .filter/.reduce, vinda como objeto, derruba a tela toda vez que ela abre — e
+// o app não volta a abrir até limpar o navegador, porque o dado ruim já está
+// no localStorage. A validação existia só pras coleções BLINDADAS; `despesas`,
+// `procedimentos`, `programas`, `profissionais`, `bloqueios` e os dois logs
+// ficavam de fora, e são percorridos do mesmo jeito.
+// A regra é objetiva: chave lida com DB.get é lista, com DB.getObj é objeto —
+// há teste que reprova se este mapa divergir de como o app realmente lê.
+const BACKUP_FORMATO = {
+  pacientes: 'lista', crm: 'lista', despesas: 'lista', followup: 'lista',
+  agendamentos: 'lista', bloqueios: 'lista', procedimentos: 'lista',
+  programas: 'lista', inscricoes: 'lista', profissionais: 'lista',
+  audit_log: 'lista', chat_history: 'lista',
+  agenda_config: 'objeto', metas: 'objeto', metas_proc: 'objeto',
+  metas_proc_valor: 'objeto', clinica_config: 'objeto', zapi_config: 'objeto',
+  wa_cloud_config: 'objeto', wa_provider: 'objeto', lembretes_config: 'objeto',
+  ia_config: 'objeto', llm_config: 'objeto', maestria: 'objeto',
+};
+
+// Devolve as chaves cujo conteúdo não tem o formato esperado.
+function _backupFormatoInvalido(dados, chaves) {
+  return chaves.filter(k => {
+    const esperado = BACKUP_FORMATO[k];
+    if (!esperado) return false; // chave sem formato declarado: não julga
+    const v = dados[k];
+    return esperado === 'lista'
+      ? !Array.isArray(v)
+      : (v === null || typeof v !== 'object' || Array.isArray(v));
+  });
+}
 
 // ====================== CONFIGURAÇÕES / Z-API ======================
 
@@ -13140,11 +13185,17 @@ function importarJSON(input) {
       const chavesTrocar = BACKUP_KEYS.filter(k => dados[k] !== undefined);
       if (!chavesTrocar.length) throw new Error('Nenhum dado reconhecido no arquivo');
 
-      // Coleção blindada TEM de ser array. Arquivo editado à mão com um objeto
-      // no lugar era gravado assim mesmo, e toda tela que faz .filter/.reduce
-      // em cima quebrava — o app não abria mais até limpar o navegador.
-      const invalidas = chavesTrocar.filter(k => _BLINDADAS[k] && !Array.isArray(dados[k]));
-      if (invalidas.length) throw new Error('Formato inválido (esperava lista) em: ' + invalidas.join(', '));
+      // Cada chave TEM de vir no formato que o app espera. Arquivo editado à
+      // mão com o tipo trocado era gravado assim mesmo, e toda tela que faz
+      // .filter/.reduce em cima quebrava — o app não abria mais até limpar o
+      // navegador. A checagem cobria só as coleções blindadas; despesas,
+      // procedimentos, programas, profissionais e bloqueios passavam batido, e
+      // são percorridos exatamente do mesmo jeito.
+      const invalidas = _backupFormatoInvalido(dados, chavesTrocar);
+      if (invalidas.length) {
+        throw new Error('Formato inválido em: '
+          + invalidas.map(k => `${k} (esperava ${BACKUP_FORMATO[k]})`).join(', '));
+      }
 
       const exportadoEm = dados._meta?.exportadoEm ? new Date(dados._meta.exportadoEm).toLocaleString('pt-BR') : 'data desconhecida';
       if (!confirm(`Restaurar backup de ${exportadoEm}?\n\nIsso vai substituir:\n${chavesTrocar.join(', ')}\n\nSeus dados atuais serão apagados. Confirma?`)) {
