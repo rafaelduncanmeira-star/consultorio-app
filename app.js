@@ -1271,7 +1271,13 @@ function _iniciarApp() {
   }).catch(e => console.warn('backup automático falhou:', e && e.message)), 3000);
   setTimeout(() => rodarCicloLembretes().then(r => {
     if (r.enviados > 0) toast(`📲 ${r.enviados} lembrete(s) WhatsApp enviado(s).`, 4000);
-  }), 5000);
+    // Falha de lembrete precisa aparecer, pelo mesmo motivo da falha de backup
+    // logo acima: o paciente NÃO foi avisado e ninguém sabe. Antes só o sucesso
+    // gerava toast — com todos os envios falhando, a tela não dizia nada e o
+    // card de lembretes continuava exibindo "✓ Ativo · último envio: hoje".
+    if (r.erros > 0) toast(`⚠️ ${r.erros} lembrete(s) NÃO foram enviados — veja em Configurações.`, 7000);
+    if (r.error) toast('⚠️ ' + r.error, 6000);
+  }).catch(e => console.warn('ciclo de lembretes falhou:', e && e.message)), 5000);
   // Sincroniza UI mobile com página inicial
   _mobSync('dashboard');
   // Mostra modal de boas-vindas se for primeiro acesso
@@ -11280,8 +11286,17 @@ async function rodarCicloLembretes(forcado = false) {
     // Throttle pra evitar rate limit
     await new Promise(r => setTimeout(r, 800));
   }
-  cfg.ultimoEnvio = hoje;
-  DB.setObj('lembretes_config', cfg);
+  // Só carimba "já rodou hoje" se algo foi de fato entregue. Carimbar depois de
+  // uma rodada 100% falha bloqueava a retentativa pelo resto do dia (o ciclo
+  // começa com `if (cfg.ultimoEnvio === hoje) return`), e no dia seguinte o
+  // agendamento já saiu da janela de lembrete: ninguém era avisado, nunca.
+  // Uma falha total costuma ser transitória — Z-API fora do ar, internet caída —
+  // e o ciclo dispara sozinho a cada abertura do app, então a retentativa é
+  // barata e só alcança quem ainda não recebeu (o filtro é !_lembreteEnviado).
+  if (sucesso > 0 || erro === 0) {
+    cfg.ultimoEnvio = hoje;
+    DB.setObj('lembretes_config', cfg);
+  }
 
   if (sucesso > 0) _auditLog('configurou', 'lembretes', `Enviou ${sucesso} lembretes WhatsApp${erro > 0 ? ' (' + erro + ' falharam)' : ''}`);
   return { enviados: sucesso, erros: erro };
@@ -11305,6 +11320,33 @@ function renderLembretesCard() {
     if (!zapiOk) status.innerHTML = '<span style="color:#dc2626;">⚠️ Z-API não conectado — lembretes não serão enviados</span>';
     else if (!cfg.ativo) status.innerHTML = '<span style="color:#94a3b8;">Inativo</span>';
     else status.innerHTML = `<span style="color:#10b981;font-weight:600;">✓ Ativo</span> · último envio: ${cfg.ultimoEnvio || 'nunca'}`;
+  }
+
+  // Falhas de envio. `_lembreteErro` era gravado no agendamento e NUNCA lido:
+  // o card dizia "✓ Ativo · último envio: hoje" mesmo com todos os envios
+  // recusados, e o médico concluía que os pacientes tinham sido avisados.
+  const falhasEl = document.getElementById('lemb-falhas');
+  if (falhasEl) {
+    const hoje = _ymd(new Date());
+    const falhas = getAgendamentos().filter(a =>
+      a._lembreteErro && !a._lembreteEnviado && (a.data || '') >= hoje && a.status !== 'Cancelado');
+    if (!falhas.length) { falhasEl.innerHTML = ''; }
+    else {
+      falhasEl.innerHTML = `
+        <div style="margin-top:10px;padding:10px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;">
+          <div style="font-weight:700;color:#b91c1c;font-size:12.5px;margin-bottom:6px;">
+            ⚠️ ${falhas.length} lembrete(s) não entregue(s) — estes pacientes NÃO foram avisados
+          </div>
+          ${falhas.slice(0, 8).map(a => `
+            <div style="font-size:11.5px;color:#7f1d1d;padding:3px 0;">
+              <strong>${_esc(a.pacienteNome || '(sem nome)')}</strong> · ${_esc(formatDate(a.data))} ${_esc(a.hora || '')}
+              <span style="color:#b91c1c;">— ${_esc(String(a._lembreteErro).slice(0, 90))}</span>
+            </div>`).join('')}
+          <div style="font-size:11px;color:#7f1d1d;margin-top:6px;">
+            O envio é retentado sozinho na próxima abertura do app. Se o motivo for o número, corrija no agendamento.
+          </div>
+        </div>`;
+    }
   }
 }
 

@@ -193,3 +193,88 @@ test('copiloto: mover agendamento respeita bloqueio da agenda', () => {
     'o ramo vizinho (criar_agendamento) já validava — mover não pode furar o bloqueio');
   assert.match(bloco, /_temConflito\(/, 'e o conflito continua sendo checado');
 });
+
+// ---------- falha de envio precisa aparecer ----------
+// `_lembreteErro` era gravado no agendamento e NUNCA lido. Com todos os envios
+// recusados, o card continuava dizendo "✓ Ativo · último envio: hoje" e o
+// disparo automático não emitia toast nenhum (só o sucesso emitia). O médico
+// concluía que os pacientes foram avisados. Não foram — e ninguém aparece.
+function ambienteCard(ags, cfg = {}) {
+  let statusHtml = '', falhasHtml = '';
+  const els = {
+    'card-lembretes': {},
+    'lemb-status': { set innerHTML(v) { statusHtml = v; } },
+    'lemb-falhas': { set innerHTML(v) { falhasHtml = v; } },
+    'lemb-ativo': {}, 'lemb-horas': {}, 'lemb-msg': {},
+  };
+  const s = _carregar(['_esc', 'renderLembretesCard'], {
+    JSON, Array, Object, Date, String,
+    document: { getElementById: (id) => els[id] || null },
+    getLembretesConfig: () => ({ ativo: true, horasAntes: 24, mensagem: 'oi', ultimoEnvio: '2026-08-05', ...cfg }),
+    getZapiConfig: () => ({ enabled: true, instanceId: 'i', token: 't' }),
+    getAgendamentos: () => JSON.parse(JSON.stringify(ags)),
+    _ymd: () => '2026-08-05',
+    formatDate: (d) => d,
+  });
+  s.renderLembretesCard();
+  return { statusHtml, falhasHtml };
+}
+
+test('card: lembrete recusado aparece com paciente e motivo', () => {
+  const { statusHtml, falhasHtml } = ambienteCard([
+    { pacienteNome: 'Ana', data: '2026-08-06', hora: '10:00', status: 'Confirmado',
+      _lembreteErro: 'numero invalido' },
+  ]);
+  assert.match(statusHtml, /Ativo/, 'a premissa: o card diz que está ativo');
+  assert.match(falhasHtml, /1 lembrete\(s\) não entregue/);
+  assert.match(falhasHtml, /Ana/);
+  assert.match(falhasHtml, /numero invalido/);
+});
+
+test('card: sem falha, nada de alarme falso', () => {
+  const { falhasHtml } = ambienteCard([
+    { pacienteNome: 'Ana', data: '2026-08-06', status: 'Confirmado', _lembreteEnviado: 'ts' },
+    { pacienteNome: 'Bruno', data: '2026-08-06', status: 'Confirmado' },
+  ]);
+  assert.strictEqual(falhasHtml, '');
+});
+
+test('card: falha já reenviada com sucesso some da lista', () => {
+  const { falhasHtml } = ambienteCard([
+    { pacienteNome: 'Ana', data: '2026-08-06', status: 'Confirmado',
+      _lembreteErro: 'timeout', _lembreteEnviado: '2026-08-05T12:00:00Z' },
+  ]);
+  assert.strictEqual(falhasHtml, '', 'o erro fica no registro, mas o envio seguinte deu certo');
+});
+
+test('card: agendamento passado ou cancelado não vira alarme', () => {
+  const { falhasHtml } = ambienteCard([
+    { pacienteNome: 'Ana', data: '2026-07-01', status: 'Confirmado', _lembreteErro: 'x' },
+    { pacienteNome: 'Bruno', data: '2026-08-09', status: 'Cancelado', _lembreteErro: 'x' },
+  ]);
+  assert.strictEqual(falhasHtml, '');
+});
+
+test('card: motivo e nome passam por _esc', () => {
+  const { falhasHtml } = ambienteCard([
+    { pacienteNome: '<script>x</script>', data: '2026-08-06', status: 'Confirmado',
+      _lembreteErro: '<img src=x onerror=y>' },
+  ]);
+  assert.ok(!falhasHtml.includes('<script>x'), 'nome pode vir do perfil do WhatsApp');
+  assert.ok(!falhasHtml.includes('<img src=x'), 'motivo vem do provedor');
+});
+
+test('ciclo: rodada 100% falha não bloqueia a retentativa do dia', () => {
+  const src = _recF('rodarCicloLembretes').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /if \(sucesso > 0 \|\| erro === 0\) \{[\s\S]*?cfg\.ultimoEnvio = hoje;/,
+    'carimbar "já rodou hoje" depois de falhar tudo faz o paciente nunca ser avisado: '
+    + 'no dia seguinte o agendamento já saiu da janela de lembrete');
+});
+
+test('disparo automático avisa a falha, como o do backup logo acima', () => {
+  const src = _recF('_iniciarApp').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /r\.erros > 0[\s\S]{0,160}toast\(/,
+    'só o sucesso gerava toast — falhar tudo não dizia nada na tela');
+  assert.match(src, /rodarCicloLembretes\(\)[\s\S]{0,600}?\.catch\(/,
+    'promise sem catch dentro de setTimeout some com o erro');
+});
