@@ -111,6 +111,20 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- **Zero é um valor, não "vazio".** `!x.pacIdx` tratava o índice **0** como "sem vínculo" —
+  e 0 é o caso *normal*, porque atendimento novo entra com `unshift`. O app reoferecia
+  registrar o atendimento a cada toque no agendamento e **duplicava o faturamento**.
+  Use `!= null`. Vale pra todo índice, e pra `valor` (Retorno nasce com `valor: 0`).
+- **Índice nunca vira vínculo persistido.** `registros[].followupIdx` guardava a posição
+  no array de follow-ups; o pull reescreve a coleção na ordem do servidor e qualquer
+  exclusão recompacta o array. Registrar o marco marcava o follow-up de **outro paciente**.
+  Vínculo é por `id` — e, pra dado legado, pelo par `(programaInscricaoId, marcoIdx)`.
+- **`setMonth(getMonth() ± n)` transborda.** Em 31/jan, +1 mês vira "31 de fevereiro" =
+  3 de março: a agenda pulava fevereiro. Ao contrário é pior — em 31/mar, −1 mês volta
+  pra 3 de março e o botão parece morto. Use `_addMeses`, que ancora no dia 1.
+- **`DB.set` carimba `id` nas coleções blindadas.** `_pushBlindada` filtra por id, então
+  registro sem id não sobe. O `_migrarIds` só conserta no `cloudPull` (carga do app):
+  até recarregar, o registro só existe naquele aparelho.
 - **Data: nunca compare `'YYYY-MM-DD'` cru com `Date.now()`.** String sem hora é lida
   como meia-noite **UTC**; `Date.now()` é local. Em UTC-3 a conta já nasce 3h adiantada
   e vira o dia a partir das 21:00. Ancore os dois lados ao **meio-dia local**
@@ -244,6 +258,13 @@ falha de leitura.
 ### Grupo C — precisa de SQL que só o usuário roda
 
 **Não aplicar sozinho.** Escrever o `.sql`, explicar o impacto e pedir que ele rode.
+
+- 🟡 **`DIAGNOSTICO_DUPLICATAS.sql` — só leitura, aguardando ele rodar.** O bug do
+  `!a.pacIdx` (índice 0 falsy) duplicou atendimentos vindos da agenda enquanto esteve
+  no ar. O conserto fecha a torneira; as duplicatas já criadas continuam inflando
+  faturamento e ticket médio. O `.sql` mostra quais são e quanto pesam — **não apaga
+  nada**, porque duplicata do bug e paciente que voltou no mesmo dia têm o mesmo
+  formato, e essa distinção é do médico.
 
 - 🔴 **Webhook multi-tenant.** `wa-webhook` é público e o `owner` vem da URL. `WA_WEBHOOK_SECRET`
   é **global**, não por clínica: não prova que quem chama é o provedor *daquele* owner.
