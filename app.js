@@ -5307,14 +5307,27 @@ function _agsVisiveis() {
 
 function _agId() { return 'ag_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6); }
 
+const AG_CONFIG_PADRAO = {
+  horaInicio: '07:00', horaFim: '20:00', slotDuracao: 60,
+  almocoInicio: '12:00', almocoFim: '13:30',
+  diasUteis: [1, 2, 3, 4, 5],
+  // slotsSemanais[0]=Dom … [6]=Sáb — slots de consultório por dia
+  slotsSemanais: [0, 5, 0, 5, 5, 0, 0],
+};
+
+// MESCLA com o padrão em vez de devolver o objeto guardado como está. DB.getObj
+// só usa o default quando a chave NÃO EXISTE — config parcial passava inteira,
+// e o app faz `cfg.diasUteis.includes(...)` em oito lugares sem guarda: um
+// agenda_config sem diasUteis derruba a tela da agenda toda vez que ela abre.
+// Chega assim por importação de backup (importarJSON grava o objeto verbatim)
+// ou por arquivo editado à mão.
 function getAgConfig() {
-  return DB.getObj('agenda_config', {
-    horaInicio: '07:00', horaFim: '20:00', slotDuracao: 60,
-    almocoInicio: '12:00', almocoFim: '13:30',
-    diasUteis: [1, 2, 3, 4, 5],
-    // slotsSemanais[0]=Dom … [6]=Sáb — slots de consultório por dia
-    slotsSemanais: [0, 5, 0, 5, 5, 0, 0],
-  });
+  const salvo = DB.getObj('agenda_config', {});
+  const cfg = { ...AG_CONFIG_PADRAO, ...(salvo && typeof salvo === 'object' ? salvo : {}) };
+  // Campos que o código percorre precisam ser lista de verdade, não só existir.
+  if (!Array.isArray(cfg.diasUteis) || !cfg.diasUteis.length) cfg.diasUteis = AG_CONFIG_PADRAO.diasUteis;
+  if (!Array.isArray(cfg.slotsSemanais) || cfg.slotsSemanais.length !== 7) cfg.slotsSemanais = AG_CONFIG_PADRAO.slotsSemanais;
+  return cfg;
 }
 function getAgendamentos() { return DB.get('agendamentos'); }
 function getBloqueios()    { return DB.get('bloqueios'); }
@@ -13441,7 +13454,10 @@ function impExecute() {
   const existentes = DB.get('pacientes');
 
   // Índice de chaves existentes (nome+data) para dedup
-  const existSet = new Set(existentes.map(p => `${p.nome.toLowerCase().trim()}|${p.data}`));
+  // (p.nome || '') porque UM atendimento sem nome na base fazia a importação
+  // inteira abortar aqui — antes de trazer uma única linha, e sem mensagem que
+  // explicasse. O resto do app já trata `nome` como opcional em vários pontos.
+  const existSet = new Set(existentes.map(p => `${(p.nome || '').toLowerCase().trim()}|${p.data || ''}`));
 
   let nImportados = 0, nPulados = 0, nSemNome = 0, nSemData = 0;
   const novos = [];

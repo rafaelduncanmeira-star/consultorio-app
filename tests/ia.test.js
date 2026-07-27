@@ -138,8 +138,8 @@ function carregarPrompt(iaCfg) {
       agenda_config: { horaInicio: '08:00', horaFim: '18:00', diasUteis: [1, 2, 3, 4, 5] },
     }[k] ?? def),
   };
-  return carregar(['getIaConfig', 'getAgConfig', '_ymd', '_iaMontarSystemPrompt'], {
-    DB,
+  return carregar(['getIaConfig', 'const:AG_CONFIG_PADRAO', 'getAgConfig', '_ymd', '_iaMontarSystemPrompt'], {
+    DB, Array, Object,
     BRL: (v) => 'R$' + v,
     getProcedimentos: () => [
       { nome: 'Consulta', valorPix: 1000, valorCartao: 1050, obs: '' },

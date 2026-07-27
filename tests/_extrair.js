@@ -37,9 +37,21 @@ function recortarFuncao(nome) {
 // Reemitida como `var` de propósito: num contexto do node:vm, `const`/`let` ficam
 // no escopo léxico e NÃO viram propriedade do sandbox — o teste não conseguiria lê-la.
 function recortarConst(nome) {
-  const m = new RegExp('^const\\s+' + nome + '\\s*=\\s*([^;\\n]+);', 'm').exec(fonte);
+  const m = new RegExp('^const\\s+' + nome + '\\s*=\\s*', 'm').exec(fonte);
   if (!m) throw new Error(`Constante não encontrada no app.js: ${nome}`);
-  return `var ${nome} = ${m[1]};`;
+  const ini = m.index + m[0].length;
+  // Valor pode ser objeto/array de VÁRIAS linhas — vai até o `;` que fecha,
+  // contando chaves e colchetes. A versão anterior parava na primeira quebra de
+  // linha e simplesmente não achava constantes multilinha.
+  let prof = 0, fim = -1;
+  for (let i = ini; i < fonte.length; i++) {
+    const c = fonte[i];
+    if (c === '{' || c === '[') prof++;
+    else if (c === '}' || c === ']') prof--;
+    else if (c === ';' && prof === 0) { fim = i; break; }
+  }
+  if (fim === -1) throw new Error(`Valor da constante não terminou: ${nome}`);
+  return `var ${nome} = ${fonte.slice(ini, fim)};`;
 }
 
 // Avalia uma ou mais funções num sandbox compartilhado. `globais` permite

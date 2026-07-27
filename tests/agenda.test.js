@@ -62,3 +62,48 @@ test('agenda: lembrete e detecção de vínculos usam a constante', () => {
     assert.match(src, /AG_FALTOU/, `${fn} tem de usar a constante, não um literal`);
   }
 });
+
+// ---------- config parcial não pode derrubar a agenda ----------
+// DB.getObj só usa o default quando a chave NÃO EXISTE: um agenda_config
+// parcial passava inteiro. E o app faz `cfg.diasUteis.includes(...)` em oito
+// lugares sem guarda — sem esse campo, a tela da agenda quebra toda vez que
+// abre. Chega assim por importação de backup (importarJSON grava o objeto
+// verbatim) ou arquivo editado à mão.
+const carregaCfg = (salvo) => carregar(['const:AG_CONFIG_PADRAO', 'getAgConfig'], {
+  DB: { getObj: (k, def) => (salvo === undefined ? def : salvo) },
+  Array, Object,
+});
+
+test('getAgConfig: config parcial recebe os campos que faltam', () => {
+  const { getAgConfig } = carregaCfg({ horaInicio: '08:00' });
+  const cfg = getAgConfig();
+  assert.strictEqual(cfg.horaInicio, '08:00', 'o que o usuário salvou continua valendo');
+  assert.ok(Array.isArray(cfg.diasUteis) && cfg.diasUteis.length, 'diasUteis não pode faltar');
+  assert.doesNotThrow(() => cfg.diasUteis.includes(1));
+});
+
+test('getAgConfig: objeto vazio ou lixo devolve a configuração padrão', () => {
+  for (const ruim of [{}, null, 'nao e objeto', []]) {
+    const { getAgConfig } = carregaCfg(ruim);
+    const cfg = getAgConfig();
+    assert.doesNotThrow(() => cfg.diasUteis.includes(1), `entrada ${JSON.stringify(ruim)}`);
+    assert.strictEqual(cfg.slotsSemanais.length, 7);
+  }
+});
+
+test('getAgConfig: diasUteis vazio ou fora do formato cai no padrão', () => {
+  for (const ruim of [[], 'seg,ter', null, 5]) {
+    const { getAgConfig } = carregaCfg({ diasUteis: ruim });
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(getAgConfig().diasUteis)), [1, 2, 3, 4, 5],
+      `diasUteis ${JSON.stringify(ruim)} não serve pra percorrer`);
+  }
+});
+
+test('getAgConfig: config completa passa intacta', () => {
+  const salva = { horaInicio: '09:00', horaFim: '19:00', slotDuracao: 30,
+                  almocoInicio: '12:00', almocoFim: '13:00',
+                  diasUteis: [1, 3, 5], slotsSemanais: [0, 4, 0, 4, 0, 4, 0] };
+  const cfg = carregaCfg(salva).getAgConfig();
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(cfg.diasUteis)), [1, 3, 5]);
+  assert.strictEqual(cfg.slotDuracao, 30);
+});
