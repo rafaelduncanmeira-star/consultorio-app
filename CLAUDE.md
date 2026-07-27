@@ -358,6 +358,14 @@ falha de leitura.
 - **Poda antes de gravar.** O snapshot gravava e só depois podava; uma vez cheio o
   `localStorage`, o `setItem` lançava, a poda nunca rodava e o backup automático parava
   **para sempre**, calado (o chamador não tinha `.catch`).
+- 🔴 **"Já rodou hoje" é do CICLO, não do paciente.** O portão cego
+  `if (cfg.ultimoEnvio === hoje) return` deixava de fora quem entrasse na agenda **depois**
+  da rodada da manhã — e a janela anda com o relógio (`alvoData = hoje + horasAntes`), então
+  no dia seguinte o agendamento já saiu do alcance: o paciente marcado durante o expediente
+  (a maioria) **nunca** era avisado. Quem impede o reenvio é o `_lembreteEnviado` gravado
+  **no agendamento**; o carimbo do dia só pula quando também não há elegível. Contrapartida
+  de voltar a varrer de 15 em 15 min: falha continua sendo retentada (costuma ser
+  transitória) mas com teto — `_LEMBRETE_MAX_TENTATIVAS` por agendamento **por dia**.
 - **Tela que grava config faz `Object.assign` sobre o valor atual — nunca literal.** O blob
   guarda mais campo do que qualquer tela mostra. `saveClinicaConfig` montava os 6 campos do
   formulário e apagava o **`modo`** da clínica: `getAppMode` caía em `'completo'` e CRM,
