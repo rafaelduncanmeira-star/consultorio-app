@@ -538,3 +538,36 @@ test('a conta antiga inflava o total em tudo que não entrou no caixa', () => {
   assert.strictEqual(lucroLinha, 700);
   assert.strictEqual(lucroTotalAntigo, 1600, 'R$ 900 de lucro que a linha do mês não mostrava');
 });
+
+// ---------- o rodapé da tabela de atendimentos discrimina os QUATRO status ----------
+// Eram duas somas inline, 'Pago' e 'Pendente' — com um comentário prometendo
+// "discrimina Pago / Pendente / Isento". 'Parcial', que TODA inscrição
+// parcelada em programa grava, e 'Isento' entravam no total da direita e em
+// selo nenhum: uma assinatura de R$ 6.480 aparecia no total e sumia da
+// discriminação. E "a receber" filtrando só 'Pendente' é o erro que a regra de
+// ouro do financeiro proíbe explicitamente.
+test('rodapé: os selos do rodapé fecham com o total da linha', () => {
+  const { _resumoFin } = carregar(['_centavos', '_resumoFin'], { Math, Number });
+  const linhas = [
+    { valor: 500,  statusPgto: 'Pago' },
+    { valor: 6480, statusPgto: 'Parcial' },   // assinatura anual parcelada
+    { valor: 300,  statusPgto: 'Pendente' },
+    { valor: 200,  statusPgto: 'Isento' },
+  ];
+  const r = _resumoFin(linhas);
+  assert.strictEqual(_centavosIguais(r.recebido + r.aReceber + r.isento, r.bruto), true,
+    'os três selos têm de somar o total mostrado ao lado');
+  assert.strictEqual(r.aReceber, 6780, 'a receber é Parcial + Pendente, nunca só Pendente');
+});
+
+function _centavosIguais(a, b) { return Math.round(a * 100) === Math.round(b * 100); }
+
+test('rodapé: usa o _resumoFin em vez de recontar status na mão', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  // renderReceita: é ela que monta a tabela de atendimentos da tela de Receita.
+  const src = recortarFuncao('renderReceita').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /_resumoFin\(linhasFiltradas/,
+    'soma inline por status é como o Parcial some da tela');
+  assert.ok(!/linhasFiltradas\.filter\(\(\{p\}\) => p\.statusPgto === /.test(src),
+    'nenhuma recontagem de status fora da fonte única');
+});

@@ -7391,10 +7391,19 @@ function renderReceita() {
         <button onclick="deleteRow('pacientes',${ref})" class="text-red-400 hover:text-red-600 text-xs" title="Excluir">🗑️</button>
       </td>
     </tr>`; }).join('');
-  // Rodapé com totais filtrados — discrimina Pago / Pendente / Isento
-  const totPago     = linhasFiltradas.filter(({p}) => p.statusPgto === 'Pago').reduce((s, {p}) => s + (p.valor || 0), 0);
-  const totPendente = linhasFiltradas.filter(({p}) => p.statusPgto === 'Pendente').reduce((s, {p}) => s + (p.valor || 0), 0);
-  const totFiltrado = linhasFiltradas.reduce((s, { p }) => s + (p.valor || 0), 0);
+  // Rodapé com os totais do que está filtrado, pela fonte única (_resumoFin).
+  // Antes eram duas somas inline, 'Pago' e 'Pendente' — o comentário aqui dizia
+  // "discrimina Pago / Pendente / Isento" e o código cobria dois dos quatro
+  // status. 'Parcial' (que TODA inscrição parcelada em programa grava) e
+  // 'Isento' entravam no total da direita e em selo nenhum: uma assinatura de
+  // R$ 6.480 aparecia no total e sumia da discriminação, sem nada explicando a
+  // diferença. E 'a receber' filtrando só 'Pendente' é justamente o erro que a
+  // regra de ouro do financeiro proíbe.
+  const _rfTab = _resumoFin(linhasFiltradas.map(({ p }) => p));
+  const totPago     = _rfTab.recebido;
+  const totAReceber = _rfTab.aReceber;
+  const totIsento   = _rfTab.isento;
+  const totFiltrado = _rfTab.bruto;
   if (tfoot) {
     tfoot.innerHTML = `
       <tr style="background:#f8fafc;border-top:2px solid #e2e8f0;">
@@ -7403,7 +7412,8 @@ function renderReceita() {
         </td>
         <td style="padding:10px 12px;text-align:right;">
           ${totPago > 0 ? `<span style="background:#d1fae5;color:#065f46;padding:3px 8px;border-radius:6px;font-size:11.5px;font-weight:700;">✅ ${BRL(totPago)} pago</span>` : ''}
-          ${totPendente > 0 ? `<span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:6px;font-size:11.5px;font-weight:700;margin-left:4px;">🕐 ${BRL(totPendente)} pendente</span>` : ''}
+          ${totAReceber > 0 ? `<span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:6px;font-size:11.5px;font-weight:700;margin-left:4px;">🕐 ${BRL(totAReceber)} a receber</span>` : ''}
+          ${totIsento > 0 ? `<span style="background:#f1f5f9;color:#475569;padding:3px 8px;border-radius:6px;font-size:11.5px;font-weight:700;margin-left:4px;">🎁 ${BRL(totIsento)} isento</span>` : ''}
         </td>
         <td style="text-align:right;font-weight:800;color:#0f172a;font-size:14px;padding:10px 16px;">${BRL(totFiltrado)}</td>
         <td colspan="3"></td>
