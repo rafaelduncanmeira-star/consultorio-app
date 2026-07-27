@@ -13316,6 +13316,7 @@ async function syncLeadsFromSupabase() {
 }
 
 function renderBackup() {
+  renderSyncSaude();
   const resumo = document.getElementById('backup-resumo');
   if (!resumo) return;
   const items = [
@@ -13331,7 +13332,105 @@ function renderBackup() {
       <div style="font-size:11px;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-top:2px;">${it.label}</div>
     </div>`).join('');
 
-  // Lista de snapshots automáticos
+  // Saúde da sincronização — o que NÃO chegou ao servidor.
+// Toda a blindagem do sync guarda o que o servidor recusa (outbox + quarentena)
+// justamente pra nada sumir, mas isso só era registrado no console: da tela, o
+// médico não tinha como saber que um atendimento existe apenas no aparelho
+// dele. Ele registra a consulta, vê na lista, e no celular ela não está — sem
+// nenhum aviso em lugar nenhum. Pior quando o outbox estoura o teto: aí o pull
+// volta a rodar e o registro some também daqui, sobrando só a cópia da
+// quarentena, que ninguém olha.
+function _pendenciasSync() {
+  const fila = Object.entries(_outboxGet()).map(([key, info]) => ({
+    key,
+    tipo: info.tipo || 'blob',
+    tentativas: info.tentativas || 0,
+    travado: (info.tentativas || 0) >= _OUTBOX_TETO,
+    ts: info.ts || '',
+  }));
+  let quarentena = [];
+  try { quarentena = JSON.parse(localStorage.getItem('consult__quarentena') || '[]'); }
+  catch (e) { quarentena = []; }
+  return { fila, quarentena };
+}
+
+const _ROTULO_COLECAO = {
+  pacientes: 'Atendidos', crm: 'CRM', agendamentos: 'Agenda',
+  inscricoes: 'Inscrições em programa', followup: 'Follow-ups',
+  despesas: 'Despesas', procedimentos: 'Procedimentos', bloqueios: 'Bloqueios',
+  profissionais: 'Equipe', programas: 'Programas',
+};
+// Aceita tanto a chave da coleção ('pacientes') quanto o nome da TABELA
+// ('clinica_atendimentos'), porque a fila guarda a chave e a quarentena guarda a
+// tabela. O de-para sai do próprio _BLINDADAS — manter uma segunda lista aqui
+// daria errado no dia em que uma tabela mudasse de nome (e já daria: a tabela de
+// `pacientes` se chama `clinica_atendimentos`, não `clinica_pacientes`).
+function _rotuloColecao(k) {
+  if (_ROTULO_COLECAO[k]) return _ROTULO_COLECAO[k];
+  for (const [chave, cfg] of Object.entries(_BLINDADAS)) {
+    if (cfg.tabela === k) return _ROTULO_COLECAO[chave] || chave;
+  }
+  return k;
+}
+
+function renderSyncSaude() {
+  const el = document.getElementById('backup-sync-saude');
+  if (!el) return;
+  const { fila, quarentena } = _pendenciasSync();
+  if (!fila.length && !quarentena.length) {
+    el.innerHTML = `<div style="padding:12px 16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;font-size:12.5px;color:#15803d;">
+      ✅ Tudo sincronizado — nenhum registro preso neste aparelho.</div>`;
+    return;
+  }
+  const linhasFila = fila.map(f => `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #fef3c7;">
+      <span style="font-size:15px;">${f.travado ? '🔴' : '🕐'}</span>
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:600;color:#0f172a;font-size:13px;">${_esc(_rotuloColecao(f.key))}</div>
+        <div style="font-size:11.5px;color:#92400e;">${f.travado
+          ? `desistiu depois de ${f.tentativas} tentativas — o pull já pode sobrescrever`
+          : `aguardando envio (${f.tentativas} tentativa(s))`}</div>
+      </div>
+    </div>`).join('');
+  const linhasQ = quarentena.slice(-20).reverse().map(q => {
+    const r = q.registro || {};
+    const quem = r.nome || r.pacienteNome || r.descricao || '(sem nome)';
+    return `
+    <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid #fee2e2;">
+      <span style="font-size:15px;">⚠️</span>
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:600;color:#0f172a;font-size:13px;">${_esc(quem)} <span style="font-weight:400;color:#94a3b8;">· ${_esc(_rotuloColecao(q.tabela))}</span></div>
+        <div style="font-size:11.5px;color:#b91c1c;word-break:break-word;">${_esc(q.motivo || 'recusado pelo servidor')}</div>
+      </div>
+    </div>`;
+  }).join('');
+  el.innerHTML = `
+    <div style="padding:14px 16px;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;">
+      <div style="font-weight:700;color:#92400e;font-size:13.5px;margin-bottom:8px;">⚠️ Há dados que não chegaram ao servidor</div>
+      <div style="font-size:12px;color:#78350f;margin-bottom:10px;">
+        Estes registros existem <strong>só neste aparelho</strong>. Em outro celular ou computador eles não aparecem.
+      </div>
+      ${fila.length ? `<div style="font-size:11px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:0.05em;margin-top:6px;">Na fila de envio</div>${linhasFila}` : ''}
+      ${quarentena.length ? `<div style="font-size:11px;font-weight:700;color:#b91c1c;text-transform:uppercase;letter-spacing:0.05em;margin-top:12px;">Recusados pelo servidor (${quarentena.length})</div>${linhasQ}
+        <div style="font-size:11.5px;color:#78350f;margin-top:8px;">
+          Recusa costuma ser permissão: registro de um profissional gravado por outro, ou membro tentando gravar dado da clínica. Os dados continuam guardados aqui — exporte o backup antes de limpar o navegador.</div>` : ''}
+      <button onclick="_tentarSincronizarAgora()" class="btn-ghost" style="margin-top:12px;font-size:12px;padding:7px 14px;">🔄 Tentar enviar agora</button>
+    </div>`;
+}
+
+async function _tentarSincronizarAgora() {
+  if (!_supa || !currentUser) { toast('Entre na sua conta para sincronizar.', 3000); return; }
+  // Zera as tentativas: o teto existe pra não martelar o servidor a cada pull,
+  // não pra impedir que a pessoa peça explicitamente.
+  _outboxResetTentativas();
+  toast('Enviando…', 2000);
+  await _drenarOutbox();
+  const { fila } = _pendenciasSync();
+  toast(fila.length ? `Ainda faltam ${fila.length} — veja o motivo abaixo.` : '✅ Tudo enviado!', 3500);
+  renderSyncSaude();
+}
+
+// Lista de snapshots automáticos
   const snapList = document.getElementById('backup-snapshots-list');
   if (snapList) {
     const snapshots = listarSnapshots();
