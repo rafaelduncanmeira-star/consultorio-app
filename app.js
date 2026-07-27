@@ -598,12 +598,15 @@ function _papelLabel(role) {
 async function listarConvites() {
   if (!_supa || !currentUser) return [];
   try {
-    const { data } = await _supa.from('team_invites')
+    const { data, error } = await _supa.from('team_invites')
       .select('*')
       .eq('owner_id', currentUser.id)
       .order('created_at', { ascending: false });
+    // null = não deu pra ler. Devolver [] aqui faz a tela dizer que não há
+    // convite nenhum — que é indistinguível de "a lista falhou" pra quem olha.
+    if (error) { console.warn('listarConvites:', error.message); return null; }
     return data || [];
-  } catch(e) { return []; }
+  } catch(e) { return null; }
 }
 
 // Lista membros da equipe (do dono)
@@ -611,9 +614,13 @@ async function listarMembros() {
   if (!_supa || !currentUser) return [];
   try {
     const owner = currentDataOwner || currentUser.id;
-    const { data: members } = await _supa.from('team_members')
+    const { data: members, error } = await _supa.from('team_members')
       .select('member_id, role, created_at')
       .eq('owner_id', owner);
+    // null = não deu pra ler. Antes o erro virava lista vazia e a tela exibia
+    // o convite-primeiro-membro, como se a equipe tivesse sumido — o dono
+    // podia concluir que perdeu a equipe, ou reconvidar quem já está dentro.
+    if (error) { console.warn('listarMembros:', error.message); return null; }
     if (!members || !members.length) return [];
     // Busca os perfis dos membros
     const ids = members.map(m => m.member_id);
@@ -622,9 +629,11 @@ async function listarMembros() {
       .in('id', ids);
     return members.map(m => {
       const p = (profiles || []).find(x => x.id === m.member_id);
-      return { ...m, nome: p?.nome || '(sem nome)' };
+      // `role` do team_members é o papel NA EQUIPE; o do profiles é o papel da
+      // conta. Mostrar os dois deixa a divergência visível em vez de escondida.
+      return { ...m, nome: p?.nome || '(sem nome)', roleConta: p?.role || null };
     });
-  } catch(e) { return []; }
+  } catch(e) { return null; }
 }
 
 // Remove um membro da equipe
@@ -11702,6 +11711,18 @@ async function renderEquipeCard() {
   if (btnEl) btnEl.style.display = '';
   const membros  = await listarMembros();
   const convites = await listarConvites();
+  // null = a consulta falhou. Cair no estado vazio aqui seria mentir: a tela
+  // diria "compartilhe seu consultório" pra quem já tem equipe montada.
+  if (membros === null || convites === null) {
+    subtitleEl.textContent = 'Não consegui carregar a equipe agora';
+    membrosEl.innerHTML = `
+      <div style="padding:14px 16px;background:#fef3c7;border:1px solid #fde68a;border-radius:10px;font-size:12.5px;color:#92400e;">
+        ⚠️ A lista de membros não pôde ser lida. Isso <strong>não</strong> quer dizer que a equipe está vazia —
+        é falha de conexão. Tente de novo em instantes.
+      </div>`;
+    convitesEl.innerHTML = '';
+    return;
+  }
   const pendentes = convites.filter(c => !c.accepted_at);
 
   if (!membros.length && !pendentes.length) {

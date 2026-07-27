@@ -378,3 +378,52 @@ test('login: o papel padrão do metadata é privilegiado — por isso a guarda i
   assert.match(fonte, /meta\.role \|\| 'medico'/,
     'o ramo de primeiro login assume medico quando o metadata não diz nada');
 });
+
+// ---------- listarMembros / listarConvites: lista vazia por erro é mentira ----------
+// A tela de Equipe cai no estado "compartilhe seu consultório" quando as listas
+// vêm vazias. Com o error descartado, uma falha de conexão produzia exatamente
+// esse estado — o dono podia concluir que perdeu a equipe, ou reconvidar quem
+// já está dentro. É a mesma tela que serve pra CONFERIR papéis depois da falha
+// de privilégio, então mentir aqui atrapalha justamente a verificação.
+function supaLista(resposta) {
+  const cadeia = { select: () => cadeia, eq: () => cadeia, in: () => cadeia,
+                   order: () => Promise.resolve(resposta), then: (f) => Promise.resolve(resposta).then(f) };
+  return { from: () => cadeia };
+}
+
+test('listarConvites: erro devolve null (não uma lista vazia)', async () => {
+  const { listarConvites } = carregar('listarConvites', {
+    _supa: supaLista({ data: null, error: { message: 'network' } }),
+    currentUser: { id: 'eu' }, console: { warn() {} }, Promise,
+  });
+  assert.strictEqual(await listarConvites(), null);
+});
+
+test('listarConvites: sem convite nenhum devolve lista vazia (isso é verdade)', async () => {
+  const { listarConvites } = carregar('listarConvites', {
+    _supa: supaLista({ data: [], error: null }),
+    currentUser: { id: 'eu' }, console: { warn() {} }, Promise,
+  });
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(await listarConvites())), []);
+});
+
+test('listarMembros: erro devolve null; equipe vazia devolve lista vazia', async () => {
+  const comErro = carregar('listarMembros', {
+    _supa: supaLista({ data: null, error: { message: 'rls' } }),
+    currentUser: { id: 'eu' }, currentDataOwner: null, console: { warn() {} }, Promise,
+  });
+  assert.strictEqual(await comErro.listarMembros(), null);
+
+  const vazio = carregar('listarMembros', {
+    _supa: supaLista({ data: [], error: null }),
+    currentUser: { id: 'eu' }, currentDataOwner: null, console: { warn() {} }, Promise,
+  });
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(await vazio.listarMembros())), []);
+});
+
+test('renderEquipeCard: distingue lista vazia de lista que não pôde ser lida', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  const src = recortarFuncao('renderEquipeCard').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /membros === null \|\| convites === null/,
+    'sem esta distinção a tela mostra "compartilhe seu consultório" pra quem já tem equipe');
+});
