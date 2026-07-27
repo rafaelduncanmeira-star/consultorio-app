@@ -225,6 +225,12 @@ Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
   já tem identidade: o telefone. `_crmPorTelefone(_chatPhone)`, resolvido na hora do uso.
   Corolário de nomes: variável que recebe `_waConnected()` **não** se chama `zapiOk` — foi
   esse nome que convidou a regressão do card de lembretes. Há teste reprovando.
+- **Nome vindo do LLM entra APARADO, e a comparação usa `_nomeNorm` nos dois lados.** O
+  guard do `PRECISA_NOME` apara só pra **validar**; o valor gravado seguia cru. "Consulta "
+  criava um segundo procedimento idêntico na tabela de preços — e o nome com espaço não casa
+  com o valor sugerido, com o `<select>` de edição nem com o balde de metas, que procuram
+  pelo nome **exato**. O `saveProc` tinha a outra metade: aparava o novo e comparava com os
+  guardados sem aparar.
 - **Telefone a partir do nome é `_telefoneDoPaciente(nome)`, uma regra só.** O botão 💬 do
   follow-up comparava nome **cru** (`p.nome === fu.nome`) e olhava 3 coleções; o da lista de
   pacientes normalizava e olhava 4. Grafia divergente → "WhatsApp não cadastrado" com o
