@@ -3707,6 +3707,11 @@ function _aplicarEfeitosMudancaStatusCrm(idx, oldStatus, newStatus) {
 }
 
 // Dropdown inline de status de pagamento (Atendidos)
+// Status de FALTA do agendamento. O <select> da agenda oferece 'No-show'; três
+// pontos do código comparavam com 'Faltou', que a interface nunca gravou.
+// Centralizado pra não voltar a divergir — ver tests/agenda.test.js.
+const AG_FALTOU = 'No-show';
+
 // Status de pagamento válidos, na ordem em que aparecem nos <select>.
 const STATUS_PGTO = ['Pago', 'Parcial', 'Pendente', 'Isento'];
 
@@ -3803,7 +3808,7 @@ function _detectarVinculos(col, item) {
     const today = _ymd(new Date());
     const ags = DB.get('agendamentos').filter(a =>
       (a.pacienteNome || '').toLowerCase().trim() === nome &&
-      (a.data || '') >= today && a.status !== 'Compareceu' && a.status !== 'Faltou'
+      (a.data || '') >= today && a.status !== 'Compareceu' && a.status !== AG_FALTOU
     );
     if (ags.length) vinculos.push(`${ags.length} agendamento(s) futuro(s)`);
     // Outras consultas do mesmo paciente
@@ -5728,7 +5733,12 @@ function updateAgStatus(id, novo) {
     if (c) {
       let novoCrm = null;
       if (novo === 'Compareceu') novoCrm = 'Atendeu';
-      else if (novo === 'Cancelado' || novo === 'Faltou') novoCrm = 'Não marcou';
+      // 'No-show' é o valor que o app REALMENTE grava (é a única opção do
+      // select na agenda). 'Faltou' nunca existiu na interface, então este
+      // ramo não disparava pra falta: o paciente não aparecia, a secretária
+      // marcava No-show e o card do CRM continuava em "Marcou" pra sempre —
+      // o funil mostrava como convertido quem não veio.
+      else if (novo === 'Cancelado' || novo === AG_FALTOU) novoCrm = 'Não marcou';
       else if (novo === 'Confirmado' && c.status !== 'Marcou') novoCrm = 'Marcou';
       if (novoCrm && c.status !== novoCrm) {
         c.status = novoCrm;
@@ -10798,7 +10808,7 @@ function _agendamentosParaLembrar(horasAntes) {
   return DB.get('agendamentos').filter(ag =>
     ag.data === alvoData &&
     ag.status !== 'Compareceu' &&
-    ag.status !== 'Faltou' &&
+    ag.status !== AG_FALTOU &&
     ag.status !== 'Cancelado' &&
     !ag._lembreteEnviado &&
     ag.whatsapp
