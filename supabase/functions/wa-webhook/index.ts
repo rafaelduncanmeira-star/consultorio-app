@@ -499,6 +499,14 @@ function _foneChat(raw: string): string {
   return (d.length >= 12 && d.startsWith('55')) ? d.slice(2) : d;
 }
 
+// Número no formato internacional que a Cloud API exige: 55 + DDD + número.
+// Mesmo cuidado do _foneChat: testar só o prefixo '55' confunde DDI com o DDD
+// 55 (Santa Maria/RS) e manda a resposta pra outro número.
+function _foneE164BR(raw: string): string {
+  const d = String(raw || '').replace(/\D/g, '');
+  return d ? '55' + _foneChat(d) : '';
+}
+
 // Data local YYYY-MM-DD no fuso da clínica.
 function _dataLocal(d: Date): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TZ_CLINICA, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
@@ -667,7 +675,7 @@ async function enviarWhatsAppServer(supa: any, owner: string, rawPhone: string, 
     if (provider === 'cloud') {
       const c = await lerAppData(supa, owner, 'wa_cloud_config', null);
       if (!c || !c.phoneNumberId || !c.accessToken) return { ok: false, error: 'cloud não configurado' };
-      const to = phone.startsWith('55') ? phone : '55' + phone;
+      const to = _foneE164BR(phone);
       const res = await fetch(`https://graph.facebook.com/v21.0/${c.phoneNumberId}/messages`, {
         method: 'POST',
         signal: corte,

@@ -163,3 +163,33 @@ test('_profDoPaciente cai no profissional logado quando não encontra', () => {
   });
   assert.strictEqual(_profDoPaciente('Desconhecido'), 'prof-logado');
 });
+
+// ---------- _foneE164BR × _zapiPhoneCandidates: os dois provedores têm de concordar ----------
+// A Cloud API fazia `startsWith('55') ? phone : '55' + phone`, que confunde DDI
+// com o DDD 55 (Santa Maria/RS). O Z-API já normalizava certo. Resultado: o
+// mesmo paciente recebia (ou não) dependendo do provedor configurado.
+const FONES = [
+  ['11987654321',   '5511987654321', 'celular SP sem DDI'],
+  ['5511987654321', '5511987654321', 'celular SP com DDI'],
+  ['55987654321',   '5555987654321', 'celular DDD 55 sem DDI — 55 é o DDD'],
+  ['5555987654321', '5555987654321', 'celular DDD 55 com DDI'],
+  ['5532201234',    '555532201234',  'fixo DDD 55 sem DDI'],
+  ['555532201234',  '555532201234',  'fixo DDD 55 com DDI'],
+];
+
+test('_foneE164BR: monta 55 + DDD + número sem confundir DDI com DDD', () => {
+  const { _foneE164BR } = carregar('_foneE164BR', { String });
+  for (const [entrada, esperado, desc] of FONES) {
+    assert.strictEqual(_foneE164BR(entrada), esperado, `${desc}: ${entrada}`);
+  }
+  assert.strictEqual(_foneE164BR(''), '');
+  assert.strictEqual(_foneE164BR(null), '');
+});
+
+test('_foneE164BR concorda com o 1º candidato do Z-API', () => {
+  const s = carregar(['_foneE164BR', '_zapiPhoneCandidates'], { String, RegExp });
+  for (const [entrada, , desc] of FONES) {
+    assert.strictEqual(s._foneE164BR(entrada), s._zapiPhoneCandidates(entrada)[0],
+      `${desc}: os dois provedores não podem discordar do mesmo telefone`);
+  }
+});

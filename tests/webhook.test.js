@@ -142,3 +142,26 @@ test('montarDisponibilidade: sem agenda e sem bloqueio o texto do prompt não ve
   const [dia] = proximosUteis(1);
   assert.ok(slotsDe(r, dia).length > 4, 'o Set não pode ser truncado como o texto');
 });
+
+// ---------- _foneE164BR: o numero que a Cloud API recebe ----------
+// `phone.startsWith('55') ? phone : '55' + phone` confunde DDI com o DDD 55
+// (Santa Maria/RS): o celular 55 98765-4321 saía como 55987654321, que o
+// WhatsApp lê como DDD 98. A mensagem ia pra outro número. O Z-API já fazia
+// certo — as duas metades do envio discordavam do mesmo telefone.
+const { _foneE164BR } = carregarTs(['_foneChat', '_foneE164BR']);
+
+test('_foneE164BR: número do DDD 55 não perde o DDD pro DDI', () => {
+  assert.strictEqual(_foneE164BR('55987654321'), '5555987654321', 'celular DDD 55 sem DDI');
+  assert.strictEqual(_foneE164BR('5532201234'), '555532201234', 'fixo DDD 55 sem DDI');
+});
+
+test('_foneE164BR: número com DDI não ganha um 55 a mais', () => {
+  assert.strictEqual(_foneE164BR('5511987654321'), '5511987654321');
+  assert.strictEqual(_foneE164BR('555532201234'), '555532201234');
+});
+
+test('_foneE164BR: número comum sem DDI recebe o 55', () => {
+  assert.strictEqual(_foneE164BR('11987654321'), '5511987654321');
+  assert.strictEqual(_foneE164BR('(11) 98765-4321'), '5511987654321', 'com máscara');
+  assert.strictEqual(_foneE164BR(''), '');
+});

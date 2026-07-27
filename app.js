@@ -10537,6 +10537,19 @@ function _formatarMensagemLembrete(ag, template) {
     .replace(/\{duracao\}/g, (ag.duracao || 50) + ' min');
 }
 
+// Número BR no formato internacional que a Cloud API exige: 55 + DDD + número.
+// `startsWith('55') ? phone : '55' + phone` NÃO serve: quem é do DDD 55 (região
+// de Santa Maria/RS) tem número que já começa com 55 sem ter DDI nenhum, e o
+// teste de prefixo achava que o DDI estava lá. O celular 55 98765-4321 saía
+// como 55987654321 — que o WhatsApp lê como DDD 98 — e a mensagem ia pra outro
+// número ou pra lugar nenhum. O corte só vale a partir de 12 dígitos, mesma
+// regra do _normPhone e do _zapiPhoneCandidates.
+function _foneE164BR(raw) {
+  const d = String(raw || '').replace(/\D/g, '');
+  if (!d) return '';
+  return '55' + ((d.length >= 12 && d.startsWith('55')) ? d.slice(2) : d);
+}
+
 // Gera os formatos possíveis de um número BR para o Z-API, em ordem de tentativa.
 // Resolve a ambiguidade do 9º dígito: o WhatsApp pode ter registrado o número
 // COM ou SEM o 9, então devolvemos os dois candidatos pra tentar em sequência.
@@ -10591,7 +10604,7 @@ async function _zapiSendText(cfg, rawPhone, text) {
 async function _cloudSendText(cfg, rawPhone, text) {
   const phone = String(rawPhone || '').replace(/\D/g, '');
   if (!phone) return { ok: false, error: 'número inválido' };
-  const to = phone.startsWith('55') ? phone : '55' + phone;  // Cloud API quer DDI
+  const to = _foneE164BR(phone);   // 55 + DDD + número (ver _foneE164BR)
   try {
     const res = await fetch(`https://graph.facebook.com/v21.0/${cfg.phoneNumberId}/messages`, {
       method: 'POST',
@@ -10609,7 +10622,7 @@ async function _cloudSendText(cfg, rawPhone, text) {
 async function _cloudSendTemplate(cfg, rawPhone, templateName, langCode, bodyParams) {
   const phone = String(rawPhone || '').replace(/\D/g, '');
   if (!phone) return { ok: false, error: 'número inválido' };
-  const to = phone.startsWith('55') ? phone : '55' + phone;
+  const to = _foneE164BR(phone);
   const components = (bodyParams && bodyParams.length)
     ? [{ type: 'body', parameters: bodyParams.map(v => ({ type: 'text', text: String(v) })) }]
     : [];
