@@ -111,6 +111,11 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- 🔴 **Canal de realtime cai — e leva o CRM junto.** Depois do login, o realtime é a
+  ÚNICA porta por onde um lead do WhatsApp entra. `subscribe()` **sempre** com callback de
+  status: `SUBSCRIBED` varre o que chegou durante a queda, `CHANNEL_ERROR`/`TIMED_OUT`
+  reconectam. **`CLOSED` não** — ele chega quando somos nós removendo o canal, e reagir
+  faz laço infinito. `online` e `visibilitychange` chamam `_revisarCanalLeads()`.
 - 🔴 **Falha de envio precisa aparecer E ter segunda chance.** `_lembreteErro` era gravado
   no agendamento e nunca lido; o toast só saía no sucesso; e `cfg.ultimoEnvio` era
   carimbado mesmo com 100% de falha, bloqueando a retentativa pelo resto do dia — no dia
