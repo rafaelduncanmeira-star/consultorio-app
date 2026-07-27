@@ -37,6 +37,8 @@ const LEGITIMAS = new Map([
   ['value === "CONNECTED"',       'idem'],
   ['object === "whatsapp_business_account"', 'tipo do payload — vocabulário da Meta'],
   ['visibilityState === "visible"', 'estado da aba — vocabulário do navegador (Page Visibility API)'],
+  ['state === "installed"',        'estado do worker — vocabulário da Service Worker API'],
+  ['update === "function"',        'typeof — método pode não existir em navegador antigo'],
 ]);
 
 // Campos genéricos demais pra essa análise dizer algo útil.

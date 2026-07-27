@@ -20,6 +20,7 @@ function ambiente({ logado = true } = {}) {
     setInterval: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
     _timerTarefasDoDia: null,
     currentUser: logado ? { id: 'u1' } : null,
+    _checarAtualizacaoSW: () => { chamadas.push('versao'); },
     criarSnapshotDiario: () => { chamadas.push('backup'); return Promise.resolve({ skipped: true }); },
     rodarCicloLembretes: () => { chamadas.push('lembretes'); return Promise.resolve({ enviados: 0, erros: 0 }); },
     toast: () => {},
@@ -30,14 +31,15 @@ function ambiente({ logado = true } = {}) {
 test('a rodada do dia dispara as duas tarefas', () => {
   const a = ambiente();
   a._rodarTarefasDoDia();
-  assert.deepStrictEqual(a.chamadas, ['backup', 'lembretes']);
+  assert.deepStrictEqual(a.chamadas, ['versao', 'backup', 'lembretes']);
 });
 
 test('sem sessão, nada roda', () => {
   const a = ambiente({ logado: false });
   a._rodarTarefasDoDia();
-  assert.deepStrictEqual(a.chamadas, [],
-    'sem usuário não há nuvem pra gravar nem WhatsApp pra enviar');
+  assert.deepStrictEqual(a.chamadas, ['versao'],
+    'sem usuário não há nuvem pra gravar nem WhatsApp pra enviar — mas procurar '
+    + 'versão nova não depende de sessão');
 });
 
 test('o agendador existe e não depende de recarregar a página', () => {

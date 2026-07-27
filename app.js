@@ -92,9 +92,48 @@ if (typeof window.Chart === 'undefined') {
 // ====================== PWA (Service Worker + Install Prompt) ======================
 let _deferredInstallPrompt = null;
 
+// Versão nova publicada: o service worker é network-first e o `skipWaiting` já
+// coloca a versão nova no ar — mas só na PRÓXIMA navegação. E este app foi feito
+// pra ficar aberto a semana inteira numa recepção: quem não recarrega segue
+// rodando a versão antiga indefinidamente, inclusive depois de uma correção de
+// dado. Nada avisava.
+// A checagem periódica mora no _rodarTarefasDoDia (a cada 15 min); aqui fica só
+// o aviso, disparado uma vez quando um worker novo termina de instalar tendo
+// outro no controle — que é exatamente a definição de "tem versão mais nova
+// esperando".
+let _swRegistro = null;
+let _avisouVersaoNova = false;
+function _observarAtualizacaoSW(reg) {
+  if (!reg) return;
+  _swRegistro = reg;
+  reg.addEventListener('updatefound', () => {
+    const novo = reg.installing;
+    if (!novo) return;
+    novo.addEventListener('statechange', () => {
+      // `navigator.serviceWorker.controller` só existe se JÁ havia uma versão
+      // no ar. Sem essa condição, o aviso apareceria na PRIMEIRA visita, quando
+      // não há nada pra atualizar.
+      if (novo.state !== 'installed' || !navigator.serviceWorker.controller) return;
+      if (_avisouVersaoNova) return;
+      _avisouVersaoNova = true;
+      toast('🔄 Versão nova disponível — recarregue a página para aplicar.', 12000);
+    });
+  });
+}
+
+function _checarAtualizacaoSW() {
+  // `update()` devolve promise e rejeita quando está offline; sem catch isso
+  // vira "unhandled rejection" a cada 15 minutos.
+  if (_swRegistro && typeof _swRegistro.update === 'function') {
+    try { _swRegistro.update().catch(() => {}); } catch (e) { /* navegador antigo */ }
+  }
+}
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(err => console.warn('SW register fail:', err));
+    navigator.serviceWorker.register('./sw.js')
+      .then(_observarAtualizacaoSW)
+      .catch(err => console.warn('SW register fail:', err));
   });
 }
 
@@ -1364,6 +1403,10 @@ function _tarefaLembretes() {
 }
 
 function _rodarTarefasDoDia() {
+  // Antes do guard de sessão: procurar versão nova não depende de estar logado,
+  // e é a checagem que faz o aviso de atualização chegar a quem deixa o app
+  // aberto por dias.
+  _checarAtualizacaoSW();
   if (!currentUser) return;
   _tarefaBackupDiario();
   _tarefaLembretes();

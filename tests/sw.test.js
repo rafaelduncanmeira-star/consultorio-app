@@ -141,3 +141,84 @@ test('sw: activate apaga cache de versão anterior e mantém a atual', async () 
   assert.ok(!('consultorio-versao-antiga' in sw.stores), 'versão antiga tem de sair');
   assert.ok(CACHE_NAME in sw.stores, 'a atual fica');
 });
+
+// ---------- aviso de versão nova ----------
+// O service worker é network-first e o skipWaiting já põe a versão nova no ar —
+// mas só na PRÓXIMA navegação. Este app foi feito pra ficar aberto a semana
+// inteira numa recepção: quem não recarrega segue rodando a versão antiga
+// indefinidamente, inclusive depois de uma correção de dado, e nada avisava.
+const { carregar: _carr, recortarFuncao: _rec2, fonte: _fnt } = require('./_extrair.js');
+
+function ambienteSW() {
+  const toasts = [];
+  let ouvinteUpdate = null;
+  const novo = { state: 'installing', _ouvintes: {},
+    addEventListener(ev, fn) { this._ouvintes[ev] = fn; } };
+  const reg = {
+    installing: novo,
+    addEventListener(ev, fn) { if (ev === 'updatefound') ouvinteUpdate = fn; },
+    update: () => Promise.resolve(),
+  };
+  const s = _carr(['_observarAtualizacaoSW', '_checarAtualizacaoSW'], {
+    _swRegistro: null, _avisouVersaoNova: false,
+    navigator: { serviceWorker: { controller: {} } },
+    toast: (t) => toasts.push(t),
+    console: { warn() {} },
+  });
+  return { ...s, reg, novo, toasts, dispararUpdate: () => ouvinteUpdate && ouvinteUpdate() };
+}
+
+test('avisa quando uma versão nova termina de instalar', () => {
+  const a = ambienteSW();
+  a._observarAtualizacaoSW(a.reg);
+  a.dispararUpdate();
+  a.novo.state = 'installed';
+  a.novo._ouvintes.statechange();
+  assert.match(a.toasts.join(' '), /Versão nova disponível/);
+  assert.match(a.toasts.join(' '), /recarregue/i, 'o aviso tem de dizer o que fazer');
+});
+
+test('não avisa na PRIMEIRA visita (não há o que atualizar)', () => {
+  const toasts = [];
+  let ouvinte = null;
+  const novo = { state: 'installing', _o: {}, addEventListener(e, f) { this._o[e] = f; } };
+  const reg = { installing: novo, addEventListener: (e, f) => { if (e === 'updatefound') ouvinte = f; } };
+  const s = _carr('_observarAtualizacaoSW', {
+    _swRegistro: null, _avisouVersaoNova: false,
+    navigator: { serviceWorker: { controller: null } },  // ninguém no controle ainda
+    toast: (t) => toasts.push(t),
+  });
+  s._observarAtualizacaoSW(reg);
+  ouvinte();
+  novo.state = 'installed';
+  novo._o.statechange();
+  assert.deepStrictEqual(toasts, [],
+    'sem controller, é a primeira instalação — avisar ali só assusta');
+});
+
+test('avisa uma vez só, não a cada checagem', () => {
+  const a = ambienteSW();
+  a._observarAtualizacaoSW(a.reg);
+  a.dispararUpdate();
+  a.novo.state = 'installed';
+  a.novo._ouvintes.statechange();
+  a.novo._ouvintes.statechange();
+  assert.strictEqual(a.toasts.length, 1);
+});
+
+test('a checagem periódica não estoura promise sem catch', () => {
+  const s = _carr('_checarAtualizacaoSW', {
+    _swRegistro: { update: () => Promise.reject(new Error('offline')) },
+    console: { warn() {} },
+  });
+  assert.doesNotThrow(() => s._checarAtualizacaoSW(),
+    'update() rejeita quando está offline, e isso roda a cada 15 minutos');
+});
+
+test('a checagem entra na rodada do dia, antes do guard de sessão', () => {
+  const src = _rec2('_rodarTarefasDoDia').replace(/\/\/[^\n]*/g, '');
+  const iCheca = src.indexOf('_checarAtualizacaoSW()');
+  const iGuard = src.indexOf('if (!currentUser) return;');
+  assert.ok(iCheca >= 0 && iCheca < iGuard,
+    'procurar versão nova não depende de estar logado');
+});
