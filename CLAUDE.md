@@ -358,6 +358,13 @@ falha de leitura.
 - **Poda antes de gravar.** O snapshot gravava e só depois podava; uma vez cheio o
   `localStorage`, o `setItem` lançava, a poda nunca rodava e o backup automático parava
   **para sempre**, calado (o chamador não tinha `.catch`).
+- **Chave que o app grava com `localStorage.setItem` cru NÃO sincroniza — e restaurar
+  não pode mudar isso.** `audit_log` e `chat_history` são as duas únicas assim
+  (`_CHAVES_SO_LOCAIS`); as outras 22 do `BACKUP_KEYS` passam por `DB.set`. Restaurar/
+  importar gravavam todas com `DB.set`/`cloudPush`, criando a linha no `app_data` — e daí
+  **todo `cloudPull`, em toda abertura**, devolvia o retrato congelado por cima do log
+  real. O `cloudPull` também ignora essas chaves, o que desarma a linha de quem já
+  restaurou. Teste cruza a lista com o fonte nos dois sentidos.
 - **Migração de config lê o objeto SALVO, nunca o já mesclado.** `getAgConfig` faz
   `{ ...AG_CONFIG_PADRAO, ...salvo }`, então `cfg.campoNovo` **sempre** existe — e o
   `cfg.campoNovo || (cfg.campoAntigo ? … )` que as telas usavam nunca era falso. A
