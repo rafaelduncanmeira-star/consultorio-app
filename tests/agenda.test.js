@@ -107,3 +107,65 @@ test('getAgConfig: config completa passa intacta', () => {
   assert.deepStrictEqual(JSON.parse(JSON.stringify(cfg.diasUteis)), [1, 3, 5]);
   assert.strictEqual(cfg.slotDuracao, 30);
 });
+
+// ---------- navegar por mês não pode pular (nem travar) ----------
+// `setMonth(getMonth() + n)` transborda quando o dia não existe no mês de
+// destino, e a âncora da agenda nasce como HOJE — ou seja, com o dia do mês de
+// hoje. Em 31/jan, ▶ ia parar em 3 de março: fevereiro sumia da navegação. No
+// sentido inverso era pior: em 31/mar, ◀ voltava pra 3 de março e o botão
+// parecia morto — clicar não saía do mês.
+const { _addMeses } = carregar('_addMeses', { Date, Math });
+const dia = (iso) => new Date(iso + 'T12:00:00');
+const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+test('_addMeses: avançar a partir de dia 31 não pula o mês curto', () => {
+  assert.strictEqual(iso(_addMeses(dia('2026-01-31'), 1)), '2026-02-28',
+    '31/jan + 1 mês é fevereiro, não março');
+  assert.strictEqual(iso(_addMeses(dia('2024-01-31'), 1)), '2024-02-29', 'ano bissexto');
+  assert.strictEqual(iso(_addMeses(dia('2026-08-31'), 1)), '2026-09-30');
+  assert.strictEqual(iso(_addMeses(dia('2026-01-30'), 1)), '2026-02-28');
+});
+
+test('_addMeses: voltar a partir de dia 31 sai mesmo do mês', () => {
+  assert.strictEqual(iso(_addMeses(dia('2026-03-31'), -1)), '2026-02-28',
+    'o botão de mês anterior tem de sair de março');
+  assert.strictEqual(iso(_addMeses(dia('2026-05-31'), -1)), '2026-04-30');
+  assert.strictEqual(iso(_addMeses(dia('2026-07-31'), -1)), '2026-06-30');
+});
+
+test('_addMeses: um clique sempre muda exatamente um mês, em qualquer dia do ano', () => {
+  for (let m = 0; m < 12; m++) {
+    for (const d of [1, 15, 28, 29, 30, 31]) {
+      const base = new Date(2026, m, 1);
+      const ultimo = new Date(2026, m + 1, 0).getDate();
+      if (d > ultimo) continue;
+      base.setDate(d);
+      for (const dir of [1, -1]) {
+        const alvo = _addMeses(base, dir);
+        const esperado = (m + dir + 12) % 12;
+        assert.strictEqual(alvo.getMonth(), esperado,
+          `${d}/${m + 1} com dir ${dir} caiu no mês ${alvo.getMonth() + 1}`);
+      }
+    }
+  }
+});
+
+test('agendaNavegar: a view de mês usa o helper, não setMonth cru', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  const src = recortarFuncao('agendaNavegar');
+  assert.match(src, /_addMeses\(agAnchor, dir\)/);
+  assert.doesNotMatch(src, /setMonth/, 'setMonth cru aqui reintroduz o pulo de mês');
+});
+
+// As duas telas que dizem "sem retorno há 6 meses" (Retenção e os insights do
+// Dashboard) tinham contas diferentes: uma comparava texto 'AAAA-MM-DD', a
+// outra comparava Date (meia-noite UTC vs. hora local). Discordavam no dia
+// exato do corte — o mesmo paciente aparecia numa tela e não na outra.
+test('6 meses: as duas telas calculam o corte do mesmo jeito', () => {
+  const semCom = fonte.replace(/\/\/[^\n]*/g, '');
+  const cortes = [...semCom.matchAll(/const seisStr = ([^;]+);/g)].map(m => m[1].trim());
+  assert.strictEqual(cortes.length, 2, 'deveria haver exatamente dois cortes de 6 meses');
+  assert.strictEqual(cortes[0], cortes[1], `contas diferentes: ${cortes.join('  ≠  ')}`);
+  assert.match(cortes[0], /_addMeses\(new Date\(\), -6\)/);
+  assert.doesNotMatch(semCom, /setMonth\(/, 'setMonth cru transborda — use _addMeses');
+});

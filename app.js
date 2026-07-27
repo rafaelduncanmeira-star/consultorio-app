@@ -5369,6 +5369,19 @@ function _ymd(d) {
   return `${y}-${m}-${day}`;
 }
 function _addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+// Desloca N meses SEM transbordar. `setMonth` cru transborda quando o dia não
+// existe no mês de destino: em 31/jan, +1 mês vira "31 de fevereiro" e o
+// JavaScript entrega 3 de março — a agenda pula fevereiro inteiro. No sentido
+// inverso é pior: em 31/mar, −1 mês volta pra 3 de março, ou seja, o botão de
+// mês anterior não sai do mês e parece quebrado. Ancora no dia 1 (aí o ano vira
+// sozinho) e só então recoloca o dia, limitado ao tamanho do mês de destino.
+function _addMeses(d, n) {
+  const dia = d.getDate();
+  const x = new Date(d.getFullYear(), d.getMonth() + n, 1);
+  const ultimoDia = new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate();
+  x.setDate(Math.min(dia, ultimoDia));
+  return x;
+}
 function _startOfWeek(d) { const x = new Date(d); const dow = x.getDay(); const diff = (dow === 0 ? 6 : dow - 1); x.setDate(x.getDate() - diff); return x; }
 function _isSameDay(a, b) { return _ymd(a) === _ymd(b); }
 
@@ -5437,7 +5450,7 @@ function setAgendaView(v) {
 function agendaNavegar(dir) {
   if (agView === 'dia' || agView === 'profissionais') agAnchor = _addDays(agAnchor, dir);
   else if (agView === 'semana') agAnchor = _addDays(agAnchor, dir * 7);
-  else { const x = new Date(agAnchor); x.setMonth(x.getMonth() + dir); agAnchor = x; }
+  else agAnchor = _addMeses(agAnchor, dir);
   renderAgenda();
 }
 function agendaHoje() { agAnchor = new Date(); renderAgenda(); }
@@ -7129,8 +7142,7 @@ function renderRetencao() {
   setText('ret-ltv-sub', `${pacientesUnicos.length} pacientes únicos · ${todos.length} consultas`);
 
   // ===== Pacientes ativos (últimos 6 meses) =====
-  const seisMeses = new Date(); seisMeses.setMonth(seisMeses.getMonth() - 6);
-  const seisStr = _ymd(seisMeses);
+  const seisStr = _ymd(_addMeses(new Date(), -6));
   const ativos = pacientesUnicos.filter(p => p.consultas[p.consultas.length - 1].data >= seisStr);
   const pctAtivos = pacientesUnicos.length ? (ativos.length / pacientesUnicos.length) * 100 : 0;
   setText('ret-ativos', ativos.length);
@@ -8152,16 +8164,20 @@ function renderAlertasProativos({ fat, totalDesp, lucro, ocup, noshowPct, inadPc
 
   // ── 5. Pacientes sumidos (última visita > 6 meses atrás) ──
   const todos = DB.get('pacientes');
-  const seisMesesAtras = new Date();
-  seisMesesAtras.setMonth(seisMesesAtras.getMonth() - 6);
+  // Mesma regra dos "abandonados" da tela de Retenção — e agora escrita do mesmo
+  // jeito. Antes esta comparava `new Date(p.data)` (que o JS lê como meia-noite
+  // UTC) com um Date local carregando a hora atual: a fronteira dos 6 meses
+  // saía deslocada em algumas horas, e as duas telas discordavam sobre o mesmo
+  // paciente no dia do corte. Comparar as datas como texto 'AAAA-MM-DD' não tem
+  // fuso nem hora.
+  const seisStr = _ymd(_addMeses(new Date(), -6));
   const ultimaVisita = {};
   todos.forEach(p => {
-    if (!p.nome) return;
-    const d = new Date(p.data);
-    if (!ultimaVisita[p.nome] || d > ultimaVisita[p.nome]) ultimaVisita[p.nome] = d;
+    if (!p.nome || !p.data) return;
+    if (!ultimaVisita[p.nome] || p.data > ultimaVisita[p.nome]) ultimaVisita[p.nome] = p.data;
   });
   const sumidos = Object.entries(ultimaVisita)
-    .filter(([, d]) => d < seisMesesAtras)
+    .filter(([, d]) => d < seisStr)
     .map(([nome]) => nome);
   if (sumidos.length > 0) {
     const preview = sumidos.slice(0, 3).join(', ') + (sumidos.length > 3 ? ` e mais ${sumidos.length - 3}` : '');
