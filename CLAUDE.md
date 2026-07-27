@@ -111,6 +111,20 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- 🔴 **Dado do LLM entra normalizado ou não entra.** `executeAIAction` espalhava `dados`
+  cru. `valor: "1.200,50"` (o formato que o médico dita) virava **string** no registro —
+  e a soma de `_resumoFin` é `s + (p.valor || 0)`, que com string **concatena**:
+  `"3001.200,50"`, cujo `_centavos` é `NaN`. Um atendimento zerava o financeiro inteiro.
+  `parseFloat` não salva (para no primeiro ponto → `1.2`); use **`impNormValor`**.
+  Status idem: fora do canônico o registro fica **fora de todos os baldes** e o dinheiro
+  some dos relatórios. Em **UPDATE**, não caia no padrão — *recuse*: canonizar rebaixaria
+  pra `Pendente` um atendimento já pago.
+- **Mutação depois do `DB.set` não é gravada.** `DB.set` serializa um instantâneo; o push
+  assíncrono carrega a referência viva. Mexer no registro depois deixa o aparelho sem o
+  dado e o servidor, às vezes, com ele. Monte o registro **inteiro** antes de gravar.
+- **Bloqueio de um dia só precisa de validação por HORA.** `dataFim < dataInicio` nunca
+  dispara quando as datas são iguais: um bloqueio 14:00 → 09:00 era salvo, aparecia na
+  lista e não barrava slot nenhum (a sobreposição é impossível com o fim antes do início).
 - **Zero é um valor, não "vazio".** `!x.pacIdx` tratava o índice **0** como "sem vínculo" —
   e 0 é o caso *normal*, porque atendimento novo entra com `unshift`. O app reoferecia
   registrar o atendimento a cada toque no agendamento e **duplicava o faturamento**.
