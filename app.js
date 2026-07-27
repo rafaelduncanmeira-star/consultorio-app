@@ -3530,7 +3530,10 @@ function saveProc(e) {
     procs[editState.idx] = item;
   } else {
     // Evita duplicado
-    if (procs.some(p => p.nome.toLowerCase() === item.nome.toLowerCase())) {
+    // `p.nome` guardado: um único procedimento sem nome na coleção (gravado por
+    // versão anterior do copiloto, ou por backup importado) travava o salvamento
+    // de TODOS os procedimentos daí em diante.
+    if (procs.some(p => String(p.nome || '').toLowerCase() === item.nome.toLowerCase())) {
       toast('Já existe um procedimento com esse nome');
       return;
     }
@@ -10254,9 +10257,15 @@ function executeAIAction(action) {
   // Vale principalmente pras ações DESTRUTIVAS: sem nome, a busca de
   // agendamento casava com o primeiro da lista e cancelava/movia a consulta de
   // um paciente aleatório, avisando "feito" com o nome errado.
+  // `criar_procedimento` entrou aqui depois: sem nome, ele gravava um
+  // procedimento com `nome: undefined` na tabela de preços — e a partir daí o
+  // PRÓPRIO criar_procedimento e o saveProc lançam, porque os dois comparam
+  // `p.nome.toLowerCase()` percorrendo a lista. Resultado: a tela de Preços
+  // parava de salvar qualquer coisa, e só limpando o navegador voltava.
   const PRECISA_NOME = ['criar_paciente', 'criar_crm', 'criar_followup', 'criar_agendamento',
                         'cancelar_agendamento', 'mover_agendamento',
-                        'atualizar_status_crm', 'atualizar_pagamento'];
+                        'atualizar_status_crm', 'atualizar_pagamento',
+                        'criar_procedimento'];
   if (PRECISA_NOME.includes(tipo)) {
     const nome = String(dados.pacienteNome || dados.nome || '').trim();
     if (!nome) {
@@ -10446,6 +10455,14 @@ function executeAIAction(action) {
     }
 
   } else if (tipo === 'criar_bloqueio') {
+    // Sem data de início o bloqueio não barra horário nenhum (_isBloqueado e o
+    // sombreado do mês pulam registro sem dataInicio) e ainda aparece na lista
+    // como "Invalid Date". O médico vê o bloqueio na tela e a agenda segue
+    // oferecendo o horário — o mesmo estrago do bloqueio com hora invertida.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dados.dataInicio || ''))) {
+      appendChatMsg('system-ok', '⚠️ Faltou a data do bloqueio (ou veio fora do formato AAAA-MM-DD) — não bloqueei nada.');
+      return;
+    }
     const item = {
       id: 'blq_' + Date.now(),
       motivo: dados.motivo || 'Bloqueio',
@@ -10490,12 +10507,16 @@ function executeAIAction(action) {
 
   } else if (tipo === 'criar_procedimento') {
     const procs = getProcedimentos();
-    const existIdx = procs.findIndex(p => p.nome.toLowerCase() === (dados.nome||'').toLowerCase());
+    const existIdx = procs.findIndex(p => String(p.nome || '').toLowerCase() === (dados.nome || '').toLowerCase());
     const item = {
       id: existIdx >= 0 ? procs[existIdx].id : ('proc_' + Date.now()),
       nome: dados.nome,
-      valorPix: parseFloat(dados.valorPix) || 0,
-      valorCartao: parseFloat(dados.valorCartao) || parseFloat(dados.valorPix) || 0,
+      // impNormValor, como os outros caminhos do copiloto: o médico dita
+      // "mil e duzentos" e o LLM devolve "1.200,00", que o parseFloat cru lê
+      // como 1.2. E esse preço vira a SUGESTÃO de valor de toda consulta
+      // futura daquele procedimento — o erro se propaga sozinho.
+      valorPix: impNormValor(dados.valorPix),
+      valorCartao: impNormValor(dados.valorCartao) || impNormValor(dados.valorPix),
     };
     if (existIdx >= 0) procs[existIdx] = item; else procs.push(item);
     DB.set('procedimentos', procs);

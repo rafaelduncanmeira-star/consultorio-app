@@ -373,3 +373,71 @@ test('copiloto: meta ditada não vira NaN (que o JSON grava como null)', () => {
   assert.strictEqual(objs.metas.pac, 80);
   assert.ok(Number.isFinite(objs.metas.fat) && Number.isFinite(objs.metas.pac));
 });
+
+// ---------- o copiloto não pode envenenar a tabela de preços ----------
+// `criar_procedimento` não exigia nome e gravava `nome: dados.nome` cru. Um
+// procedimento com nome undefined na coleção faz o PRÓPRIO criar_procedimento e
+// o saveProc lançarem — os dois percorrem a lista comparando
+// `p.nome.toLowerCase()`. A tela de Preços parava de salvar qualquer coisa, e
+// só limpando o navegador voltava.
+function montarProc(procs = []) {
+  const banco = { procedimentos: JSON.parse(JSON.stringify(procs)) };
+  const msgs = [];
+  const s = require('./_extrair.js').carregar(
+    ['const:STATUS_PGTO', 'const:KANBAN_COLUNAS', '_statusPgtoCanonico', '_statusCrmCanonico',
+     'impNormValor', '_nomeNorm', '_nomeCasaParcial', '_acharPorNome', '_acharCrmPorNome',
+     'executeAIAction'], {
+    JSON, Array, Object, Date, Math, String, Number, parseFloat, parseInt, isNaN, RegExp, console,
+    DB: {
+      get: (k) => JSON.parse(JSON.stringify(banco[k] || [])),
+      set: (k, v) => { banco[k] = JSON.parse(JSON.stringify(v)); },
+      getObj: (k, def) => def, setObj: () => {},
+    },
+    getProcedimentos: () => JSON.parse(JSON.stringify(banco.procedimentos)),
+    _novoId: (p) => p + '_novo', currentProfissionalId: null, _profDoPaciente: () => null,
+    appendChatMsg: (_r, t) => msgs.push(t), BRL: (v) => 'R$ ' + v, formatDate: (d) => d,
+    document: { getElementById: () => ({ classList: { contains: () => false } }) },
+    renderDashboard: () => {}, renderPacientes: () => {}, renderCrm: () => {},
+    renderFollowup: () => {}, renderDespesas: () => {}, renderPrecos: () => {}, renderAgenda: () => {},
+  });
+  return { executeAIAction: s.executeAIAction, banco, msgs };
+}
+
+test('copiloto: recusa procedimento sem nome em vez de envenenar a lista', () => {
+  const a = montarProc();
+  a.executeAIAction({ tipo: 'criar_procedimento', dados: { valorPix: 500 } });
+  assert.deepStrictEqual(a.banco.procedimentos, [],
+    'procedimento com nome undefined trava o salvamento de todos os outros');
+  assert.match(a.msgs.join(' '), /Faltou o nome/);
+});
+
+// O preço do procedimento vira a SUGESTÃO de valor de toda consulta futura
+// daquele tipo — parseFloat("1.200,00") = 1.2 se propaga sozinho daí em diante.
+test('copiloto: preço do procedimento passa pelo mesmo normalizador dos outros', () => {
+  const a = montarProc();
+  a.executeAIAction({ tipo: 'criar_procedimento', dados: { nome: 'Botox', valorPix: '1.200,00' } });
+  assert.strictEqual(a.banco.procedimentos.length, 1);
+  assert.strictEqual(a.banco.procedimentos[0].nome, 'Botox');
+  assert.strictEqual(a.banco.procedimentos[0].valorPix, 1200);
+});
+
+test('copiloto: lista já envenenada não impede criar procedimento novo', () => {
+  const a = montarProc([{ id: 'p1', valorPix: 0 }]);   // sem nome, de versão anterior
+  assert.doesNotThrow(() =>
+    a.executeAIAction({ tipo: 'criar_procedimento', dados: { nome: 'Retorno', valorPix: 0 } }));
+  assert.strictEqual(a.banco.procedimentos.length, 2);
+});
+
+test('saveProc: procedimento sem nome na coleção não trava o salvamento', () => {
+  const src = require('./_extrair.js').recortarFuncao('saveProc').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /String\(p\.nome \|\| ''\)\.toLowerCase\(\)/,
+    'um registro sem nome fazia a tela de Preços parar de salvar de vez');
+});
+
+test('copiloto: bloqueio sem data não é gravado', () => {
+  const a = montarProc();
+  a.executeAIAction({ tipo: 'criar_bloqueio', dados: { motivo: 'Congresso' } });
+  assert.deepStrictEqual(a.banco.bloqueios, undefined,
+    'bloqueio sem dataInicio não barra horário nenhum e aparece como Invalid Date');
+  assert.match(a.msgs.join(' '), /Faltou a data do bloqueio/);
+});
