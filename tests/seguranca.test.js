@@ -501,3 +501,32 @@ test('_migrarIds usa a versão estrita, não a que chuta', () => {
   assert.doesNotMatch(src, /[^A-Za-z]_profDoPaciente\(/,
     'a versão que cai no profissional logado não pode voltar pra migração');
 });
+
+// ---------- botão travado para sempre ----------
+// Estas funções desabilitam o botão ANTES de operações assíncronas e são
+// chamadas direto de um onclick — que não tem catch. Qualquer exceção (rede
+// caindo no meio do login, uma tela do _iniciarApp() quebrando ao renderizar)
+// rejeitava a promise em silêncio e deixava "Entrando…" travado PARA SEMPRE,
+// sem mensagem. A pessoa acha que errou a senha, tenta de novo, e o botão nem
+// responde: só recarregando a página.
+const { recortarFuncao: _rec } = require('./_extrair.js');
+
+for (const [fn, rotulo] of [['doLogin', 'Entrar'], ['doSignup', 'Criar conta gratuita'],
+                            ['confirmar2FA', 'Ativar 2FA']]) {
+  test(`${fn}: o botão volta mesmo se o await lançar`, () => {
+    const src = _rec(fn).replace(/\/\/[^\n]*/g, '');
+    assert.match(src, /\bdisabled\s*=\s*true/, 'a premissa: a função trava o botão');
+    assert.match(src, /\}\s*finally\s*\{[\s\S]*?disabled\s*=\s*false/,
+      `${fn} precisa restaurar o botão num finally — só nos caminhos felizes não basta`);
+    assert.match(src, new RegExp(`finally\\s*\\{[\\s\\S]*?${rotulo}`),
+      'e restaurar também o texto, senão fica "Entrando…" num botão clicável');
+  });
+}
+
+test('doLogin: exceção no meio do login derruba a sessão (falha fechado)', () => {
+  const src = _rec('doLogin').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /catch \(e\) \{[\s\S]*?signOut\(\)/,
+    'não dá pra saber onde parou — seguir com a sessão pela metade é pior que pedir de novo');
+  assert.match(src, /catch \(e\) \{[\s\S]*?errEl\.style\.display = 'block'/,
+    'e a pessoa tem de ver uma mensagem, não um botão morto');
+});

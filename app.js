@@ -1028,9 +1028,19 @@ async function doSignup() {
 
   btn.textContent = 'Criando…';
   btn.disabled = true;
-  const result = await signUpUser(email, password, nome, role);
-  btn.textContent = 'Criar conta gratuita';
-  btn.disabled = false;
+  // Sem catch, um throw aqui deixava "Criando…" travado para sempre e a pessoa
+  // sem saber se a conta foi criada ou não (ver doLogin).
+  let result;
+  try {
+    result = await signUpUser(email, password, nome, role);
+  } catch (e) {
+    errEl.textContent = 'Não foi possível criar a conta agora (' + ((e && e.message) || 'erro inesperado') + '). Tente novamente.';
+    errEl.style.display = 'block';
+    return;
+  } finally {
+    btn.textContent = 'Criar conta gratuita';
+    btn.disabled = false;
+  }
 
   // Salva o modo escolhido (em clinica_config, que sincroniza)
   if (!result || !result.error) {
@@ -1161,39 +1171,52 @@ async function doLogin() {
   btn.disabled = true;
   errEl.style.display = 'none';
 
-  const result = await loginUser(email, password);
-
-  if (result && result.error) {
-    errEl.textContent = result.error;
-    errEl.style.display = 'block';
-    btn.textContent = 'Entrar';
-    btn.disabled = false;
-    return;
-  }
-
-  // Sucesso — verifica se precisa de 2FA
-  const mfaCheck = await mfaVerificarSeNecessario();
-  // `error` aqui significa "não consegui confirmar a segunda etapa". Era
-  // ignorado, e o _iniciarApp() rodava assim mesmo — entrando sem 2FA.
-  if (mfaCheck.error) {
-    await _supa.auth.signOut().catch(() => {});
-    errEl.textContent = mfaCheck.error;
-    errEl.style.display = 'block';
-    btn.textContent = 'Entrar'; btn.disabled = false;
-    return;
-  }
-  if (mfaCheck.needsCode) {
-    const ok = await pedir2FACodigo();
-    if (!ok) {
-      // Cancelou 2FA — derruba a sessão (ela existe em aal1) e força novo login
-      await _supa.auth.signOut().catch(() => {});
-      errEl.textContent = 'Verificação 2FA cancelada. Faça login novamente.';
+  // O botão é desabilitado ANTES de quatro operações assíncronas, e nenhuma
+  // delas estava protegida. Qualquer exceção — rede caindo no meio do
+  // signInWithPassword, uma tela do _iniciarApp() quebrando na renderização —
+  // rejeitava a promise em silêncio (o chamador é um onclick, não tem catch) e
+  // deixava "Entrando…" travado PARA SEMPRE, sem mensagem nenhuma. A pessoa
+  // conclui que errou a senha, tenta de novo, e o botão nem responde: só
+  // recarregando a página. O `finally` garante que o botão sempre volta.
+  try {
+    const result = await loginUser(email, password);
+    if (result && result.error) {
+      errEl.textContent = result.error;
       errEl.style.display = 'block';
-      btn.textContent = 'Entrar'; btn.disabled = false;
       return;
     }
+
+    // Sucesso — verifica se precisa de 2FA
+    const mfaCheck = await mfaVerificarSeNecessario();
+    // `error` aqui significa "não consegui confirmar a segunda etapa". Era
+    // ignorado, e o _iniciarApp() rodava assim mesmo — entrando sem 2FA.
+    if (mfaCheck.error) {
+      await _supa.auth.signOut().catch(() => {});
+      errEl.textContent = mfaCheck.error;
+      errEl.style.display = 'block';
+      return;
+    }
+    if (mfaCheck.needsCode) {
+      const ok = await pedir2FACodigo();
+      if (!ok) {
+        // Cancelou 2FA — derruba a sessão (ela existe em aal1) e força novo login
+        await _supa.auth.signOut().catch(() => {});
+        errEl.textContent = 'Verificação 2FA cancelada. Faça login novamente.';
+        errEl.style.display = 'block';
+        return;
+      }
+    }
+    _iniciarApp();
+  } catch (e) {
+    // Falhar FECHADO: não há como saber em que ponto parou, e seguir para o app
+    // com a sessão pela metade é pior que pedir de novo.
+    await (_supa?.auth?.signOut() || Promise.resolve()).catch(() => {});
+    errEl.textContent = 'Não foi possível entrar agora (' + ((e && e.message) || 'erro inesperado') + '). Tente novamente.';
+    errEl.style.display = 'block';
+  } finally {
+    btn.textContent = 'Entrar';
+    btn.disabled = false;
   }
-  _iniciarApp();
 }
 
 // Mostra modal de boas-vindas (após signup ou primeiro login)
@@ -11879,8 +11902,17 @@ async function confirmar2FA() {
     return;
   }
   btn.textContent = 'Verificando…'; btn.disabled = true;
-  const result = await mfaVerificarPrimeiroCodigo(_mfa_pending_factor_id, code);
-  btn.textContent = 'Ativar 2FA'; btn.disabled = false;
+  // Idem doLogin: throw aqui travava o botão de ativar o 2FA para sempre.
+  let result;
+  try {
+    result = await mfaVerificarPrimeiroCodigo(_mfa_pending_factor_id, code);
+  } catch (e) {
+    errEl.textContent = 'Não foi possível verificar o código agora. Tente de novo.';
+    errEl.style.display = '';
+    return;
+  } finally {
+    btn.textContent = 'Ativar 2FA'; btn.disabled = false;
+  }
   if (result.error) {
     errEl.textContent = 'Código incorreto: ' + result.error;
     errEl.style.display = '';
