@@ -281,6 +281,99 @@ test('_lerTodasBlindada: funciona com max-rows menor que a página pedida', asyn
   assert.strictEqual(new Set(data.map(r => r.data.id)).size, 1200, 'sem repetição nem buraco');
 });
 
+// ---------- Anti-zeramento: proteger sem ressuscitar ----------
+const PULL_FNS = ['const:_OUTBOX_TETO', '_outboxGet', '_outboxPendente',
+                  '_lerTodasBlindada', '_pullBlindada'];
+const CFG_PAC = { tabela: 'clinica_atendimentos', flag: 'consult_atend_migrado' };
+
+function sandboxPull(ls, totalNoServidor) {
+  return carregar(PULL_FNS, {
+    localStorage: ls, JSON, console: mudo,
+    _supa: supaPull(totalNoServidor, 1000),
+    currentUser: { id: 'dono' }, currentDataOwner: 'dono',
+  });
+}
+
+// O achado: pull vazio com dados locais re-marcava a migração, e o push seguinte
+// re-subia o array local — ressuscitando no servidor tudo que o usuário tinha
+// acabado de apagar no celular.
+test('_pullBlindada: aparelho que já leu linhas reflete a exclusão, não ressuscita', async () => {
+  const ls = fakeLS({
+    'consult_pacientes': JSON.stringify([{ id: 'p1' }, { id: 'p2' }]),
+    'consult_pacientes_msync': '1',   // este aparelho já leu linhas da tabela
+    'consult_atend_migrado': '1',
+  });
+  const s = sandboxPull(ls, 0);
+  await s._pullBlindada('pacientes', CFG_PAC);
+  assert.deepStrictEqual(JSON.parse(ls._store['consult_pacientes']), [],
+    'servidor zerado + aparelho já sincronizado = exclusão real');
+  assert.strictEqual(ls._store['consult_atend_migrado'], '1',
+    'a migração NÃO pode ser re-armada — é ela que re-subiria os registros apagados');
+});
+
+// A proteção original continua valendo onde ela faz sentido: aparelho que nunca
+// leu linha nenhuma da tabela — aí o vazio sugere migração perdida, não exclusão.
+test('_pullBlindada: aparelho que nunca sincronizou mantém o local e re-arma a migração', async () => {
+  const ls = fakeLS({
+    'consult_pacientes': JSON.stringify([{ id: 'p1' }, { id: 'p2' }]),
+    'consult_atend_migrado': '1',     // sem _msync: nunca leu linha da tabela
+  });
+  const s = sandboxPull(ls, 0);
+  await s._pullBlindada('pacientes', CFG_PAC);
+  assert.strictEqual(JSON.parse(ls._store['consult_pacientes']).length, 2, 'local preservado');
+  assert.ok(!('consult_atend_migrado' in ls._store), 'migração re-armada pra auto-cura');
+});
+
+test('_pullBlindada: pull com linhas grava e marca o aparelho como sincronizado', async () => {
+  const ls = fakeLS({ 'consult_pacientes': JSON.stringify([{ id: 'antigo' }]) });
+  const s = sandboxPull(ls, 3);
+  await s._pullBlindada('pacientes', CFG_PAC);
+  assert.strictEqual(JSON.parse(ls._store['consult_pacientes']).length, 3);
+  assert.strictEqual(ls._store['consult_pacientes_msync'], '1');
+});
+
+// ---------- Fila serial por chave ----------
+// "Excluir" e logo "desfazer" viravam dois pushes concorrentes; se o servidor
+// confirmasse na ordem trocada, a nuvem ficava com o estado do meio.
+test('_enfileirarPush: respeita a ordem mesmo quando o 2º push é mais rápido', async () => {
+  const { _enfileirarPush } = carregar(['const:_filaPush', '_enfileirarPush'], { Promise, setTimeout });
+  const ordem = [];
+  const p1 = _enfileirarPush('crm', () => new Promise(r => setTimeout(() => { ordem.push('exclui'); r(1); }, 30)));
+  const p2 = _enfileirarPush('crm', () => new Promise(r => { ordem.push('desfaz'); r(2); }));
+  await Promise.all([p1, p2]);
+  assert.deepStrictEqual(ordem, ['exclui', 'desfaz'], 'o 2º só começa depois que o 1º termina');
+});
+
+test('_enfileirarPush: um push que falha não trava a fila daquela chave', async () => {
+  const { _enfileirarPush } = carregar(['const:_filaPush', '_enfileirarPush'], { Promise, setTimeout });
+  await _enfileirarPush('crm', () => Promise.reject(new Error('offline'))).catch(() => {});
+  assert.strictEqual(await _enfileirarPush('crm', () => Promise.resolve('ok')), 'ok');
+});
+
+test('_enfileirarPush: chaves diferentes não esperam uma pela outra', async () => {
+  const { _enfileirarPush } = carregar(['const:_filaPush', '_enfileirarPush'], { Promise, setTimeout });
+  const ordem = [];
+  const lento = _enfileirarPush('crm', () => new Promise(r => setTimeout(() => { ordem.push('crm'); r(); }, 30)));
+  const rapido = _enfileirarPush('despesas', () => { ordem.push('despesas'); return Promise.resolve(); });
+  await Promise.all([lento, rapido]);
+  assert.deepStrictEqual(ordem, ['despesas', 'crm']);
+});
+
+// ---------- cloudPush: entrada zumbi ----------
+// Sem nada local pra enviar, cloudPush saía sem tirar a chave da fila. Como o
+// pull pula chave pendente, aquela chave parava de ser baixada pra sempre.
+test('cloudPush: chave sem valor local sai da fila em vez de bloquear o pull', async () => {
+  const ls = fakeLS({ 'consult__outbox': JSON.stringify({ despesas: { tipo: 'blob', tentativas: 1 } }) });
+  const s = carregar(['const:_OUTBOX_TETO', '_outboxGet', '_outboxAdd', '_outboxRemove',
+                      '_outboxPendente', 'cloudPush'], {
+    localStorage: ls, JSON, Date, console: mudo,
+    _supa: {}, currentUser: { id: 'u1' }, currentDataOwner: null,
+  });
+  assert.strictEqual(s._outboxPendente('despesas'), true, 'começa pendente');
+  await s.cloudPush('despesas');   // não há consult_despesas no localStorage
+  assert.strictEqual(s._outboxPendente('despesas'), false, 'zumbi removido, pull liberado');
+});
+
 test('_lerTodasBlindada: coleção vazia e erro de banco não viram lista falsa', async () => {
   const vazio = carregar('_lerTodasBlindada', { _supa: supaPull(0, 1000), console: mudo });
   const r0 = await vazio._lerTodasBlindada('t', 'u1');

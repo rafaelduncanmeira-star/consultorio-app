@@ -257,7 +257,10 @@ async function cloudPush(key) {
   if (!_supa || !currentUser) return;
   const owner = currentDataOwner || currentUser.id;
   const raw = localStorage.getItem('consult_' + key);
-  if (raw === null) return;
+  // Não há nada local pra enviar. Se a chave estava na fila, tem de sair dela:
+  // entrada zumbi nunca é entregue e, como o pull pula chave pendente, aquela
+  // chave parava de ser baixada do servidor pra sempre.
+  if (raw === null) { _outboxRemove(key); return; }
   try {
     const ok = await _pushComRev(owner, key, JSON.parse(raw));
     if (ok) _outboxRemove(key); else _outboxAdd(key, 'blob');
@@ -497,9 +500,17 @@ async function _pullBlindada(key, cfg) {
     if (arr.length === 0 && atual.length > 0) {
       const souDono = (currentDataOwner || currentUser.id) === currentUser.id;
       if (souDono) {
-        console.warn('_pullBlindada: pull vazio com dados locais (' + key + ') — mantendo local e re-marcando migração');
-        localStorage.removeItem(cfg.flag); // força re-migração no próximo ciclo (auto-cura)
-        return;
+        // A auto-cura só vale enquanto este aparelho NUNCA leu linha nenhuma
+        // desta coleção na tabela — aí um vazio de fato sugere migração perdida.
+        // Depois que ele já leu, vazio é deleção real feita em outro aparelho:
+        // re-marcar a migração fazia o push seguinte RESSUSCITAR tudo no servidor,
+        // desfazendo a exclusão que o usuário tinha acabado de fazer no celular.
+        if (localStorage.getItem(msyncFlag) !== '1') {
+          console.warn('_pullBlindada: pull vazio com dados locais (' + key + ') — mantendo local e re-marcando migração');
+          localStorage.removeItem(cfg.flag); // força re-migração no próximo ciclo (auto-cura)
+          return;
+        }
+        console.warn('_pullBlindada: coleção zerada no servidor (' + key + ') — refletindo a exclusão');
       }
       // Membro: só confia num vazio DEPOIS de já ter sincronizado linhas uma vez
       // (evita apagar local por glitch de RLS/timing no 1º load). A partir daí,
@@ -999,6 +1010,15 @@ async function doSignup() {
 
 // Logout
 async function logoutUser() {
+  // O logout apaga TODO o consult_* — inclusive o outbox. Escrita que ainda não
+  // chegou ao servidor morre aí, em silêncio: some do aparelho e nunca existiu
+  // na nuvem. Última chance de entregar, e se sobrar algo quem decide é o usuário.
+  try { await _drenarOutbox(); } catch(e) { console.warn('logout: drenar outbox —', e.message); }
+  const pendentes = Object.keys(_outboxGet());
+  if (pendentes.length && !confirm(
+      'Estas alterações ainda não foram salvas na nuvem:\n\n  ' + pendentes.join(', ') +
+      '\n\nSair agora vai descartá-las neste aparelho. Sair mesmo assim?')) return;
+
   _auditLog('logout', 'sistema', `Saiu do sistema`);
   if (_supa) await _supa.auth.signOut();
   currentUser = null;
@@ -1415,8 +1435,24 @@ function setGeminiKey(key) {
 }
 
 // ====================== ESTADO DA APP ======================
+
+// Fila serial POR CHAVE. Sem ela, duas gravações seguidas na mesma coleção
+// ("excluir" e logo o "desfazer") viravam dois pushes concorrentes e o servidor
+// podia confirmar na ordem trocada — o estado final da nuvem ficava sendo o do
+// meio, não o que está na tela. O `old` de cada push é lido no momento da
+// chamada (localStorage é síncrono), então cada diff continua correto.
+const _filaPush = {};
+function _enfileirarPush(key, tarefa) {
+  const atual = (_filaPush[key] || Promise.resolve()).then(tarefa, tarefa);
+  _filaPush[key] = atual.catch(() => {});
+  return atual;
+}
+
 const DB = {
   get: (key) => JSON.parse(localStorage.getItem('consult_' + key) || '[]'),
+  // Devolve Promise<boolean>: true = o servidor confirmou. Quase todo mundo
+  // chama sem await (a UI não espera a nuvem) — mas quem precisa saber se a
+  // gravação chegou ANTES de dar o passo seguinte irreversível pode esperar.
   set: (key, val) => {
     // Blindagem: coleções sensíveis sincronizam na tabela por linha (não no "pacote único")
     const cfg = _BLINDADAS[key];
@@ -1425,18 +1461,20 @@ const DB = {
       localStorage.setItem('consult_' + key, JSON.stringify(val));
       // Falhou (offline/RLS)? Vai pra outbox — o pull não sobrescreve e a fila
       // re-entrega quando a conexão voltar.
-      _pushBlindada(cfg.tabela, old, val)
-        .then(ok => { if (ok) _outboxRemove(key); else _outboxAdd(key, 'blindada'); })
-        .catch(() => _outboxAdd(key, 'blindada'));
-      return;
+      return _enfileirarPush(key, () => _pushBlindada(cfg.tabela, old, val)
+        .then(ok => { if (ok) _outboxRemove(key); else _outboxAdd(key, 'blindada'); return ok; })
+        .catch(() => { _outboxAdd(key, 'blindada'); return false; }));
     }
     localStorage.setItem('consult_' + key, JSON.stringify(val));
-    cloudPush(key);
+    // cloudPush já enfileira sozinho quando falha — sair da fila é a confirmação.
+    return _enfileirarPush(key, () => cloudPush(key)
+      .then(() => !(key in _outboxGet())).catch(() => false));
   },
   getObj: (key, def = {}) => JSON.parse(localStorage.getItem('consult_' + key) || JSON.stringify(def)),
   setObj: (key, val) => {
     localStorage.setItem('consult_' + key, JSON.stringify(val));
-    cloudPush(key);
+    return _enfileirarPush(key, () => cloudPush(key)
+      .then(() => !(key in _outboxGet())).catch(() => false));
   },
 };
 
@@ -12444,11 +12482,19 @@ async function syncLeadsFromSupabase() {
     });
 
     if (ids.length > 0) {
-      DB.set('crm', crm);
-      await _supa.from('crm_leads').update({ processado: true }).in('id', ids);
+      // `processado: true` é um caminho sem volta: o lead nunca mais volta neste
+      // select. Marcar antes de confirmar a gravação do CRM perdia o contato de
+      // vez quando o push era recusado (RLS) ou o aparelho estava offline.
+      const gravou = await DB.set('crm', crm);
       if (novos > 0 && document.getElementById('page-crm')?.classList.contains('active')) {
         renderCrm();
       }
+      if (!gravou) {
+        console.warn('[WhatsApp] CRM não chegou ao servidor — leads seguem pendentes pro próximo ciclo');
+        return;
+      }
+      const { error: eMarca } = await _supa.from('crm_leads').update({ processado: true }).in('id', ids);
+      if (eMarca) { console.warn('[WhatsApp] leads não marcados como processados:', eMarca.message); return; }
       console.log(`[WhatsApp] ${novos} novo(s) lead(s) incorporado(s) ao CRM`);
     }
   } catch(e) {
