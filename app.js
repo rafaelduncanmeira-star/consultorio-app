@@ -850,19 +850,31 @@ async function _acceptInviteIfPending() {
   if (!_supa || !currentUser) return;
   const token = localStorage.getItem('consult_pending_invite');
   if (!token) return;
-  localStorage.removeItem('consult_pending_invite');
+  // NÃO apaga o token antes de saber o resultado. O _checkInviteFromUrl limpa a
+  // URL assim que lê o convite, então este localStorage é o ÚNICO lugar onde ele
+  // existe: apagando antes, uma falha de rede no meio do primeiro login queimava
+  // um convite perfeitamente válido, e a pessoa convidada precisava pedir outro
+  // link ao dono — sem entender por quê. Mesmo erro do `processado: true` dos
+  // leads, que já custou contato.
+  // Regra: só apaga quando o SERVIDOR se pronuncia. Erro de transporte é "não
+  // sei", não "inválido".
+  const descartarConvite = () => localStorage.removeItem('consult_pending_invite');
   try {
     // Aceite via função SECURITY DEFINER (valida token + insere membro
     // + marca aceito, tudo server-side, sem expor tokens de terceiros)
     const { data, error } = await _supa.rpc('accept_invite', { invite_token: token });
     if (error) {
+      // Transporte: o convite continua guardado e será tentado no próximo login.
       console.warn('accept_invite RPC error:', error.message);
       if (typeof toast === 'function') {
-        setTimeout(() => toast('⚠️ Não foi possível aceitar o convite. Peça um novo link.', 4000), 1500);
+        setTimeout(() => toast('⚠️ Não consegui aceitar o convite agora — vou tentar de novo no próximo acesso.', 5000), 1500);
       }
       return;
     }
     if (data && data.error) {
+      // O servidor respondeu: expirado, e-mail diferente, já usado. Insistir não
+      // muda nada, e guardar o token faria a mensagem reaparecer a cada login.
+      descartarConvite();
       console.warn('accept_invite:', data.error);
       if (typeof toast === 'function') {
         setTimeout(() => toast('⚠️ ' + data.error, 4000), 1500);
@@ -870,6 +882,7 @@ async function _acceptInviteIfPending() {
       return;
     }
     if (data && data.ok) {
+      descartarConvite();
       currentRole = data.role || currentRole;
       if (data.profissional_id) currentProfissionalId = data.profissional_id;
       if (typeof toast === 'function') {
