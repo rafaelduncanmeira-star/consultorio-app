@@ -111,6 +111,14 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- 🔴 **CSV do Excel em pt-BR vem em latin1.** Lido como UTF-8, cada acento vira `U+FFFD`:
+  "José Conceição" entra "Jos� Concei��o" e o paciente nunca mais casa com o cadastro que
+  já existia. Releia em `ISO-8859-1` quando aparecer `�`. **O comentário no código
+  prometia essa releitura e ela não existia** — comentário que descreve comportamento
+  inexistente é pior que comentário nenhum: quem lê confia e não confere.
+- **Todo `FileReader` precisa de `onerror`.** Sem ele o `onload` nunca dispara e a tela
+  espera para sempre, calada — e no `importarJSON` o `input.value = ''` também ficava sem
+  rodar, então reescolher o mesmo arquivo não disparava evento nenhum. Há teste varrendo.
 - 🔴 **Data importada tem de EXISTIR, não só ter o formato.** `impNormDate` devolvia
   `2026-02-31` e `2026-13-13` como válidos, e a tela contava a linha como sucesso.
   `getMes('2026-13-13')` = `'2026-13'`: o atendimento some de **todo** filtro por mês mas
