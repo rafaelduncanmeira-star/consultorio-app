@@ -11394,6 +11394,12 @@ const BACKUP_KEYS = [
   'procedimentos','agenda_config','metas','metas_proc','metas_proc_valor',
   // Programas (cuidado longitudinal e assinaturas)
   'programas','inscricoes',
+  // Equipe. Estava FALTANDO: todo registro guarda `profissionalId`, e sem esta
+  // coleção os ids apontam pro vazio — some a cor na agenda, o filtro por
+  // profissional fica sem opções e o REPASSE (quanto cada um recebe) se perde.
+  // O caso que dói: excluir um profissional por engano e restaurar o snapshot
+  // do dia anterior não desfazia nada, porque o snapshot nunca teve a chave.
+  'profissionais',
   // Personalização do consultório
   'clinica_config',
   // Integrações

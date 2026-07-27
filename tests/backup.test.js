@@ -126,3 +126,47 @@ test('importarJSON: limpa o input em todos os caminhos (senão o mesmo arquivo n
     assert.strictEqual(a.input.value, '');
   }
 });
+
+// ---------- nenhuma coleção pode ficar de fora do backup ----------
+// BACKUP_KEYS manda em QUATRO rotas: exportarJSON, o snapshot automático,
+// restaurarSnapshot e importarJSON. Chave que falta ali não é salva por
+// nenhuma delas — e o buraco só aparece no dia em que a pessoa precisa
+// restaurar. `profissionais` ficou de fora: todo registro guarda
+// `profissionalId`, então sem ela os ids apontam pro vazio (some a cor na
+// agenda, o filtro fica sem opções, o repasse de cada um se perde), e
+// restaurar o snapshot do dia anterior não desfazia uma exclusão por engano,
+// porque o snapshot nunca teve a chave.
+
+// Preferência de tela, não dado do consultório. Restaurar um backup não deve
+// trocar a visualização (kanban/tabela) que a pessoa está usando agora.
+const FORA_DO_BACKUP_DE_PROPOSITO = ['crm_view'];
+
+test('backup: toda coleção gravada pelo app está em BACKUP_KEYS', () => {
+  const { fonte, carregar } = require('./_extrair.js');
+  const { BACKUP_KEYS } = carregar('const:BACKUP_KEYS', {});
+  const gravadas = new Set(
+    [...fonte.matchAll(/DB\.set(?:Obj)?\('([a-z_0-9]+)'/g)].map(m => m[1])
+  );
+  const faltando = [...gravadas]
+    .filter(k => !BACKUP_KEYS.includes(k) && !FORA_DO_BACKUP_DE_PROPOSITO.includes(k))
+    .sort();
+  assert.deepStrictEqual(faltando, [],
+    'estas coleções o app grava mas nenhum backup salva');
+});
+
+test('backup: as exceções ainda existem (não viraram órfãs)', () => {
+  const { fonte } = require('./_extrair.js');
+  for (const k of FORA_DO_BACKUP_DE_PROPOSITO) {
+    assert.match(fonte, new RegExp(`DB\\.set(?:Obj)?\\('${k}'`),
+      `${k} não é mais gravado — tire da lista de exceções em vez de deixar mentindo`);
+  }
+});
+
+test('backup: internos de sincronização NÃO podem entrar no backup', () => {
+  const { carregar } = require('./_extrair.js');
+  const { BACKUP_KEYS } = carregar('const:BACKUP_KEYS', {});
+  for (const k of ['_outbox', '_quarentena', '_revs']) {
+    assert.ok(!BACKUP_KEYS.includes(k),
+      `${k} é estado de sincronização — restaurar isso reenvia ou requarentena coisa velha`);
+  }
+});
