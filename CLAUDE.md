@@ -170,10 +170,12 @@ Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
   **`_signOutIntencional`**, senão o aviso dispara nos fluxos de login e esconde a
   mensagem verdadeira.
 - 🔴 **Canal de realtime cai — e leva o CRM junto.** Depois do login, o realtime é a
-  ÚNICA porta por onde um lead do WhatsApp entra. `subscribe()` **sempre** com callback de
-  status: `SUBSCRIBED` varre o que chegou durante a queda, `CHANNEL_ERROR`/`TIMED_OUT`
-  reconectam. **`CLOSED` não** — ele chega quando somos nós removendo o canal, e reagir
-  faz laço infinito. `online` e `visibilitychange` chamam `_revisarCanalLeads()`.
+  ÚNICA porta por onde um lead do WhatsApp entra — e o canal do CHAT é a única por onde
+  chega mensagem na conversa aberta. `subscribe()` **sempre** com callback de status:
+  `SUBSCRIBED` varre o que chegou durante a queda, `CHANNEL_ERROR`/`TIMED_OUT` reconectam.
+  **`CLOSED` não** — ele chega quando somos nós removendo o canal, e reagir faz laço
+  infinito. `online` e `visibilitychange` chamam `_revisarCanalLeads()`, que cuida dos
+  **dois** canais. Vale pra qualquer canal novo.
 - 🔴 **Falha de envio precisa aparecer E ter segunda chance.** `_lembreteErro` era gravado
   no agendamento e nunca lido; o toast só saía no sucesso; e `cfg.ultimoEnvio` era
   carimbado mesmo com 100% de falha, bloqueando a retentativa pelo resto do dia — no dia
