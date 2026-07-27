@@ -225,6 +225,15 @@ Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
   já tem identidade: o telefone. `_crmPorTelefone(_chatPhone)`, resolvido na hora do uso.
   Corolário de nomes: variável que recebe `_waConnected()` **não** se chama `zapiOk` — foi
   esse nome que convidou a regressão do card de lembretes. Há teste reprovando.
+- 🔴 **Rótulo de `<optgroup>` NÃO é valor gravado.** O gráfico do Dashboard e a tabela do
+  relatório agrupavam despesa por `['Estrutura','Pessoal','Profissional',…]` — os rótulos dos
+  grupos —, mas o select grava a opção (`Aluguel`, `Salários`, `Contador`). Aluguel e salário
+  não caíam em balde nenhum: o gráfico somava uma fração do total e a tabela do contador
+  tinha percentuais que não fecham 100% (denominador real, numerador incompleto). Agrupe
+  pelas categorias **reais** dos lançamentos (`_despesasPorCategoria`); a tela de Despesas já
+  fazia isso e as outras duas ficaram para trás.
+- **Todo `<select>` recebe `_opcaoLegadaSeFaltar` antes de `.value = …`.** Valor inexistente
+  deixa `selectedIndex = -1` e o save devolve `''`: abrir e salvar **apaga o campo**.
 - **Forma de pagamento é vocabulário: `FORMAS_PAGAMENTO` + `_pagamentoCanonico`.** Era o
   terceiro campo de vocabulário do atendimento e o único sem canonizador — `"pix"` sumia das
   **três** tabelas de Mix (que casam por igualdade exata) e do `TAXA_PAGAMENTO`, e as linhas
