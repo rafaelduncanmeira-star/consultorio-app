@@ -2,7 +2,9 @@
 // Estratégia: network-first com fallback para cache (para um app que muda muito,
 // é melhor sempre tentar a rede primeiro e só cair no cache se estiver offline).
 
-const CACHE_NAME = 'consultorio-v2';
+// v3: o activate apaga os caches de nome diferente, então subir a versão é o
+// que limpa a resposta ruim que a v2 podia ter gravado (ver o fetch abaixo).
+const CACHE_NAME = 'consultorio-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -43,11 +45,23 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(req)
       .then((res) => {
-        // Atualiza o cache em background com a resposta nova
-        const resClone = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(req, resClone).catch(() => {}));
+        // Só guarda resposta BOA. Sem o res.ok, um 500 ou uma página de erro
+        // servida durante um deploy era gravada no lugar do app.js — e a
+        // próxima abertura offline entregava esse lixo como se fosse o app.
+        if (res && res.ok) {
+          const resClone = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(req, resClone).catch(() => {}));
+        }
         return res;
       })
-      .catch(() => caches.match(req).then((cached) => cached || caches.match('./index.html')))
+      .catch(() => caches.match(req).then((cached) => {
+        if (cached) return cached;
+        // index.html só responde por NAVEGAÇÃO. Devolver o HTML no lugar de um
+        // .js ou de uma imagem não salva nada: o navegador tenta executar
+        // HTML como script e a página quebra de um jeito bem mais confuso do
+        // que uma falha de rede honesta.
+        if (req.mode === 'navigate') return caches.match('./index.html');
+        return Response.error();
+      }))
   );
 });
