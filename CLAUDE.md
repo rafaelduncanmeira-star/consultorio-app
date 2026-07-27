@@ -138,6 +138,19 @@ Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 - **Ação destrutiva que sai do app (mensagem, e-mail) grava a marca de "já fiz" ANTES do
   próximo item.** Guardar pro fim do laço perde tudo se o app fechar no meio — e
   `rodarCicloLembretes` dispara sozinho 5s depois de abrir, ~1s por paciente.
+- **`_foneE164BR` é a única forma de montar o número pra Cloud API.** `startsWith('55')`
+  sozinho confunde DDI com o DDD 55 e o lembrete ia pra outro estado. Quatro pontos usam a
+  mesma regra hoje; um teste compara com o 1º candidato do Z-API número a número.
+- **Migração não chuta dono.** `_migrarIds` roda a cada `cloudPull`; usar `_profDoPaciente`
+  (que cai no profissional logado) fazia o primeiro a abrir o app levar pra si todos os
+  registros sem dono — e o RLS some com eles pros outros. Use `_profDoPacienteEstrito`.
+- **O prompt que o médico LÊ tem de ser o que o servidor MANDA.** O preview do app exibia
+  "não confirme o agendamento" sempre, e o webhook não dizia nada sobre agendar quando
+  `agendar` está desligado (o padrão) — a IA respondia "marquei!" sem marcar. Os textos
+  são comparados literalmente em `tests/webhook.test.js`.
+- ⚠️ **O `wa-webhook` é publicado à MÃO.** Corrigir o arquivo não põe nada no ar. Ao mexer:
+  suba `WEBHOOK_VERSAO` (há teste) e **avise o usuário pra republicar**. Pra saber o que
+  está rodando, abra a URL do webhook — ela responde `wa-webhook ativo · versao AAAA-MM-DD`.
 
 #### 🔴 Padrão que mais rendeu: pergunta ao banco com o `error` descartado
 
@@ -173,10 +186,28 @@ falha de leitura.
 - **SQL: `SETUP_EQUIPE.sql` sobrescreve policies que arquivos posteriores restringem.**
   O `accept_invite` dele já foi alinhado, mas as policies não — re-rodar sozinho reverte.
   A ordem completa está no cabeçalho do arquivo.
+- **Ler → esperar o usuário → gravar o array velho.** `deleteRow`/`saveCrm`/
+  `excluirInscricao`/`deleteProc` liam a coleção, abriam `confirm()`/`prompt()` (aberto o
+  tempo que a pessoa levar) e gravavam o array de antes. O CRM recebe leads por realtime
+  nesse intervalo: o lead sumia, e o push levava a exclusão pro servidor. **Releia depois
+  do diálogo e reaplique por id.** Vale pra qualquer gap — diálogo ou `await`.
+- **Vocabulário: `<select>` estático e lista canônica do JS têm de bater.** O select do
+  modal não tinha `Parcial` (editar+salvar apagava o status, e o valor sumia de todos os
+  baldes); o código comparava com `'Faltou'` mas a agenda grava `'No-show'` (o card do CRM
+  nunca voltava pra "Não marcou"). `tests/vocabulario.test.js` guarda isso a cada rodada.
+- **Campo que o código sabe que pode faltar tem de ser guardado em TODO lugar.** Se existe
+  `x.campo || ''` num ponto, `x.campo.metodo()` em outro é bug esperando: um atendimento
+  sem `data` derrubava a busca global inteira (`undefined.localeCompare`), e um sem `nome`
+  abortava a importação de planilha antes da primeira linha. Use `_cmpDataDesc`/`_cmpDataAsc`.
+- **`DB.getObj` NÃO mescla com o default** — só usa o default quando a chave não existe.
+  Config parcial (backup antigo, arquivo editado) passava com buracos e `cfg.diasUteis
+  .includes()` derrubava a agenda. `getAgConfig` agora mescla e valida o formato.
+- **Atribuição a `.value` de `<select>` com opção inexistente** deixa `selectedIndex = -1`
+  e o `FormData` devolve `''` no save — apaga o dado em silêncio.
 
 #### Sobre os testes
 
-- `node --test` roda 99 testes. **Rode também em outro fuso** quando mexer em data:
+- `node --test` roda 209 testes. **Rode também em outro fuso** quando mexer em data:
   `TZ=UTC node --test` — teste de fuso que só passa na máquina local não guarda nada.
 - `tests/_extrair.js` — recorta funções do `app.js`. Aceita `const:NOME` pra constante
   e entende `async function`.
@@ -186,8 +217,18 @@ falha de leitura.
 - **Armadilha do `node:vm`:** o sandbox tem realm próprio. `deepStrictEqual` reprova por
   protótipo (normalize com `JSON.parse(JSON.stringify(x))`) e `instanceof Date` dá falso
   se você não passar o **mesmo** `Date` nos globais.
-- Hábito que vale manter: depois de corrigir, **reverta a função antiga e confira que o
-  teste novo reprova**. Já pegou teste meu que passava sem guardar nada.
+- `tests/vocabulario.test.js` — varredura genérica: acusa comparação com literal que nada
+  no app grava nem oferece na interface. Vocabulário externo entra em `LEGITIMAS`
+  **com o motivo escrito**; um segundo teste reprova exceção que virou órfã.
+- **Hábito que vale manter:** depois de corrigir, **reverta a versão antiga e confira que
+  o teste novo reprova**. Já pegou teste meu que passava sem guardar nada — **cinco vezes**
+  nesta série. Reverta com **`git stash push`**, nunca com `git checkout --`: uma vez usei
+  o checkout num ponto sem nada pra restaurar e ele descartou o trabalho não commitado.
+- Falso positivo pontual numa varredura entra na lista de exceções. **Nunca alargue o
+  detector pra silenciá-lo** — tentei uma vez e o teste parou de acusar até os bugs reais.
+- Teste que falha depois de mexer no `app.js` nem sempre é regressão: já foi o extrator do
+  `_extrair.js` não dando conta (constante multilinha, `async function`) e realm do
+  `node:vm`. Leia a mensagem antes de "consertar" o código.
 
 ### Grupo B — precisa de decisão do usuário
 
