@@ -60,9 +60,18 @@ test('agendar duas vezes não empilha timers', () => {
 
 test('as duas tarefas continuam se protegendo contra repetir no mesmo dia', () => {
   // É esta propriedade que torna seguro re-checar de 15 em 15 minutos.
+  // A proteção do ciclo NÃO é o carimbo do dia (esse é só um atalho pra não
+  // varrer à toa, e cegá-lo deixava de fora quem entrasse na agenda depois da
+  // rodada da manhã). Quem impede o reenvio é o carimbo por AGENDAMENTO, que é
+  // mais preciso — e o teto de tentativas segura a insistência num número ruim.
   const ciclo = recortarFuncao('rodarCicloLembretes').replace(/\/\/[^\n]*/g, '');
-  assert.match(ciclo, /cfg\.ultimoEnvio === hoje/,
-    'sem esta guarda o agendador mandaria o mesmo lembrete a cada volta');
+  assert.match(ciclo, /_lembreteEnviado = new Date\(\)\.toISOString\(\)/,
+    'sem marcar o agendamento, o agendador mandaria o mesmo lembrete a cada volta');
+  const elegiveis = recortarFuncao('_agendamentosParaLembrar').replace(/\/\/[^\n]*/g, '');
+  assert.match(elegiveis, /!ag\._lembreteEnviado/,
+    'quem já recebeu tem de sair da lista de elegíveis');
+  assert.match(elegiveis, /_LEMBRETE_MAX_TENTATIVAS/,
+    'sem teto, um número inválido é retentado a cada volta do agendador');
   const snap = recortarFuncao('criarSnapshotDiario').replace(/\/\/[^\n]*/g, '');
   assert.match(snap, /já existe snapshot de hoje/,
     'sem esta guarda o agendador regravaria o snapshot a cada volta');

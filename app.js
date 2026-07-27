@@ -11620,6 +11620,9 @@ async function _enviarLembreteZapi(ag, mensagem) {
 }
 
 // Encontra agendamentos elegíveis (na janela de N horas, não realizados, não notificados)
+// Teto de tentativas por agendamento por dia (ver _agendamentosParaLembrar).
+const _LEMBRETE_MAX_TENTATIVAS = 3;
+
 function _agendamentosParaLembrar(horasAntes) {
   const agora = new Date();
   const alvo = new Date(agora.getTime() + horasAntes * 3600000);
@@ -11631,6 +11634,11 @@ function _agendamentosParaLembrar(horasAntes) {
     ag.status !== AG_FALTOU &&
     ag.status !== 'Cancelado' &&
     !ag._lembreteEnviado &&
+    // Falhou demais hoje: para de insistir a cada volta do agendador (amanhã o
+    // contador zera). Até o teto, a retentativa continua — falha de envio
+    // costuma ser transitória.
+    !(ag._lembreteTentativaDia === _ymd(agora)
+      && (ag._lembreteTentativas || 0) >= _LEMBRETE_MAX_TENTATIVAS) &&
     ag.whatsapp
   );
 }
@@ -11662,11 +11670,18 @@ async function rodarCicloLembretes(forcado = false) {
   const cfg = getLembretesConfig();
   if (!cfg.ativo && !forcado) return { skipped: 'desativado' };
 
-  // Já rodou hoje? Pula (a menos que forçado)
+  // "Já rodou hoje" NÃO pode ser um portão cego. O carimbo é do CICLO, não do
+  // paciente — e o agendamento nasce durante o dia: a recepção marca "pra
+  // amanhã" o tempo todo, e o ciclo costuma rodar de manhã, na abertura do app.
+  // Quem entrasse na agenda depois disso ficava de fora hoje, e amanhã a janela
+  // já teria andado um dia (alvoData = hoje + horasAntes): o paciente nunca era
+  // avisado, sem nada aparecer na tela. Quem impede o reenvio é o carimbo por
+  // AGENDAMENTO (_lembreteEnviado), que é mais preciso — o do dia fica só como
+  // atalho pra não varrer à toa.
   const hoje = _ymd(new Date());
-  if (!forcado && cfg.ultimoEnvio === hoje) return { skipped: 'já rodou hoje' };
-
   const ags = _agendamentosParaLembrar(cfg.horasAntes);
+  if (!forcado && cfg.ultimoEnvio === hoje && !ags.length) return { skipped: 'já rodou hoje' };
+
   if (!ags.length) {
     _marcarLembretesRodaramHoje(hoje);
     return { enviados: 0, msg: 'nenhum agendamento elegível' };
@@ -11701,6 +11716,15 @@ async function rodarCicloLembretes(forcado = false) {
         sucesso++;
       } else {
         todosAgs[idx]._lembreteErro = (r && r.error) || 'desconhecido';
+        // Conta a tentativa do DIA. Falha costuma ser transitória (provedor
+        // fora do ar, internet caída) e a retentativa é barata — por isso ela
+        // continua acontecendo. Mas agora que o ciclo volta a varrer a cada 15
+        // min, um número permanentemente inválido seria retentado ~96 vezes por
+        // dia. Três tentativas cobrem a queda passageira e param a insistência.
+        // O contador é POR DIA: amanhã começa do zero.
+        const mesmoDia = todosAgs[idx]._lembreteTentativaDia === hoje;
+        todosAgs[idx]._lembreteTentativaDia = hoje;
+        todosAgs[idx]._lembreteTentativas = (mesmoDia ? (todosAgs[idx]._lembreteTentativas || 0) : 0) + 1;
         erro++;
       }
       DB.set('agendamentos', todosAgs);

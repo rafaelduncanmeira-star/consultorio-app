@@ -42,7 +42,11 @@ function cenario({ agenda = AGENDA, aoEnviar, falharEm = [], cfg = {} } = {}) {
       return falharEm.includes(ag.id) ? { error: 'numero invalido' } : { ok: true };
     },
     getLembretesConfig: () => ({ ativo: true, horasAntes: 24, mensagem: '', ultimoEnvio: null, ...cfg }),
-    _agendamentosParaLembrar: () => DB.get('agendamentos').filter(a => !a._lembreteEnviado && a.whatsapp),
+    // Espelha o filtro real na parte que estes testes exercitam (o de verdade
+    // também confere data/status; aqui a agenda já é toda elegível).
+    _agendamentosParaLembrar: () => DB.get('agendamentos')
+      .filter(a => !a._lembreteEnviado && a.whatsapp
+        && !(a._lembreteTentativaDia === '2026-08-03' && (a._lembreteTentativas || 0) >= 3)),
     _ymd: () => '2026-08-03',
   };
   const carregado = carregar(['_marcarLembretesRodaramHoje', 'rodarCicloLembretes'], sandbox);
@@ -124,11 +128,63 @@ test('lembretes: envio que lança exceção não impede os próximos pacientes',
   assert.ok(marcado(c.store, 'a2') && marcado(c.store, 'a3'));
 });
 
-test('lembretes: ciclo que já rodou hoje é pulado (não reenvia)', async () => {
-  const c = cenario({ cfg: { ultimoEnvio: '2026-08-03' } });   // HOJE, no _ymd do teste
+test('lembretes: ciclo que já rodou hoje e não tem pendência é pulado', async () => {
+  const agenda = AGENDA.map(a => ({ ...a, _lembreteEnviado: '2026-08-03T09:00:00Z' }));
+  const c = cenario({ agenda, cfg: { ultimoEnvio: '2026-08-03' } });   // HOJE, no _ymd do teste
   const r = await c.rodarCicloLembretes();
   assert.deepStrictEqual(c.enviados, [], 'nenhuma mensagem pode sair');
   assert.strictEqual(r.skipped, 'já rodou hoje');
+});
+
+// ---------- agendamento marcado DEPOIS da rodada do dia ----------
+// O carimbo ultimoEnvio é do CICLO, não do paciente. A recepção marca "pra
+// amanhã" o dia inteiro, e o ciclo roda de manhã, na abertura do app: quem
+// entrasse na agenda depois disso ficava de fora hoje — e amanhã a janela já
+// teria andado um dia (alvoData = hoje + horasAntes), então o agendamento saía
+// do alcance pra sempre. O paciente nunca era avisado, e nada aparecia na tela.
+test('lembretes: quem entrou na agenda depois da rodada ainda é avisado', async () => {
+  const agenda = [
+    { id: 'a1', pacienteNome: 'Ana', whatsapp: '11999990000', data: '2026-08-04',
+      status: 'Confirmado', _lembreteEnviado: '2026-08-03T09:00:00Z' },
+    // marcado às 15h, depois do ciclo da manhã
+    { id: 'a9', pacienteNome: 'Novo', whatsapp: '11777770000', data: '2026-08-04',
+      status: 'Confirmado' },
+  ];
+  const c = cenario({ agenda, cfg: { ultimoEnvio: '2026-08-03' } });
+  const r = await c.rodarCicloLembretes();
+  assert.deepStrictEqual(c.enviados, ['a9'], 'só o novo — quem já recebeu não recebe de novo');
+  assert.strictEqual(r.enviados, 1);
+});
+
+// A contrapartida de voltar a varrer a cada 15 min: falha continua sendo
+// retentada (provedor fora do ar é transitório e a retentativa é barata), mas
+// com teto — senão um número permanentemente inválido daria ~96 chamadas de API
+// por dia.
+test('lembretes: falha é retentada, mas para no teto do dia', async () => {
+  let agenda = [{ id: 'a1', pacienteNome: 'Ana', whatsapp: '11999990000',
+                  data: '2026-08-04', status: 'Confirmado' }];
+  const tentativas = [];
+  for (let volta = 1; volta <= 5; volta++) {
+    const c = cenario({ agenda, falharEm: ['a1'] });
+    await c.rodarCicloLembretes();
+    tentativas.push(c.enviados.length);
+    agenda = c.store.agendamentos;
+  }
+  assert.deepStrictEqual(tentativas, [1, 1, 1, 0, 0],
+    'três tentativas cobrem a queda passageira; a partir daí o agendador não insiste mais');
+  assert.strictEqual(agenda[0]._lembreteTentativas, 3);
+  assert.strictEqual(agenda[0]._lembreteTentativaDia, '2026-08-03');
+});
+
+test('lembretes: as tentativas de ontem não gastam o orçamento de hoje', async () => {
+  const agenda = [{ id: 'a1', pacienteNome: 'Ana', whatsapp: '11999990000',
+                    data: '2026-08-04', status: 'Confirmado',
+                    _lembreteTentativaDia: '2026-08-02', _lembreteTentativas: 3 }];
+  const c = cenario({ agenda });
+  await c.rodarCicloLembretes();
+  assert.deepStrictEqual(c.enviados, ['a1'],
+    'o contador é por DIA — o de ontem não pode barrar a tentativa de hoje');
+  assert.ok(marcado(c.store, 'a1'));
 });
 
 test('lembretes: "forçar envio" ignora a trava do dia, mas respeita quem já recebeu', async () => {
