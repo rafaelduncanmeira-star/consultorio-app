@@ -358,6 +358,16 @@ falha de leitura.
 - **Poda antes de gravar.** O snapshot gravava e só depois podava; uma vez cheio o
   `localStorage`, o `setItem` lançava, a poda nunca rodava e o backup automático parava
   **para sempre**, calado (o chamador não tinha `.catch`).
+- 🔴 **Trocar de usuário sem trocar de PÁGINA mistura as duas contas.** O `logoutUser`
+  apagava o `localStorage` e só trocava de tela: todo estado de módulo do anterior
+  continuava vivo. `chatHistory` é lido do storage **uma vez, na carga do script** —
+  apagar a chave não esvazia a variável, e ela vai pra tela **e pro prompt do LLM**.
+  Logout agora **recarrega**. E a sessão que cai sozinha não limpa nada (é onde mora o
+  outbox), então quem entrar depois passa por **`_conferirDonoDoAparelho()`** antes do
+  `cloudPull` — sem ele o `_drenarOutbox` sobe os registros do dono anterior usando o
+  **owner atual** (`cloudPush`), gravando o prontuário de uma clínica dentro de outra.
+  Marca é `consult__dono`, nunca sincronizada; recusar derruba a sessão. Há teste
+  varrendo todo `cloudPull()` desprotegido.
 - 🔴 **Seed é gravação, e gravação sobe pra nuvem.** "Nunca apagar com base em array
   local vazio" vale igual pro seed: ele não apaga, ele grava — e o `DB.set` empurra por
   cima. Pior era o `getProgramas`, que ressemeava quando a **flag local faltasse OU** o
