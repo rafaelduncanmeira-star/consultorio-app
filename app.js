@@ -12,7 +12,8 @@ window.loadDemoData = async function loadDemoData() {
     Object.entries(dump).forEach(([k, v]) => {
       localStorage.setItem('consult_' + k, JSON.stringify(v));
     });
-    // Limpa flag de seed de programas pra forçar carregar os templates
+    // Limpa a flag de seed de programas. Só tem efeito se o dump NÃO trouxer
+    // programas — o seed agora exige coleção vazia e conta sem a chave.
     localStorage.removeItem('consult_progs_seeded_v2');
     // Re-migra as coleções blindadas pra tabela por linha no próximo load
     try { Object.values(_BLINDADAS).forEach(c => localStorage.removeItem(c.flag)); } catch(e) {}
@@ -438,6 +439,21 @@ async function _pushComRev(owner, key, value, tentativa = 0) {
 }
 
 // Pull todas as chaves do Supabase → localStorage — usa o owner da equipe atual
+// Um SEED só pode nascer em conta nova. "Array local vazio" não prova conta
+// nova: prova aparelho novo, pós-logout ou pull que falhou — e o seed grava, e
+// o DB.set empurra pro servidor por cima do que já estava lá.
+// Estas duas variáveis respondem a pergunta certa ("esta CONTA já teve esta
+// coleção alguma vez?") a partir do que a nuvem devolveu de fato.
+let _pullConcluido = false;
+const _chavesNaNuvem = new Set();
+
+function _contaNovaPara(key) {
+  // Fora de sessão (simulação por console) não há nuvem pra consultar.
+  if (!currentUser) return true;
+  // Pull que não terminou = "não sei". Não semeia — jamais no escuro.
+  return _pullConcluido && !_chavesNaNuvem.has(key);
+}
+
 async function cloudPull() {
   if (!_supa || !currentUser) return;
   const owner = currentDataOwner || currentUser.id;
@@ -459,6 +475,10 @@ async function cloudPull() {
     if (data && data.length) {
       let aplicadas = 0;
       data.forEach(row => {
+        // Registra a EXISTÊNCIA da chave antes de qualquer desvio: coleção que
+        // o médico esvaziou de propósito volta como `[]`, e isso é uma
+        // resposta ("já existiu, está vazia"), não ausência.
+        _chavesNaNuvem.add(row.key);
         // Chave com escrita local não confirmada: local vence até drenar.
         if (_outboxPendente(row.key)) return;
         localStorage.setItem('consult_' + row.key, JSON.stringify(row.value));
@@ -467,6 +487,9 @@ async function cloudPull() {
       });
       console.log(`cloudPull: ${aplicadas} chaves sincronizadas`);
     }
+    // Só aqui: a leitura foi até o fim sem erro. Conta nova devolve lista
+    // vazia sem erro, e isso também é uma resposta válida.
+    _pullConcluido = true;
   } catch(e) { console.warn('cloudPull error:', e.message); }
   _migrarIds(); // Fase 1: garante ids estáveis após cada carga (idempotente)
   await _sincronizarBlindadas(); // Fase 2/3: migra (dono) + puxa as coleções blindadas da tabela (filtrado por RLS)
@@ -1201,9 +1224,12 @@ async function doSignup() {
   }
 
   // Login automático bem-sucedido
-  // Se entrou numa equipe (via convite), baixa os dados do dono antes de abrir o app
+  // O pull roda SEMPRE, mesmo em conta nova onde não há o que baixar: é ele que
+  // responde "esta conta já teve procedimentos/programas/profissionais?" e
+  // libera os seeds (_contaNovaPara). Sem ele, a clínica nova abria com tabela
+  // de preços vazia e sem o profissional Titular.
+  await cloudPull();
   if (currentDataOwner && currentDataOwner !== currentUser?.id) {
-    await cloudPull();
     if (typeof syncLeadsFromSupabase === 'function') syncLeadsFromSupabase();
   }
   _iniciarApp();
@@ -2215,7 +2241,7 @@ function closeModal(id) {
 function getProcedimentos() {
   let arr = DB.get('procedimentos');
   // Seed inicial na primeira execução
-  if (!arr.length && !localStorage.getItem('consult_proc_seeded')) {
+  if (!arr.length && !localStorage.getItem('consult_proc_seeded') && _contaNovaPara('procedimentos')) {
     arr = [
       { nome: 'Primeira consulta',        valorPix: 1000, valorCartao: 1050, obs: 'Paciente novo (1ª vez)' },
       { nome: 'Consulta no consultório', valorPix: 1000, valorCartao: 1050, obs: '' },
@@ -2262,7 +2288,7 @@ const _PROF_CORES = ['#10b981','#3b82f6','#8b5cf6','#f59e0b','#ec4899','#14b8a6'
 
 function getProfissionais() {
   let arr = DB.get('profissionais');
-  if (!arr.length && !localStorage.getItem('consult_prof_seeded')) {
+  if (!arr.length && !localStorage.getItem('consult_prof_seeded') && _contaNovaPara('profissionais')) {
     arr = [{ id: 'prof_titular', nome: 'Titular', tipo: 'Médico', especialidade: '', cor: _PROF_CORES[0], ativo: true }];
     DB.set('profissionais', arr);
     localStorage.setItem('consult_prof_seeded', '1');
@@ -2468,9 +2494,17 @@ function _vigenciaDias(vigencia) {
 
 function getProgramas() {
   let arr = DB.get('programas');
-  // Recompõe seeds se: (a) flag v2 não existe OU (b) array está vazio
-  // (a 2ª condição cobre o caso de backup antigo sem programas)
-  if (!arr.length || !localStorage.getItem('consult_progs_seeded_v2')) {
+  // O seed era recomposto se a flag v2 (local, NUNCA sincronizada) faltasse OU
+  // o array estivesse vazio. As duas pontas do OU destruíam dado do médico:
+  //  · flag ausente é o estado NORMAL de todo aparelho novo — bastava abrir o
+  //    app no celular pra os programas customizados (preço, marcos, campos
+  //    clínicos, os criados por ele) serem trocados pelos 5 templates de
+  //    fábrica E empurrados por cima da nuvem, apagando-os em todo aparelho.
+  //    As inscrições apontando pro programaId dele viravam órfãs.
+  //  · array vazio é o estado normal de pull que falhou e de pós-logout.
+  // Agora vale o mesmo critério dos outros seeds: vazio de fato E a conta
+  // nunca ter tido a coleção (ver _contaNovaPara).
+  if (!arr.length && !localStorage.getItem('consult_progs_seeded_v2') && _contaNovaPara('programas')) {
     arr = [
       {
         id: 'pg_compagni',
