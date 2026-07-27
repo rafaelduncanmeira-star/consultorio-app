@@ -111,6 +111,16 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- 🔴 **`async` chamada de `onclick` não tem catch.** Exceção vira promise rejeitada em
+  **silêncio**: o botão simplesmente não faz nada. Pior quando a função desabilita o
+  botão antes do `await` — `doLogin`/`doSignup`/`confirmar2FA`/`iaSugerirNoChat`
+  restauravam *depois* do await, o que não vale quando é o await que lança: ficava
+  "Entrando…" travado até recarregar a página. Restaure no **`finally`**, sempre.
+  Mesma classe: `JSON.parse` solto dentro de `async` (era o `restaurarSnapshot`).
+- **`BACKUP_FORMATO` valida TODAS as 24 chaves antes de gravar.** Antes só as blindadas
+  eram checadas; `despesas`/`procedimentos`/`programas`/`profissionais` vindas como objeto
+  eram gravadas e derrubavam a tela — e o app não reabria até limpar o navegador.
+  A regra: lida com `DB.get` é lista, com `DB.getObj` é objeto (há teste cruzando com o fonte).
 - **`_resumoFin`/`_lucroFin` não são "uma forma de calcular" — são A forma.** O gráfico de
   12 meses fazia a própria conta: somava `p.valor` de todo mundo, chamava de *Faturamento*
   (contando o isento, que `faturado` exclui) e tirava o *Lucro* dali. Desenhava como lucro
