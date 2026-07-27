@@ -111,6 +111,11 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- 🔴 **O app tem de ABRIR mesmo com a sincronização falhando.** Um blob corrompido fazia
+  o `JSON.parse` do `_drenarOutbox` lançar → `cloudPull` (que drenava **fora** do próprio
+  try) rejeitava → o `DOMContentLoaded` não tinha catch → `_iniciarApp` nunca rodava e a
+  tela nunca montava, com os dados intactos e inalcançáveis. Isole **por chave** na fila
+  (a ruim volta pra fila, nunca é apagada) e chame `_iniciarApp` fora do try.
 - ⚠️ **Repetir uma tarefa exige três coisas, não uma.** Ao passar backup e lembretes pro
   agendador de 15 min eu quebrei duas: (1) o **aviso de erro** passou a se repetir a cada
   volta — erro permanente vira ruído que a pessoa fecha sem ler; guarde o último motivo e
