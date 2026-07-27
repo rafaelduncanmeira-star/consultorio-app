@@ -225,6 +225,13 @@ Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
   já tem identidade: o telefone. `_crmPorTelefone(_chatPhone)`, resolvido na hora do uso.
   Corolário de nomes: variável que recebe `_waConnected()` **não** se chama `zapiOk` — foi
   esse nome que convidou a regressão do card de lembretes. Há teste reprovando.
+- **Forma de pagamento é vocabulário: `FORMAS_PAGAMENTO` + `_pagamentoCanonico`.** Era o
+  terceiro campo de vocabulário do atendimento e o único sem canonizador — `"pix"` sumia das
+  **três** tabelas de Mix (que casam por igualdade exata) e do `TAXA_PAGAMENTO`, e as linhas
+  passavam a somar menos que o Total. Segundo tempo: `editRow` atribui ao `<select>`, valor
+  inexistente dá `selectedIndex = -1` e o save **apaga** o campo — abrir e salvar bastava.
+  Fora do vocabulário **não se chuta** (inventaria como o paciente pagou): guarda como veio,
+  avisa no chat e entra como opção `(legado)` no modal.
 - **Nome vindo do LLM entra APARADO, e a comparação usa `_nomeNorm` nos dois lados.** O
   guard do `PRECISA_NOME` apara só pra **validar**; o valor gravado seguia cru. "Consulta "
   criava um segundo procedimento idêntico na tabela de preços — e o nome com espaço não casa
