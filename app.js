@@ -10136,24 +10136,30 @@ function executeAIAction(action) {
       appendChatMsg('system-ok', `🚫 Horário bloqueado nesse período. Escolha outro horário.`);
       return;
     }
-    const ags = getAgendamentos(); ags.push(item); DB.set('agendamentos', ags);
-
-    // Atualiza CRM: se o paciente estava como Lead/Contato feito/Em negociação → muda para Marcou
+    // Atualiza CRM: se o paciente estava como Lead/Contato feito/Em negociação → muda para Marcou.
+    // Isto roda ANTES de gravar o agendamento de propósito. Antes vinha depois,
+    // e mexia no `item` que já tinha ido pro DB.set — que serializa um
+    // instantâneo. O vínculo nunca chegava ao localStorage; o aparelho ficava
+    // com um agendamento sem vínculo e o servidor, às vezes, com um vínculo.
+    // E o vínculo era gravado como ÍNDICE do array do CRM — o elo congelado que
+    // o resto do app já abandonou. Um lead novo chegando por realtime reordena
+    // a coleção e o agendamento passa a apontar pro contato de outra pessoa:
+    // é o status DELA que muda quando este agendamento for confirmado ou
+    // cancelado depois. Vínculo é por id.
     const nomeAlvo = item.pacienteNome.toLowerCase().trim();
+    let sufixo = ` (${item.procedimento || 'sem procedimento'})`;
     if (nomeAlvo) {
       const crm = DB.get('crm');
       const crmIdx = _acharCrmPorNome(crm, nomeAlvo);
       if (crmIdx >= 0 && !['Marcou','Atendeu'].includes(crm[crmIdx].status)) {
         crm[crmIdx].status = 'Marcou';
-        DB.set('crm', crm);
-        item.crmIdx = crmIdx;
-        appendChatMsg('system-ok', `✅ ${item.pacienteNome} agendado para ${item.data} às ${item.hora} · CRM atualizado para "Marcou"`);
-      } else {
-        appendChatMsg('system-ok', `✅ ${item.pacienteNome} agendado para ${item.data} às ${item.hora} (${item.procedimento || 'sem procedimento'})`);
+        DB.set('crm', crm); // carimba id em quem estiver sem, então o id abaixo existe
+        item.crmId = crm[crmIdx].id || null;
+        sufixo = ' · CRM atualizado para "Marcou"';
       }
-    } else {
-      appendChatMsg('system-ok', `✅ ${item.pacienteNome} agendado para ${item.data} às ${item.hora} (${item.procedimento || 'sem procedimento'})`);
     }
+    const ags = getAgendamentos(); ags.push(item); DB.set('agendamentos', ags);
+    appendChatMsg('system-ok', `✅ ${item.pacienteNome} agendado para ${item.data} às ${item.hora}${sufixo}`);
     if (document.getElementById('page-agenda').classList.contains('active')) renderAgenda();
 
   } else if (tipo === 'cancelar_agendamento') {

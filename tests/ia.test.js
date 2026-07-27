@@ -223,3 +223,37 @@ test('overrides do formulário têm precedência sobre o salvo (playground ao vi
   assert.match(p, /TOM DE VOZ: do formulário/);
   assert.doesNotMatch(p, /TOM DE VOZ: salvo/);
 });
+
+// ---------- o copiloto não pode vincular agendamento por índice ----------
+// O caminho `criar_agendamento` do copiloto gravava `item.crmIdx = crmIdx`
+// DEPOIS do DB.set do agendamento. Dois problemas de uma vez:
+//
+//  1. DB.set serializa um INSTANTÂNEO. Mexer no `item` depois não chega ao
+//     localStorage — o aparelho fica sem o vínculo e o servidor, às vezes, com
+//     ele. As duas pontas discordam sobre o mesmo agendamento.
+//  2. O vínculo era o índice do array do CRM. Um lead novo chegando por
+//     realtime reordena a coleção: o agendamento passa a apontar pro contato de
+//     OUTRA pessoa, e é o status dela que muda quando este agendamento for
+//     confirmado ou cancelado depois.
+const _fonteIA = require('./_extrair.js').fonte;
+const _blocoCriarAg = (() => {
+  const ini = _fonteIA.indexOf("} else if (tipo === 'criar_agendamento') {");
+  const fim = _fonteIA.indexOf("} else if (tipo === 'cancelar_agendamento') {", ini);
+  assert.ok(ini > 0 && fim > ini, 'o ramo criar_agendamento do copiloto tem de existir');
+  return _fonteIA.slice(ini, fim).replace(/\/\/[^\n]*/g, '');
+})();
+
+test('copiloto: o agendamento criado guarda o id do contato, não o índice', () => {
+  assert.match(_blocoCriarAg, /item\.crmId\s*=/,
+    'sem o vínculo por id o agendamento não sabe qual contato do CRM é o dele');
+  assert.doesNotMatch(_blocoCriarAg, /item\.crmIdx\s*=/,
+    'índice do CRM apodrece: qualquer lead novo por realtime reordena o array');
+});
+
+test('copiloto: o vínculo é resolvido ANTES de gravar o agendamento', () => {
+  const posCrm = _blocoCriarAg.search(/item\.crmId\s*=/);
+  const posSet = _blocoCriarAg.search(/DB\.set\('agendamentos'/);
+  assert.ok(posSet > 0, 'o ramo tem de gravar o agendamento');
+  assert.ok(posCrm > 0 && posCrm < posSet,
+    'gravar primeiro e vincular depois perde o vínculo: DB.set serializa um instantâneo');
+});
