@@ -111,6 +111,13 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- 🔴 **Falha de envio precisa aparecer E ter segunda chance.** `_lembreteErro` era gravado
+  no agendamento e nunca lido; o toast só saía no sucesso; e `cfg.ultimoEnvio` era
+  carimbado mesmo com 100% de falha, bloqueando a retentativa pelo resto do dia — no dia
+  seguinte o agendamento já saiu da janela e o paciente **nunca** é avisado. Carimbe
+  "já rodou hoje" só quando algo foi entregue.
+- **`clipboard.writeText` rejeita** (aba sem foco, permissão negada) — sem `catch`, nem o
+  toast aparece nem o texto é copiado, e a pessoa cola o clipboard antigo.
 - **Guardar o dado recusado não basta — tem de APARECER.** Outbox e quarentena existem pra
   nada sumir, mas só apareciam no `console.warn`: da tela, o registro que o servidor
   recusou simplesmente não existia. `renderSyncSaude()` mostra fila e quarentena (com o
