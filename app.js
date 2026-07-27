@@ -2262,7 +2262,9 @@ function openModal(id) {
     _popularProfissionalSelect(currentProfissionalId || _agFiltroProf || null, 'pac-profissional');
     // Reseta valor e atualiza hint
     const vEl = document.getElementById('pac-valor');
-    if (vEl && !editState.idx && editState.crmIdx === null) vEl.value = '';
+    // `!editState.idx` tratava o índice 0 como "sem edição" — e 0 é o caso
+    // normal, porque atendimento novo entra com unshift. Use == null.
+    if (vEl && editState.idx == null && editState.crmIdx === null) vEl.value = '';
     atualizarValorSugerido();
   }
   if (id === 'modal-crm' && !editState.col) {
@@ -15056,9 +15058,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
-  // Fecha modais ao clicar fora
+  // Fecha modais ao clicar fora — pelo closeModal, NUNCA escondendo o elemento
+  // na mão. Só esconder deixava para trás tudo o que o closeModal limpa: o
+  // formulário preenchido, o título "Editar Consulta" e — o que dói — o
+  // editState apontando pro registro que estava sendo editado.
+  // Cenário: o médico abre ✏️ num atendimento, desiste e dispensa clicando
+  // fora (gesto que o app oferece de propósito). Depois clica em "+ Novo
+  // Atendimento": o openModal não reseta nada, então o modal reabre com os
+  // dados do paciente anterior e o savePaciente ainda enxerga editState.id —
+  // salvar SUBSTITUI o atendimento antigo em vez de criar um novo. O antigo
+  // some, e com ele a receita dele no mês a que pertencia.
   document.querySelectorAll('.modal-overlay').forEach(el => {
-    el.addEventListener('click', (e) => { if (e.target === el) el.style.display = 'none'; });
+    el.addEventListener('click', (e) => {
+      if (e.target !== el) return;
+      if (el.id) closeModal(el.id); else el.style.display = 'none';
+    });
   });
 
   // Data por extenso ao lado de todo input[type=date] — o formato nativo

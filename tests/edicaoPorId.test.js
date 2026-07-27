@@ -166,3 +166,43 @@ test('nenhuma coleção com id estável usa índice no onclick', () => {
   }
   assert.deepStrictEqual([...new Set(achados)].sort(), []);
 });
+
+// ---------- dispensar o modal clicando fora tem de limpar o estado ----------
+// O closeModal reseta o formulário, o título e o editState. O handler de
+// "clicar fora" só escondia o elemento, então tudo isso ficava para trás.
+// Cenário: o médico abre ✏️ num atendimento, desiste e dispensa clicando fora
+// (gesto que o app oferece de propósito). Depois clica em "+ Novo
+// Atendimento" — o openModal não reseta nada. O modal reabre com os dados do
+// paciente anterior, o título ainda diz "Editar Consulta", e o savePaciente
+// continua enxergando editState.id: salvar SUBSTITUI o atendimento antigo em
+// vez de criar um novo. O antigo some, e com ele a receita dele no mês.
+test('clicar fora do modal passa pelo closeModal, não esconde na mão', () => {
+  const { fonte } = require('./_extrair.js');
+  const i = fonte.indexOf('Fecha modais ao clicar fora');
+  assert.ok(i > 0, 'o handler de clicar fora tem de existir');
+  // O bloco tem um comentário longo explicando o caso; corta no fim do forEach.
+  const bloco = fonte.slice(i);
+  const trecho = bloco.slice(0, bloco.indexOf('\n  });') + 6);
+  assert.match(trecho, /closeModal\(el\.id\)/,
+    'esconder o elemento na mão deixa editState apontando pro registro editado');
+});
+
+test('closeModal limpa o editState — é o que impede o save de virar update', () => {
+  const s = carregar('closeModal', {
+    document: {
+      getElementById: () => ({ style: {} }),
+      querySelector: () => null,
+    },
+    editState: { col: 'pacientes', idx: 3, id: 'pac_1' },
+  });
+  s.closeModal('modal-paciente');
+  assert.strictEqual(s.editState.col, null);
+  assert.strictEqual(s.editState.id, undefined,
+    'sobrar id aqui faz o próximo "+ Novo Atendimento" gravar por cima do antigo');
+});
+
+test('o valor sugerido não trata o índice 0 como "sem edição"', () => {
+  const { fonte } = require('./_extrair.js');
+  assert.ok(!/if \(vEl && !editState\.idx/.test(fonte),
+    'atendimento novo entra com unshift: o registro editado costuma ser o índice 0');
+});
