@@ -111,6 +111,14 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- **Registro inválido do copiloto trava a tela que o percorre.** Procedimento com
+  `nome: undefined` fazia `saveProc` **e** o próprio `criar_procedimento` lançarem
+  (os dois fazem `p.nome.toLowerCase()` na lista inteira): a tela de Preços parava de
+  salvar pra sempre. Toda ação do copiloto que cria registro entra no **`PRECISA_NOME`**
+  (ou valida seu campo-chave), **e** quem percorre a coleção guarda o campo — senão um
+  registro velho envenenado mantém a tela travada mesmo depois do conserto.
+- **Ordenar por campo que pode faltar derruba a tela inteira.** `a.hora.localeCompare`
+  lança com um único registro sem hora. Use `_cmpDataAsc`/`_cmpDataDesc`/`_cmpHoraAsc`.
 - 🔴 **O gate do financeiro vale no PROMPT também.** `_podeVerFinanceiro()` já era
   consultado pela sidebar, pelo `showPage` e pelo `_applyRole` — o prompt do copiloto
   era a quarta porta e entregava faturamento, lucro, "quem deve" com nomes e valores,
