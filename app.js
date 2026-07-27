@@ -12392,14 +12392,22 @@ function getClinicaConfig() {
 }
 
 function saveClinicaConfig() {
-  const cfg = {
+  // Object.assign sobre o que já está gravado, nunca um objeto novo: o
+  // clinica_config guarda mais coisa do que este formulário mostra. O `modo`
+  // ('completo' | 'financeiro'), escolhido no cadastro e trocado por
+  // setAppMode, é o caso: gravar o literal cru apagava ele, getAppMode caía no
+  // padrão 'completo' e CRM, Follow-up, Programas e Agenda voltavam pra
+  // sidebar de quem tinha escolhido "Apenas Financeiro". Sem nada avisar, e só
+  // na abertura seguinte do app — porque esta função não reaplica o papel,
+  // então nem dá pra ligar o efeito ao ato de salvar o nome da clínica.
+  const cfg = Object.assign(getClinicaConfig(), {
     nome:         (document.getElementById('clinica-nome')?.value || '').trim(),
     especialidade:(document.getElementById('clinica-especialidade')?.value || '').trim(),
     nomeClinica:  (document.getElementById('clinica-nome-clinica')?.value || '').trim(),
     cidade:       (document.getElementById('clinica-cidade')?.value || '').trim(),
     crm:          (document.getElementById('clinica-crm')?.value || '').trim(),
     cor:           document.getElementById('clinica-cor')?.value || '#10b981',
-  };
+  });
   DB.setObj('clinica_config', cfg);
   applyClinicaConfig(cfg);
   toast('✅ Configurações salvas!');
