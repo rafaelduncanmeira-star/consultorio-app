@@ -232,6 +232,13 @@ Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
   tinha percentuais que não fecham 100% (denominador real, numerador incompleto). Agrupe
   pelas categorias **reais** dos lançamentos (`_despesasPorCategoria`); a tela de Despesas já
   fazia isso e as outras duas ficaram para trás.
+- 🔴 **Lista de ESCOLHA ≠ lista de EXIBIÇÃO.** `_popularProfissionalSelect` monta só os
+  ativos (certo: não se atribui trabalho novo a quem saiu) — mas sem `<option>` pro
+  profissional **do registro**, o `.value` não casava: no CRM o vínculo era apagado, e no
+  atendimento/agenda o próprio código caía em `profs[0].id` e **transferia** o registro pro
+  primeiro ativo. Editar um atendimento antigo movia receita, repasse **e** o
+  `profissional_id` que o RLS usa pra decidir quem enxerga a linha. O dono do registro entra
+  sempre, marcado `(inativo)` / `(profissional removido)`.
 - **Todo `<select>` recebe `_opcaoLegadaSeFaltar` antes de `.value = …`.** Valor inexistente
   deixa `selectedIndex = -1` e o save devolve `''`: abrir e salvar **apaga o campo**.
 - **Forma de pagamento é vocabulário: `FORMAS_PAGAMENTO` + `_pagamentoCanonico`.** Era o
