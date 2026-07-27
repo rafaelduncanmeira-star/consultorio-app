@@ -18,7 +18,17 @@ function recortarFuncao(nome) {
   const assinatura = new RegExp('(?:async\\s+)?function\\s+' + nome + '\\s*\\(');
   const m = assinatura.exec(fonte);
   if (!m) throw new Error(`Função não encontrada no app.js: ${nome}`);
-  const abreChave = fonte.indexOf('{', m.index);
+  // Pula a LISTA DE PARÂMETROS antes de procurar o corpo. Um parâmetro com
+  // valor padrão de objeto — `function f(a, opts = {})` — tem chave própria, e
+  // o `indexOf('{')` cru parava nela: o recorte virava só a assinatura, e o
+  // teste morria com "Unexpected end of input" em vez de dizer o que houve.
+  let par = 0, fechaParams = -1;
+  for (let i = m.index + m[0].length - 1; i < fonte.length; i++) {
+    if (fonte[i] === '(') par++;
+    else if (fonte[i] === ')') { par--; if (par === 0) { fechaParams = i; break; } }
+  }
+  if (fechaParams === -1) throw new Error(`Parâmetros não fecharam para: ${nome}`);
+  const abreChave = fonte.indexOf('{', fechaParams);
   if (abreChave === -1) throw new Error(`Corpo não encontrado para: ${nome}`);
   let profundidade = 0;
   for (let i = abreChave; i < fonte.length; i++) {

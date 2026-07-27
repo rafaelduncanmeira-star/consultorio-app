@@ -2157,7 +2157,7 @@ function renderOnboardingClinica() {
 //   consult_inscricoes: [{ id, programaId, pacienteNome, pacienteWhatsapp, pacIdx,
 //                          dataInicio, status:'Ativo'|'Pausado'|'Concluído',
 //                          registros: [{ marcoIdx, dataPrevista, dataReal, agendamentoId,
-//                                        followupIdx, valoresClinicos, obs }],
+//                                        followupId, valoresClinicos, obs }],
 //                          obs }]
 // Helper: converte vigência de Assinatura em dias
 function _vigenciaDias(vigencia) {
@@ -2530,7 +2530,10 @@ function inscreverEmPrograma(programaId, pacienteRef, dataInicio, horaPadrao = '
 
     inscricao.registros.push({
       marcoIdx: idx, dataPrevista: dataPrev, dataReal: null,
-      agendamentoId: agId, followupIdx: fus.length - 1,
+      // Por ID, nunca por índice: o array de follow-ups é reescrito na ordem do
+      // servidor a cada pull e recompactado por qualquer exclusão — o índice
+      // guardado passa a apontar pro follow-up de outro paciente.
+      agendamentoId: agId, followupId: fuObj.id,
       valoresClinicos: {}, obs: ''
     });
   });
@@ -2717,11 +2720,18 @@ function registrarMarco(inscricaoId, marcoIdx, valoresClinicos = {}, obs = '') {
     const ag = ags.find(a => a.id === reg.agendamentoId);
     if (ag) { ag.status = 'Compareceu'; DB.set('agendamentos', ags); }
   }
-  // Marca o follow-up como feito
-  if (reg.followupIdx != null) {
-    const fus = DB.get('followup');
-    if (fus[reg.followupIdx]) { fus[reg.followupIdx].feito = true; DB.set('followup', fus); }
-  }
+  // Marca o follow-up como feito. Antes isto era `fus[reg.followupIdx]` — um
+  // índice gravado em disco. O array de follow-ups é substituído inteiro pelo
+  // pull (na ordem que o servidor devolve) e recompactado por qualquer exclusão:
+  // bastava apagar um follow-up qualquer pra todo índice acima dele passar a
+  // apontar pro vizinho. Registrar o marco marcava como feito o follow-up de
+  // OUTRO paciente, e o verdadeiro ficava aberto pra sempre.
+  // Resolve por id; para inscrições antigas (que só têm o índice), cai no par
+  // (inscrição, marco), que o follow-up carrega desde a primeira versão.
+  const fus = DB.get('followup');
+  const fuAlvo = (reg.followupId && fus.find(f => f && f.id === reg.followupId))
+    || fus.find(f => f && f.programaInscricaoId === ins.id && f.marcoIdx === marcoIdx);
+  if (fuAlvo) { fuAlvo.feito = true; DB.set('followup', fus); }
 
   const prog = getProgramas().find(p => p.id === ins.programaId);
   // Programa Contínuo: cria automaticamente o próximo marco
@@ -2740,19 +2750,20 @@ function registrarMarco(inscricaoId, marcoIdx, valoresClinicos = {}, obs = '') {
       programaInscricaoId: ins.id, marcoIdx: novoIdx,
       crmIdx: null, pacIdx: ins.pacIdx,
     });
-    fus.push({
+    const fuNovo = {
       id: _novoId('fu'), profissionalId: ins.profissionalId || null,
       nome: ins.pacienteNome, ultConsulta: reg.dataReal,
       dataContato: _addDaysIso(dataNova, -2),
       tipoContato: 'WhatsApp', feito: false, dataReav: dataNova,
       obs: `Confirmar próximo marco — ${prog.nome}`,
       programaInscricaoId: ins.id, marcoIdx: novoIdx,
-    });
+    };
+    fus.push(fuNovo);
     DB.set('agendamentos', ags);
     DB.set('followup', fus);
     ins.registros.push({
       marcoIdx: novoIdx, dataPrevista: dataNova, dataReal: null,
-      agendamentoId: agId, followupIdx: fus.length - 1,
+      agendamentoId: agId, followupId: fuNovo.id,
       valoresClinicos: {}, obs: ''
     });
   }
