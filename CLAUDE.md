@@ -358,6 +358,15 @@ falha de leitura.
 - **Poda antes de gravar.** O snapshot gravava e só depois podava; uma vez cheio o
   `localStorage`, o `setItem` lançava, a poda nunca rodava e o backup automático parava
   **para sempre**, calado (o chamador não tinha `.catch`).
+- 🔴 **Seed é gravação, e gravação sobe pra nuvem.** "Nunca apagar com base em array
+  local vazio" vale igual pro seed: ele não apaga, ele grava — e o `DB.set` empurra por
+  cima. Pior era o `getProgramas`, que ressemeava quando a **flag local faltasse OU** o
+  array estivesse vazio: flag local nunca sincroniza, então **todo aparelho novo** trocava
+  os programas do médico pelos 5 de fábrica e apagava os dele em todos os aparelhos
+  (inscrições viravam órfãs). Todo seed passa por **`_contaNovaPara(chave)`**: só é conta
+  nova se o pull terminou **sem erro** e a chave **não existe** no `app_data`. `[]` vindo
+  do servidor é resposta ("já existiu, está vazia"), não ausência — por isso o `cloudPull`
+  registra a existência da chave **antes** do desvio do outbox.
 - **"Novo" tem duas leituras e cada uma tem UMA implementação.** `_novosNoMes` responde
   por **pessoa no mês** (aquisição → CAC e ROI de marketing); `_primeiroAtendimentoDe`
   responde por **atendimento** (o DRE fatia o faturamento em novos + recorrentes, e só
