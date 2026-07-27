@@ -5670,10 +5670,10 @@ function renderBloqueiosList() {
     lista.map(b => `
       <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:#fef3c7;border-radius:6px;margin-bottom:4px;font-size:12px;">
         <div>
-          <strong>${b.motivo}</strong>
-          <div style="color:#78350f;font-size:11px;">${formatDate(b.dataInicio)} ${b.horaInicio || ''} → ${formatDate(b.dataFim)} ${b.horaFim || ''}</div>
+          <strong>${_esc(b.motivo)}</strong>
+          <div style="color:#78350f;font-size:11px;">${formatDate(b.dataInicio)} ${_esc(b.horaInicio || '')} → ${formatDate(b.dataFim)} ${_esc(b.horaFim || '')}</div>
         </div>
-        <button onclick="deleteBloqueio('${b.id}')" style="background:none;border:none;color:#991b1b;cursor:pointer;font-size:14px;">🗑️</button>
+        <button onclick="deleteBloqueio('${_jsArg(b.id)}')" style="background:none;border:none;color:#991b1b;cursor:pointer;font-size:14px;">🗑️</button>
       </div>`).join('');
 }
 
@@ -5700,7 +5700,8 @@ function saveBloqueio(e) {
   toast('Bloqueio criado');
 }
 
-function deleteBloqueio(id) {
+function deleteBloqueio(idEnc) {
+  const id = decodeURIComponent(idEnc);
   if (!confirm('Remover este bloqueio?')) return;
   DB.set('bloqueios', getBloqueios().filter(b => b.id !== id));
   renderBloqueiosList();

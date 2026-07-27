@@ -70,6 +70,40 @@ test('médico e secretária mantêm o financeiro intacto', () => {
   }
 });
 
+// ---------- renderBloqueiosList: XSS armazenado pelo motivo do bloqueio ----------
+// A coleção `bloqueios` é um blob de app_data que QUALQUER membro da equipe
+// pode gravar (o RLS só barra membro nas chaves financeiras). O motivo era
+// injetado cru no innerHTML da tela do dono: um membro mal-intencionado — ou
+// com a conta comprometida — executava script na sessão do dono, que é quem tem
+// acesso a tudo. Rende também o id dentro do onclick, que pedia _jsArg.
+test('renderBloqueiosList: motivo e horas passam por _esc, id por _jsArg', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  const src = recortarFuncao('renderBloqueiosList').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /\$\{_esc\(b\.motivo\)\}/, 'motivo é texto livre digitado por gente');
+  assert.match(src, /deleteBloqueio\('\$\{_jsArg\(b\.id\)\}'\)/,
+    'argumento dentro de onclick pede _jsArg — encodeURIComponent não escapa aspa simples');
+  assert.doesNotMatch(src, /\$\{b\.(motivo|horaInicio|horaFim)\b/,
+    'nenhum campo do bloqueio pode ir cru pro innerHTML');
+});
+
+test('deleteBloqueio: decodifica o id que o _jsArg codificou', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  const src = recortarFuncao('deleteBloqueio');
+  assert.match(src, /decodeURIComponent\(/,
+    'sem o decode, id com caractere especial não casaria e o bloqueio não seria removido');
+});
+
+// O par _jsArg/_esc é a defesa; se o _jsArg parar de escapar aspa simples,
+// todos os onclick do app ficam abertos de uma vez.
+test('_jsArg: escapa a aspa simples que o encodeURIComponent deixa passar', () => {
+  const { _jsArg } = carregar('_jsArg', { encodeURIComponent, String });
+  const veneno = "x');alert(1);//";
+  const saida = _jsArg(veneno);
+  assert.ok(!saida.includes("'"), 'nenhuma aspa simples pode sobrar');
+  assert.strictEqual(decodeURIComponent(saida), veneno, 'e o valor tem de voltar intacto');
+  assert.strictEqual(_jsArg(null), '');
+});
+
 // ---------- _podeVerFinanceiro: a UI tem de seguir o RLS ----------
 // O RLS (SETUP_SEGURANCA.sql) só deixa o DONO ler/gravar 'despesas' e 'metas*'.
 // A sidebar liberava o financeiro pra qualquer currentRole === 'medico',
