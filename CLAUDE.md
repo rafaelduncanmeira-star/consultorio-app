@@ -358,6 +358,14 @@ falha de leitura.
 - **Poda antes de gravar.** O snapshot gravava e só depois podava; uma vez cheio o
   `localStorage`, o `setItem` lançava, a poda nunca rodava e o backup automático parava
   **para sempre**, calado (o chamador não tinha `.catch`).
+- **"Novo" tem duas leituras e cada uma tem UMA implementação.** `_novosNoMes` responde
+  por **pessoa no mês** (aquisição → CAC e ROI de marketing); `_primeiroAtendimentoDe`
+  responde por **atendimento** (o DRE fatia o faturamento em novos + recorrentes, e só
+  soma 100% se a divisão for por atendimento). O DRE e o relatório tinham cópias inline
+  da segunda, e ambas sem a guarda `if (!n || !p.data)`: a ordenação por `(p.data || '')`
+  põe o registro sem data na frente, a estreia da pessoa virava `undefined` e ela contava
+  como **recorrente até na consulta de estreia**. Mapa de nome→data é `Map`, nunca objeto
+  literal (`'constructor' in {}` é `true` por herança).
 - **Toda chamada externa passa por `_fetchComPrazo`.** O `fetch()` do navegador **não tem
   prazo**: servidor que aceita a conexão e nunca responde deixa a promise pendurada pra
   sempre — não resolve, não rejeita, e **nenhum `catch`/`finally` do chamador roda**. No
