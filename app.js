@@ -5880,11 +5880,11 @@ function _openWhatsAppForFu(ref) {
   const data = DB.get('followup');
   const fu = data[_acharFuPorRef(data, ref)];
   if (!fu) { toast('Este follow-up não está mais na lista.', 3000); return; }
-  // Tenta achar o telefone do paciente
-  const pac = DB.get('pacientes').find(p => p.nome === fu.nome && p.whatsapp);
-  const crm = DB.get('crm').find(c => c.nome === fu.nome && c.whatsapp);
+  // Telefone: o do próprio follow-up, senão o do paciente (regra única, por nome
+  // NORMALIZADO — aqui a busca era por nome cru e falhava sempre que a grafia
+  // divergia de uma tela pra outra), senão o da inscrição em programa.
   const ins = DB.get('inscricoes').find(i => i.id === fu.programaInscricaoId);
-  const wa = (fu.whatsapp || pac?.whatsapp || crm?.whatsapp || ins?.pacienteWhatsapp || '').replace(/\D/g, '');
+  const wa = (fu.whatsapp || _telefoneDoPaciente(fu.nome) || ins?.pacienteWhatsapp || '').replace(/\D/g, '');
   if (!wa) { alert('WhatsApp não cadastrado para ' + fu.nome + '.\n\nClique no ✏️ pra editar este follow-up e adicionar o número.'); return; }
   const msg = `Olá ${(fu.nome || '').split(' ')[0]}! ${fu.obs || ''}`.trim();
   // Roteia pelo CRM (se automação ligada) ou WhatsApp externo (se desligada)
@@ -13299,6 +13299,21 @@ function abrirChatPorTelefone(nome, whatsapp) {
 // Roteia o contato pelo MELHOR canal:
 //  • Z-API (CRM) ligado  → abre o chat interno (responde pelo sistema, registra a conversa)
 //  • Z-API desligado     → cai pro WhatsApp externo (wa.me)
+// Telefone do paciente a partir do NOME — regra única das duas telas que
+// precisam disso. A chave é o nome NORMALIZADO, que é a identidade de paciente
+// no app inteiro; comparar o nome cru faz "Maria Silva" e "maria silva" serem
+// pessoas diferentes, e o número cadastrado numa grafia fica invisível na outra.
+// A ordem das fontes também é única: atendimento → CRM → agenda → follow-up.
+function _telefoneDoPaciente(nome) {
+  const chave = (nome || '').toLowerCase().trim();
+  if (!chave) return '';
+  const bate = (n) => (n || '').toLowerCase().trim() === chave;
+  return (DB.get('pacientes').find(p => bate(p.nome) && p.whatsapp)?.whatsapp)
+      || (DB.get('crm').find(c => bate(c.nome) && c.whatsapp)?.whatsapp)
+      || (getAgendamentos().find(a => bate(a.pacienteNome) && a.whatsapp)?.whatsapp)
+      || (DB.get('followup').find(f => bate(f.nome) && f.whatsapp)?.whatsapp) || '';
+}
+
 function falarComPaciente(nome, whatsapp, mensagem) {
   const wa = String(whatsapp || '').replace(/\D/g, '');
   if (!wa) { alert('WhatsApp não cadastrado para ' + (nome || 'este paciente') + '.'); return; }
@@ -13315,13 +13330,8 @@ function falarComPaciente(nome, whatsapp, mensagem) {
 
 // Versão que descobre o WhatsApp do paciente pelo nome (usada no perfil)
 function falarComPacienteNome(nomeEnc) {
-  const nome  = decodeURIComponent(nomeEnc);
-  const chave = nome.toLowerCase().trim();
-  const wa = (DB.get('pacientes').find(p => (p.nome||'').toLowerCase().trim()===chave && p.whatsapp)?.whatsapp)
-          || (DB.get('crm').find(c => (c.nome||'').toLowerCase().trim()===chave && c.whatsapp)?.whatsapp)
-          || (getAgendamentos().find(a => (a.pacienteNome||'').toLowerCase().trim()===chave && a.whatsapp)?.whatsapp)
-          || (DB.get('followup').find(f => (f.nome||'').toLowerCase().trim()===chave && f.whatsapp)?.whatsapp) || '';
-  falarComPaciente(nome, wa);
+  const nome = decodeURIComponent(nomeEnc);
+  falarComPaciente(nome, _telefoneDoPaciente(nome));
 }
 
 function closeCrmChat() {
