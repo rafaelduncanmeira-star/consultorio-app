@@ -3925,7 +3925,10 @@ function saveProc(e) {
     // `p.nome` guardado: um único procedimento sem nome na coleção (gravado por
     // versão anterior do copiloto, ou por backup importado) travava o salvamento
     // de TODOS os procedimentos daí em diante.
-    if (procs.some(p => String(p.nome || '').toLowerCase() === item.nome.toLowerCase())) {
+    // _nomeNorm dos dois lados: o item.nome já vem aparado, mas os guardados
+    // podem ter espaço sobrando (vindos do copiloto ou de backup importado), e
+    // aí o duplicado passava batido.
+    if (procs.some(p => _nomeNorm(p.nome) === _nomeNorm(item.nome))) {
       toast('Já existe um procedimento com esse nome');
       return;
     }
@@ -10996,10 +10999,19 @@ function executeAIAction(action) {
 
   } else if (tipo === 'criar_procedimento') {
     const procs = getProcedimentos();
-    const existIdx = procs.findIndex(p => String(p.nome || '').toLowerCase() === (dados.nome || '').toLowerCase());
+    // _nomeNorm nos DOIS lados, e o nome guardado já vem aparado. O LLM emite
+    // "Consulta " com espaço sobrando o tempo todo, e a comparação sem trim não
+    // reconhecia o procedimento que já existe: nascia um segundo, visualmente
+    // idêntico na tabela de preços, e o nome com espaço não casa mais com nada
+    // — nem com o balde de metas, nem com o valor sugerido do atendimento, que
+    // procuram o procedimento pelo nome exato.
+    // (O guard do PRECISA_NOME já apara pra VALIDAR; o valor gravado é que
+    // continuava cru.)
+    const nomeProc = String(dados.nome || '').trim();
+    const existIdx = procs.findIndex(p => _nomeNorm(p.nome) === _nomeNorm(nomeProc));
     const item = {
       id: existIdx >= 0 ? procs[existIdx].id : ('proc_' + Date.now()),
-      nome: dados.nome,
+      nome: nomeProc,
       // impNormValor, como os outros caminhos do copiloto: o médico dita
       // "mil e duzentos" e o LLM devolve "1.200,00", que o parseFloat cru lê
       // como 1.2. E esse preço vira a SUGESTÃO de valor de toda consulta

@@ -429,9 +429,16 @@ test('copiloto: lista já envenenada não impede criar procedimento novo', () =>
 });
 
 test('saveProc: procedimento sem nome na coleção não trava o salvamento', () => {
+  // A guarda agora mora dentro do _nomeNorm, que é a mesma comparação usada
+  // pelo copiloto. O que importa é que percorrer a coleção não lance por causa
+  // de um registro sem nome — era isso que fazia a tela de Preços parar de
+  // salvar de vez.
+  const { _nomeNorm } = carregar('_nomeNorm');
+  assert.strictEqual(_nomeNorm(undefined), '');
+  assert.strictEqual(_nomeNorm(null), '');
   const src = require('./_extrair.js').recortarFuncao('saveProc').replace(/\/\/[^\n]*/g, '');
-  assert.match(src, /String\(p\.nome \|\| ''\)\.toLowerCase\(\)/,
-    'um registro sem nome fazia a tela de Preços parar de salvar de vez');
+  assert.match(src, /_nomeNorm\(p\.nome\)/,
+    'p.nome.toLowerCase() cru volta a lançar com um registro sem nome');
 });
 
 test('copiloto: bloqueio sem data não é gravado', () => {
@@ -440,4 +447,60 @@ test('copiloto: bloqueio sem data não é gravado', () => {
   assert.deepStrictEqual(a.banco.bloqueios, undefined,
     'bloqueio sem dataInicio não barra horário nenhum e aparece como Invalid Date');
   assert.match(a.msgs.join(' '), /Faltou a data do bloqueio/);
+});
+
+// ---------- procedimento criado pelo copiloto não pode duplicar o que já existe ----------
+// O LLM emite "Consulta " com espaço sobrando o tempo todo. A comparação era
+// `.toLowerCase()` sem trim nos dois lados, então o procedimento existente não
+// era reconhecido: nascia um segundo, visualmente idêntico na tabela de preços.
+// E o nome guardado com o espaço não casa mais com nada — o valor sugerido do
+// atendimento e os baldes de metas procuram o procedimento pelo nome EXATO.
+// O guard do PRECISA_NOME já aparava o nome pra VALIDAR; o valor gravado é que
+// continuava cru.
+function criarProc(procsIniciais, dadosNome) {
+  const { recortarFuncao } = require('./_extrair.js');
+  const vm = require('node:vm');
+  const corpo = recortarFuncao('executeAIAction');
+  const ini = corpo.indexOf("} else if (tipo === 'criar_procedimento') {");
+  const fim = corpo.indexOf("DB.set('procedimentos', procs);", ini)
+            + "DB.set('procedimentos', procs);".length;
+  assert.ok(ini > 0 && fim > ini, 'o bloco criar_procedimento mudou de forma');
+  const trecho = corpo.slice(ini + "} else if (tipo === 'criar_procedimento') {".length, fim);
+
+  const guardadas = { procedimentos: procsIniciais.map(p => ({ ...p })) };
+  const s = carregar(['_nomeNorm'], {
+    String, Date, Math, Number,
+    dados: { nome: dadosNome, valorPix: '500', valorCartao: '' },
+    getProcedimentos: () => guardadas.procedimentos,
+    impNormValor: (v) => parseFloat(v) || 0,
+    DB: { set: (k, v) => { guardadas[k] = v; } },
+  });
+  vm.runInContext(trecho, s, { filename: 'recorte' });
+  return guardadas.procedimentos;
+}
+
+test('copiloto: procedimento com espaço sobrando atualiza o existente', () => {
+  const procs = criarProc([{ id: 'p1', nome: 'Consulta', valorPix: 300, valorCartao: 320 }], 'Consulta ');
+  assert.strictEqual(procs.length, 1, 'espaço sobrando criava um segundo "Consulta" na tabela de preços');
+  assert.strictEqual(procs[0].id, 'p1', 'atualizar mantém o id do procedimento');
+  assert.strictEqual(procs[0].valorPix, 500);
+});
+
+test('copiloto: o nome é guardado aparado', () => {
+  const procs = criarProc([], '  Telemedicina  ');
+  assert.strictEqual(procs[0].nome, 'Telemedicina',
+    'nome com espaço não casa com o balde de metas nem com o valor sugerido');
+});
+
+test('copiloto: procedimento realmente novo continua sendo criado', () => {
+  const procs = criarProc([{ id: 'p1', nome: 'Consulta' }], 'Domiciliar');
+  assert.strictEqual(procs.length, 2);
+  assert.strictEqual(procs[1].nome, 'Domiciliar');
+});
+
+test('as duas telas que gravam procedimento usam a mesma comparação de nome', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  const saveProc = recortarFuncao('saveProc');
+  assert.match(saveProc, /_nomeNorm\(p\.nome\) === _nomeNorm\(item\.nome\)/,
+    'comparar sem trim deixa passar o duplicado que o copiloto já criou');
 });
