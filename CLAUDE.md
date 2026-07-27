@@ -225,6 +225,11 @@ Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
   já tem identidade: o telefone. `_crmPorTelefone(_chatPhone)`, resolvido na hora do uso.
   Corolário de nomes: variável que recebe `_waConnected()` **não** se chama `zapiOk` — foi
   esse nome que convidou a regressão do card de lembretes. Há teste reprovando.
+- **Nada lê `editState` depois do `closeModal`** — ele acabou de zerar tudo. `savePaciente`
+  e `saveDespesa` montavam a linha do histórico ali, com `editState.idx != null`: **toda
+  edição virava "Cadastrou"**, a alteração sumia do registro e aparecia uma criação que
+  nunca houve. O sinal certo é o **ramo que a função tomou** (`editIdx >= 0`), capturado
+  antes — e ele também acerta o caso do registro que sumiu, onde a função de fato inseriu.
 - 🔴 **Fechar modal é `closeModal(id)`, nunca `style.display = 'none'`.** É o `closeModal`
   que reseta formulário, título **e `editState`**. O handler de "clicar fora" só escondia o
   elemento: dispensar um ✏️ assim e depois clicar em "+ Novo Atendimento" reabria o modal
