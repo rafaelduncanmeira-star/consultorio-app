@@ -1297,6 +1297,51 @@ function closeOnboarding() {
 }
 
 // Mostra o app e configura role
+// ====================== TAREFAS DO DIA ======================
+// O backup automático e o ciclo de lembretes eram disparados apenas dentro do
+// _iniciarApp — ou seja, uma vez por CARREGAMENTO da página. Numa recepção o app
+// fica aberto a semana inteira; é um PWA, é exatamente pra isso. Segunda de
+// manhã os dois rodam. De terça em diante, nenhum dos dois roda mais: ninguém é
+// lembrado da consulta e nenhum backup é gravado — e nada avisa, porque do ponto
+// de vista do app está tudo normal.
+//
+// As duas funções já se protegem sozinhas contra rodar duas vezes no mesmo dia
+// (`cfg.ultimoEnvio === hoje` no ciclo, "já existe snapshot de hoje" no backup),
+// então re-checar de tempos em tempos é barato e não duplica nada.
+function _tarefaBackupDiario() {
+  return criarSnapshotDiario().then(r => {
+    if (r.created) console.log('🗂️ Backup automático criado:', r.data);
+    // Falha de backup precisa aparecer: é a rede de segurança de todo o resto.
+    else if (r.error) toast('⚠️ ' + r.error, 6000);
+  }).catch(e => console.warn('backup automático falhou:', e && e.message));
+}
+
+function _tarefaLembretes() {
+  return rodarCicloLembretes().then(r => {
+    if (r.enviados > 0) toast(`📲 ${r.enviados} lembrete(s) WhatsApp enviado(s).`, 4000);
+    // Falha de lembrete precisa aparecer, pelo mesmo motivo da falha de backup
+    // logo acima: o paciente NÃO foi avisado e ninguém sabe. Antes só o sucesso
+    // gerava toast — com todos os envios falhando, a tela não dizia nada e o
+    // card de lembretes continuava exibindo "✓ Ativo · último envio: hoje".
+    if (r.erros > 0) toast(`⚠️ ${r.erros} lembrete(s) NÃO foram enviados — veja em Configurações.`, 7000);
+    if (r.error) toast('⚠️ ' + r.error, 6000);
+  }).catch(e => console.warn('ciclo de lembretes falhou:', e && e.message));
+}
+
+function _rodarTarefasDoDia() {
+  if (!currentUser) return;
+  _tarefaBackupDiario();
+  _tarefaLembretes();
+}
+
+let _timerTarefasDoDia = null;
+function _agendarTarefasDoDia() {
+  if (_timerTarefasDoDia) return; // _iniciarApp pode rodar de novo (sair e entrar)
+  // 15 min: a janela de lembrete é de horas, então não precisa ser fino. O
+  // objetivo é só não depender de alguém recarregar a página.
+  _timerTarefasDoDia = setInterval(_rodarTarefasDoDia, 15 * 60 * 1000);
+}
+
 function _iniciarApp() {
   // GUARD: só inicia se houver sessão válida (impede bypass via console)
   if (!currentUser || !currentRole) {
@@ -1317,20 +1362,9 @@ function _iniciarApp() {
   renderDashboard();
   saudacaoDiaria();
   setTimeout(() => checkAchievements(), 1000); // verifica conquistas após render
-  setTimeout(() => criarSnapshotDiario().then(r => {
-    if (r.created) console.log('🗂️ Backup automático criado:', r.data);
-    // Falha de backup precisa aparecer: é a rede de segurança de todo o resto.
-    else if (r.error) toast('⚠️ ' + r.error, 6000);
-  }).catch(e => console.warn('backup automático falhou:', e && e.message)), 3000);
-  setTimeout(() => rodarCicloLembretes().then(r => {
-    if (r.enviados > 0) toast(`📲 ${r.enviados} lembrete(s) WhatsApp enviado(s).`, 4000);
-    // Falha de lembrete precisa aparecer, pelo mesmo motivo da falha de backup
-    // logo acima: o paciente NÃO foi avisado e ninguém sabe. Antes só o sucesso
-    // gerava toast — com todos os envios falhando, a tela não dizia nada e o
-    // card de lembretes continuava exibindo "✓ Ativo · último envio: hoje".
-    if (r.erros > 0) toast(`⚠️ ${r.erros} lembrete(s) NÃO foram enviados — veja em Configurações.`, 7000);
-    if (r.error) toast('⚠️ ' + r.error, 6000);
-  }).catch(e => console.warn('ciclo de lembretes falhou:', e && e.message)), 5000);
+  setTimeout(_tarefaBackupDiario, 3000);
+  setTimeout(_tarefaLembretes, 5000);
+  _agendarTarefasDoDia();
   // Sincroniza UI mobile com página inicial
   _mobSync('dashboard');
   // Mostra modal de boas-vindas se for primeiro acesso
@@ -13387,7 +13421,12 @@ function _revisarCanalLeads() {
 }
 window.addEventListener('online', () => setTimeout(_revisarCanalLeads, 2000));
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') _revisarCanalLeads();
+  if (document.visibilityState !== 'visible') return;
+  _revisarCanalLeads();
+  // Máquina suspensa não dispara setInterval: o computador da recepção dorme na
+  // sexta e acorda na segunda com o timer parado no tempo. Ao voltar pra frente,
+  // re-checa as tarefas do dia — que se protegem sozinhas contra repetição.
+  _rodarTarefasDoDia();
 });
 
 async function syncLeadsFromSupabase() {
