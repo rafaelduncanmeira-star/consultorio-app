@@ -193,3 +193,90 @@ test('_foneE164BR concorda com o 1º candidato do Z-API', () => {
       `${desc}: os dois provedores não podem discordar do mesmo telefone`);
   }
 });
+
+// ---------- mfaVerificarSeNecessario: o portão de 2FA tem de falhar FECHADO ----------
+// Este é o ÚNICO portão de 2FA do app — o RLS não checa AAL. Então devolver
+// "pode entrar" quando a verificação falha é o mesmo que não ter 2FA.
+function supaMfa({ aal, aalErr, factors, factorsErr, verifyErr } = {}) {
+  return { auth: { mfa: {
+    getAuthenticatorAssuranceLevel: async () => ({ data: aalErr ? null : aal, error: aalErr || null }),
+    listFactors: async () => ({ data: factorsErr ? null : { totp: factors || [] }, error: factorsErr || null }),
+    challenge: async () => ({ data: { id: 'ch1' }, error: null }),
+    verify: async () => ({ data: {}, error: verifyErr || null }),
+  } } };
+}
+const carregaMfa = (supa) => carregar('mfaVerificarSeNecessario', { _supa: supa, Promise });
+
+test('mfa: listar fatores falhando NÃO pode liberar o login', async () => {
+  const { mfaVerificarSeNecessario } = carregaMfa(supaMfa({
+    aal: { currentLevel: 'aal1', nextLevel: 'aal2' },
+    factorsErr: { message: 'network' },
+  }));
+  const r = await mfaVerificarSeNecessario();
+  assert.ok(!r.ok, 'uma falha de rede não pode virar "entra sem segunda etapa"');
+  assert.ok(r.error, 'tem de devolver erro pro chamador barrar');
+});
+
+test('mfa: não conseguir ler o nível exigido também barra', async () => {
+  const { mfaVerificarSeNecessario } = carregaMfa(supaMfa({ aalErr: { message: 'timeout' } }));
+  const r = await mfaVerificarSeNecessario();
+  assert.ok(!r.ok);
+  assert.ok(r.error);
+});
+
+test('mfa: conta que exige 2FA e não tem fator verificado é barrada', async () => {
+  const { mfaVerificarSeNecessario } = carregaMfa(supaMfa({
+    aal: { currentLevel: 'aal1', nextLevel: 'aal2' },
+    factors: [{ id: 'f1', status: 'unverified' }],   // cadastro abandonado
+  }));
+  const r = await mfaVerificarSeNecessario();
+  assert.ok(!r.ok, 'fator não verificado não vale como segunda etapa');
+  assert.ok(r.error);
+});
+
+test('mfa: com fator verificado, pede o código', async () => {
+  const { mfaVerificarSeNecessario } = carregaMfa(supaMfa({
+    aal: { currentLevel: 'aal1', nextLevel: 'aal2' },
+    factors: [{ id: 'f-antigo', status: 'unverified' }, { id: 'f-bom', status: 'verified' }],
+  }));
+  const r = await mfaVerificarSeNecessario();
+  assert.strictEqual(r.needsCode, true);
+  assert.strictEqual(r.factorId, 'f-bom', 'escolhe o verificado, não o primeiro da lista');
+});
+
+test('mfa: código errado não passa; código certo passa', async () => {
+  const base = { aal: { currentLevel: 'aal1', nextLevel: 'aal2' }, factors: [{ id: 'f1', status: 'verified' }] };
+  const ruim = carregaMfa(supaMfa({ ...base, verifyErr: { message: 'invalid' } }));
+  assert.ok((await ruim.mfaVerificarSeNecessario('000000')).error);
+  const bom = carregaMfa(supaMfa(base));
+  assert.strictEqual((await bom.mfaVerificarSeNecessario('123456')).ok, true);
+});
+
+test('mfa: quem não usa 2FA entra normalmente', async () => {
+  const { mfaVerificarSeNecessario } = carregaMfa(supaMfa({
+    aal: { currentLevel: 'aal1', nextLevel: 'aal1' },
+  }));
+  const r = await mfaVerificarSeNecessario();
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.noMfa, true);
+});
+
+// O segundo furo estava no CHAMADOR: mfaVerificarSeNecessario já devolvia
+// { error } quando não conseguia ler o nível exigido, mas os dois pontos de
+// entrada só olhavam `needsCode` — o erro era ignorado e o app iniciava em
+// aal1. Como esses trechos mexem em DOM e sessão, o guarda é no código-fonte.
+test('login e checkSession barram quando o 2FA não pôde ser confirmado', () => {
+  const { fonte } = require('./_extrair.js');
+  // Todo trecho que chama o portão tem de tratar mfaCheck.error logo em seguida.
+  const chamadas = [...fonte.matchAll(/mfaVerificarSeNecessario\([^)]*\)/g)];
+  assert.ok(chamadas.length >= 2, 'esperava os dois pontos de entrada');
+  for (const m of chamadas) {
+    const depois = fonte.slice(m.index, m.index + 700);
+    if (/^\s*async function/.test(depois)) continue;     // a definição, não uma chamada
+    if (!/mfaCheck/.test(depois)) continue;              // chamada com código (fluxo do modal)
+    assert.match(depois, /mfaCheck\.error/,
+      'o resultado de erro do portão de 2FA não pode ser ignorado');
+    assert.match(depois, /signOut\(\)/,
+      'sessão em aal1 tem de ser derrubada, não deixada de pé');
+  }
+});

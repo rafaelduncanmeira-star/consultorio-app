@@ -1117,10 +1117,20 @@ async function doLogin() {
 
   // Sucesso — verifica se precisa de 2FA
   const mfaCheck = await mfaVerificarSeNecessario();
+  // `error` aqui significa "não consegui confirmar a segunda etapa". Era
+  // ignorado, e o _iniciarApp() rodava assim mesmo — entrando sem 2FA.
+  if (mfaCheck.error) {
+    await _supa.auth.signOut().catch(() => {});
+    errEl.textContent = mfaCheck.error;
+    errEl.style.display = 'block';
+    btn.textContent = 'Entrar'; btn.disabled = false;
+    return;
+  }
   if (mfaCheck.needsCode) {
     const ok = await pedir2FACodigo();
     if (!ok) {
-      // Cancelou 2FA — força novo login
+      // Cancelou 2FA — derruba a sessão (ela existe em aal1) e força novo login
+      await _supa.auth.signOut().catch(() => {});
       errEl.textContent = 'Verificação 2FA cancelada. Faça login novamente.';
       errEl.style.display = 'block';
       btn.textContent = 'Entrar'; btn.disabled = false;
@@ -10881,12 +10891,23 @@ async function mfaDesativar(factorId) {
 async function mfaVerificarSeNecessario(code) {
   if (!_supa) return { error: 'Sem conexão.' };
   try {
-    const { data: aalData } = await _supa.auth.mfa.getAuthenticatorAssuranceLevel();
+    const { data: aalData, error: aalErr } = await _supa.auth.mfa.getAuthenticatorAssuranceLevel();
+    // Não deu pra descobrir o nível exigido? Então não dá pra afirmar que a
+    // segunda etapa é dispensável. Barra em vez de deixar passar.
+    if (aalErr || !aalData) return { error: 'Não foi possível verificar a segunda etapa. Tente novamente.' };
     if (aalData.nextLevel === aalData.currentLevel) return { ok: true, noMfa: true };
     if (aalData.nextLevel === 'aal2') {
       const factors = await _supa.auth.mfa.listFactors();
-      const totp = factors.data?.totp?.[0];
-      if (!totp) return { ok: true, noMfa: true };
+      // FALHA FECHADA. Aqui o código devolvia { ok: true, noMfa: true } quando a
+      // listagem falhava — ou seja, uma instabilidade de rede rebaixava o login
+      // de dois fatores para um só, e o app entrava normalmente. Este é o ÚNICO
+      // portão de 2FA do app (o RLS não checa AAL), então falhar aberto aqui é
+      // o mesmo que não ter 2FA.
+      if (factors.error || !factors.data) return { error: 'Não foi possível verificar a segunda etapa. Tente novamente.' };
+      // Só fator VERIFICADO conta — um cadastro abandonado não vale como
+      // segunda etapa. (renderStatus2FA já filtrava assim; aqui não filtrava.)
+      const totp = (factors.data.totp || []).find(f => f.status === 'verified');
+      if (!totp) return { error: 'Sua conta exige segunda etapa, mas nenhum app autenticador verificado foi encontrado. Refaça o cadastro do 2FA.' };
       if (!code) return { needsCode: true, factorId: totp.id };
       const challenge = await _supa.auth.mfa.challenge({ factorId: totp.id });
       if (challenge.error) return { error: challenge.error.message };
@@ -13584,16 +13605,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (temSessao) {
     // Já logado: verifica se precisa 2FA antes de qualquer outra coisa
     const mfaCheck = await mfaVerificarSeNecessario();
+    // Não confirmou a segunda etapa (erro de rede, fator sumido): barra. Antes
+    // o `error` era ignorado e a sessão seguia direto pro app, em aal1.
+    const barrar = async (msg) => {
+      await _supa.auth.signOut().catch(()=>{});
+      document.getElementById('login-page').style.display = 'flex';
+      const errEl2 = document.getElementById('login-error');
+      if (errEl2 && msg) { errEl2.textContent = msg; errEl2.style.display = 'block'; }
+      const emailEl = document.getElementById('login-email');
+      if (emailEl) setTimeout(() => emailEl.focus(), 100);
+    };
+    if (mfaCheck.error) { await barrar(mfaCheck.error); return; }
     if (mfaCheck.needsCode) {
       const ok = await pedir2FACodigo();
-      if (!ok) {
-        // Logout forçado e mostra tela de login
-        await _supa.auth.signOut().catch(()=>{});
-        document.getElementById('login-page').style.display = 'flex';
-        const emailEl = document.getElementById('login-email');
-        if (emailEl) setTimeout(() => emailEl.focus(), 100);
-        return;
-      }
+      if (!ok) { await barrar(''); return; }
     }
     // 2FA ok — aceita convite pendente, resolve owner, sincroniza
     await _acceptInviteIfPending();
