@@ -5780,12 +5780,9 @@ function saveAgendamento(e) {
   if (idx >= 0) {
     const antigo = ags[idx];
     ags[idx] = { ...antigo, ...item };
-    // MAS: se a data ou a hora mudou (remarcação), o lembrete já enviado
-    // não vale mais — rearma para que o novo horário receba um novo lembrete.
-    if (antigo.data !== item.data || antigo.hora !== item.hora) {
-      delete ags[idx]._lembreteEnviado;
-      delete ags[idx]._lembreteErro;
-    }
+    // Se a data ou a hora mudou (remarcação), o lembrete já enviado não vale
+    // mais. Mesma função dos outros dois caminhos que remarcam.
+    _limparLembreteSeRemarcou(ags[idx], antigo.data, antigo.hora);
   } else ags.push(item);
   DB.set('agendamentos', ags);
 
@@ -6127,6 +6124,22 @@ function _agDragLeave(e) {
   e.currentTarget.classList.remove('ag-drop-hover');
 }
 
+// Remarcar = trocar data e/ou hora. Um lembrete já ENVIADO se refere ao horário
+// ANTIGO: o paciente recebeu "sua consulta é amanhã às 10h" e a consulta não é
+// mais amanhã às 10h. Pior, _agendamentosParaLembrar filtra `!ag._lembreteEnviado`,
+// então esse agendamento nunca mais entra num ciclo de lembrete — a única
+// mensagem que a pessoa recebeu aponta pro dia errado, e nenhuma outra vem.
+//
+// Três telas remarcam (o modal, o arrastar na agenda e o copiloto) e só o modal
+// rearmava. Existe como função pra que as três façam a mesma coisa e um teste
+// possa cobrar isso.
+function _limparLembreteSeRemarcou(ag, dataAnt, horaAnt) {
+  if (!ag || (ag.data === dataAnt && ag.hora === horaAnt)) return false;
+  delete ag._lembreteEnviado;
+  delete ag._lembreteErro;
+  return true;
+}
+
 function _agDrop(e, ds, hora) {
   e.preventDefault();
   e.stopPropagation();
@@ -6144,8 +6157,10 @@ function _agDrop(e, ds, hora) {
   if (typeof _isBloqueado === 'function' && _isBloqueado(ds, hora, dur)) {
     toast('⚠️ Esse horário está bloqueado na agenda'); _agDragId = null; return;
   }
+  const dAnt = ags[idx].data, hAnt = ags[idx].hora;
   ags[idx].data = ds;
   ags[idx].hora = hora;
+  _limparLembreteSeRemarcou(ags[idx], dAnt, hAnt);
   DB.set('agendamentos', ags);
   _agDragId = null;
   renderAgenda();
@@ -6170,9 +6185,11 @@ function _agDropProf(e, ds, hora, profId) {
   if (typeof _isBloqueado === 'function' && _isBloqueado(ds, hora, durP)) {
     toast('⚠️ Esse horário está bloqueado na agenda'); _agDragId = null; return;
   }
+  const dAntP = ags[idx].data, hAntP = ags[idx].hora;
   ags[idx].data = ds;
   ags[idx].hora = hora;
   ags[idx].profissionalId = novoProf;
+  _limparLembreteSeRemarcou(ags[idx], dAntP, hAntP);
   DB.set('agendamentos', ags);
   _agDragId = null;
   renderAgenda();
@@ -10363,9 +10380,18 @@ function executeAIAction(action) {
         appendChatMsg('system-ok', `⚠️ Conflito no novo horário: já tem ${conflito.pacienteNome} às ${conflito.hora}. Tente outro horário.`);
         return;
       }
+      // O ramo vizinho (criar_agendamento) já validava bloqueio; este não. O
+      // médico bloqueava a tarde de quinta pro congresso e bastava pedir "move
+      // a Ana pra quinta às 15h" que o copiloto movia pra dentro do bloqueio.
+      if (typeof _isBloqueado === 'function' && _isBloqueado(novaData, novaHora, ags[idx].duracao || 60)) {
+        appendChatMsg('system-ok', `🚫 ${novaData} às ${novaHora} está em um período bloqueado da agenda. Escolha outro horário.`);
+        return;
+      }
       const nomeAnt = ags[idx].pacienteNome;
+      const dAntIA = ags[idx].data, hAntIA = ags[idx].hora;
       ags[idx].data = novaData;
       ags[idx].hora = novaHora;
+      _limparLembreteSeRemarcou(ags[idx], dAntIA, hAntIA);
       DB.set('agendamentos', ags);
       appendChatMsg('system-ok', `✅ Consulta de ${nomeAnt} movida para ${novaData} às ${novaHora}`);
       if (document.getElementById('page-agenda').classList.contains('active')) renderAgenda();

@@ -142,3 +142,54 @@ test('lembretes: desativado não manda nada', async () => {
   assert.deepStrictEqual(c.enviados, []);
   assert.strictEqual(r.skipped, 'desativado');
 });
+
+// ---------- remarcar tem de rearmar o lembrete ----------
+// _agendamentosParaLembrar filtra `!ag._lembreteEnviado`. Um agendamento que já
+// recebeu lembrete e depois foi REMARCADO nunca mais entra num ciclo: a única
+// mensagem que o paciente recebeu aponta pro dia errado, e nenhuma outra vem.
+// Três telas remarcam — modal, arrastar na agenda e copiloto — e só o modal
+// rearmava.
+const { carregar: _carregar, recortarFuncao: _recF, fonte: _fonte } = require('./_extrair.js');
+
+test('_limparLembreteSeRemarcou: rearma quando data ou hora mudou', () => {
+  const { _limparLembreteSeRemarcou } = _carregar('_limparLembreteSeRemarcou', {});
+  const base = () => ({ data: '2026-08-05', hora: '10:00',
+                        _lembreteEnviado: '2026-08-04T13:00:00Z', _lembreteErro: 'x' });
+
+  const mudouData = base(); mudouData.data = '2026-08-12';
+  assert.strictEqual(_limparLembreteSeRemarcou(mudouData, '2026-08-05', '10:00'), true);
+  assert.strictEqual(mudouData._lembreteEnviado, undefined);
+  assert.strictEqual(mudouData._lembreteErro, undefined);
+
+  const mudouHora = base(); mudouHora.hora = '16:00';
+  _limparLembreteSeRemarcou(mudouHora, '2026-08-05', '10:00');
+  assert.strictEqual(mudouHora._lembreteEnviado, undefined, 'mudar só a hora também invalida');
+});
+
+test('_limparLembreteSeRemarcou: não rearma quando nada mudou', () => {
+  const { _limparLembreteSeRemarcou } = _carregar('_limparLembreteSeRemarcou', {});
+  const ag = { data: '2026-08-05', hora: '10:00', _lembreteEnviado: 'ts' };
+  assert.strictEqual(_limparLembreteSeRemarcou(ag, '2026-08-05', '10:00'), false);
+  assert.strictEqual(ag._lembreteEnviado, 'ts',
+    'salvar sem mexer no horário não pode fazer o paciente receber o lembrete duas vezes');
+});
+
+test('os três caminhos que remarcam chamam o mesmo rearme', () => {
+  for (const fn of ['saveAgendamento', '_agDrop', '_agDropProf']) {
+    const src = _recF(fn).replace(/\/\/[^\n]*/g, '');
+    assert.match(src, /_limparLembreteSeRemarcou\(/, `${fn} remarca e precisa rearmar o lembrete`);
+  }
+  // O copiloto vive dentro do executeAIAction — confere no ramo.
+  const bloco = _fonte.slice(_fonte.indexOf("tipo === 'mover_agendamento'"),
+                            _fonte.indexOf("tipo === 'criar_bloqueio'"));
+  assert.match(bloco, /_limparLembreteSeRemarcou\(/, 'mover pelo copiloto também remarca');
+});
+
+test('copiloto: mover agendamento respeita bloqueio da agenda', () => {
+  const bloco = _fonte.slice(_fonte.indexOf("tipo === 'mover_agendamento'"),
+                             _fonte.indexOf("tipo === 'criar_bloqueio'"))
+                      .replace(/\/\/[^\n]*/g, '');
+  assert.match(bloco, /_isBloqueado\(novaData, novaHora/,
+    'o ramo vizinho (criar_agendamento) já validava — mover não pode furar o bloqueio');
+  assert.match(bloco, /_temConflito\(/, 'e o conflito continua sendo checado');
+});
