@@ -219,6 +219,12 @@ Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
   já enviado aponta pro horário velho, e `_agendamentosParaLembrar` filtra
   `!ag._lembreteEnviado`: sem rearmar, aquele agendamento sai de **todo** ciclo futuro.
   Toda validação de agenda (conflito **e** `_isBloqueado`) vale nos quatro.
+- 🔴 **Estado congelado se elimina, não se mantém fresco.** O chat guardava `_chatIdx`
+  (índice do CRM) e o fallback de "Primeira msg" lia `crm[_chatIdx]` — um lead chegando por
+  realtime deslocava tudo e a conversa exibia a mensagem de **outro paciente**. A conversa
+  já tem identidade: o telefone. `_crmPorTelefone(_chatPhone)`, resolvido na hora do uso.
+  Corolário de nomes: variável que recebe `_waConnected()` **não** se chama `zapiOk` — foi
+  esse nome que convidou a regressão do card de lembretes. Há teste reprovando.
 - 🔴 **Índice no `onclick` é o índice de OUTRO registro.** Ele é calculado no *render* e
   usado no *clique*; entre os dois a coleção muda (unshift do copiloto, outra aba, pull).
   Pior ainda congelado num `dataset` do DOM atravessando um modal — era assim que
