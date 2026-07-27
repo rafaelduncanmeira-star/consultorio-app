@@ -358,6 +358,15 @@ falha de leitura.
 - **Poda antes de gravar.** O snapshot gravava e só depois podava; uma vez cheio o
   `localStorage`, o `setItem` lançava, a poda nunca rodava e o backup automático parava
   **para sempre**, calado (o chamador não tinha `.catch`).
+- **Migração de config lê o objeto SALVO, nunca o já mesclado.** `getAgConfig` faz
+  `{ ...AG_CONFIG_PADRAO, ...salvo }`, então `cfg.campoNovo` **sempre** existe — e o
+  `cfg.campoNovo || (cfg.campoAntigo ? … )` que as telas usavam nunca era falso. A
+  migração de `slotsConsultorioDia` estava em **três** cópias e as três eram código morto:
+  quem configurou a agenda na versão antiga passou a ver a capacidade **de fábrica**, e a
+  ocupação do consultório (Dashboard e PDF do contador) era calculada contra ela. As três
+  ainda discordavam entre si — a da tela de Configurações espalhava o número de segunda a
+  sexta ignorando o `diasUteis`. Migração mora **dentro** do getter, uma vez, antes da
+  validação. Há teste varrendo leitura do campo antigo fora dele.
 - 🔴 **Trocar de usuário sem trocar de PÁGINA mistura as duas contas.** O `logoutUser`
   apagava o `localStorage` e só trocava de tela: todo estado de módulo do anterior
   continuava vivo. `chatHistory` é lido do storage **uma vez, na carga do script** —
