@@ -13000,9 +13000,21 @@ function impRefreshPreview() {
 /* ── Normaliza data (DD/MM/YYYY, serial Excel, YYYY-MM-DD) ── */
 function impNormDate(s) {
   if (!s) return '';
+  // Date object (SheetJS com cellDates:true) — TEM de ser testado ANTES do
+  // String(), senão o instanceof nunca é verdade e a data cai como texto
+  // "Mon Aug 03 2026 ...", que não casa com nenhum formato e vira ''.
+  if (s instanceof Date) {
+    if (isNaN(s.getTime())) return '';
+    // Nada de toISOString: o SheetJS monta a data em hora LOCAL
+    // (new Date(ano, mes, dia)), e em fuso negativo o toISOString devolveria o
+    // dia ANTERIOR — o mesmo erro que o _ymd existe pra evitar.
+    // Planilha gerada com UTC:true chega ancorada em meia-noite UTC; nesse caso
+    // a leitura UTC é que está certa.
+    const meiaNoiteLocal = s.getHours() === 0 && s.getMinutes() === 0 && s.getSeconds() === 0;
+    const meiaNoiteUTC   = s.getUTCHours() === 0 && s.getUTCMinutes() === 0 && s.getUTCSeconds() === 0;
+    return (meiaNoiteLocal || !meiaNoiteUTC) ? _ymd(s) : s.toISOString().slice(0, 10);
+  }
   s = String(s).trim();
-  // Date object (SheetJS com cellDates:true)
-  if (s instanceof Date) return s.toISOString().slice(0,10);
   // Excel serial
   if (/^\d{5}$/.test(s)) {
     const d = new Date(Date.UTC(1899,11,30) + parseInt(s)*86400000);

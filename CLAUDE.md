@@ -100,6 +100,44 @@ como invariante** (quebrar reintroduz o bug):
    é o que o RLS já dizia, e a sidebar liberava a página pra ele lançar despesa que o
    servidor recusava calado.
 
+### Achados NOVOS (fora do backlog original) — já corrigidos
+
+Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
+
+- **Data: nunca compare `'YYYY-MM-DD'` cru com `Date.now()`.** String sem hora é lida
+  como meia-noite **UTC**; `Date.now()` é local. Em UTC-3 a conta já nasce 3h adiantada
+  e vira o dia a partir das 21:00. Ancore os dois lados ao **meio-dia local**
+  (`+ 'T12:00:00'`). Foi o que quebrava `_diasDesde` (todo card do Kanban envelhecia
+  sozinho toda noite).
+- **Nunca `toISOString()` pra extrair `YYYY-MM-DD` de um `Date`** — use `_ymd()`.
+  Em fuso negativo o toISOString devolve o dia anterior.
+- **`instanceof` antes de `String()`.** Em `impNormDate` o teste vinha depois da
+  conversão, então nunca era verdade: `.xlsx` com coluna de data de verdade importava
+  **zero linhas**, todas contadas como "sem data".
+- **`impNormValor`: o separador da DIREITA é o decimal.** Tratar todo ponto como milhar
+  fazia `"1234.56"` virar `123456` — e esse é o formato que o próprio `exportarCSV`
+  grava, então exportar+reimportar inflava o faturamento em 100x.
+- **Telefone: `_foneChat` (webhook) espelha `_normPhone` (app).** Tirar o `55` sem olhar
+  o tamanho comia o DDD de quem é do DDD 55 e escreveu sem código do país — a conversa
+  ficava numa chave que o app nunca procura e o chat abria vazio.
+- **Bloqueio de agenda tem HORA, não só data** (`_isBloqueado` e o `bloqueado()` do
+  webhook). O webhook olhava só a data e apagava o dia inteiro da disponibilidade da IA.
+
+#### Sobre os testes
+
+- `node --test` roda 99 testes. **Rode também em outro fuso** quando mexer em data:
+  `TZ=UTC node --test` — teste de fuso que só passa na máquina local não guarda nada.
+- `tests/_extrair.js` — recorta funções do `app.js`. Aceita `const:NOME` pra constante
+  e entende `async function`.
+- `tests/_extrairTs.js` — recorta funções do `wa-webhook/index.ts` e deixa o Node fazer
+  o type-stripping nativo (v22.6+). A agenda que a IA oferece ao paciente é calculada
+  **lá**, não no `app.js`.
+- **Armadilha do `node:vm`:** o sandbox tem realm próprio. `deepStrictEqual` reprova por
+  protótipo (normalize com `JSON.parse(JSON.stringify(x))`) e `instanceof Date` dá falso
+  se você não passar o **mesmo** `Date` nos globais.
+- Hábito que vale manter: depois de corrigir, **reverta a função antiga e confira que o
+  teste novo reprova**. Já pegou teste meu que passava sem guardar nada.
+
 ### Grupo B — precisa de decisão do usuário
 
 - **MRR tem duas fórmulas convivendo:** `renderProgramas` usa `valorTotal / vigência × 30`

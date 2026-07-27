@@ -187,6 +187,49 @@ test('_novosNoMes: base vazia e mês sem estreia não quebram', () => {
   assert.strictEqual(_novosNoMes(null, '2026-08').receita, 0);
 });
 
+// IMPORTAÇÃO DE DATA. O `instanceof Date` estava DEPOIS do String(s), então
+// nunca era verdade: a data que o SheetJS entrega como objeto Date virava o
+// texto "Mon Aug 03 2026 ...", não casava com nenhum formato e voltava ''.
+// Como impExecute descarta linha sem data, um .xlsx com coluna de data de
+// verdade importava ZERO linhas — e a tela dizia que estavam todas "sem data".
+const IMP_DATA = ['_ymd', 'impNormDate'];
+// O sandbox do node:vm tem realm próprio: sem passar o MESMO Date do teste,
+// o `s instanceof Date` lá dentro compara com outro construtor e dá falso.
+const impData = () => carregar(IMP_DATA, { String, Date, parseInt, isNaN });
+
+test('impNormDate: Date do SheetJS não pode voltar vazia', () => {
+  const { impNormDate } = impData();
+  assert.strictEqual(impNormDate(new Date(2026, 7, 3)), '2026-08-03');
+});
+
+// SheetJS monta a data em hora local (new Date(ano, mes, dia)). Usar
+// toISOString aí devolveria o dia ANTERIOR em fuso negativo — o erro que o
+// _ymd existe pra evitar. Planilha gerada com UTC:true chega em meia-noite UTC
+// e aí a leitura UTC é a certa. As duas têm de cair no mesmo dia.
+test('impNormDate: data local e data ancorada em UTC caem no mesmo dia', () => {
+  const { impNormDate } = impData();
+  assert.strictEqual(impNormDate(new Date(2026, 7, 3)), '2026-08-03', 'meia-noite local');
+  assert.strictEqual(impNormDate(new Date(Date.UTC(2026, 7, 3))), '2026-08-03', 'meia-noite UTC');
+  // Virada de ano é onde o deslocamento de fuso aparece primeiro.
+  assert.strictEqual(impNormDate(new Date(2026, 0, 1)), '2026-01-01');
+  assert.strictEqual(impNormDate(new Date(Date.UTC(2026, 0, 1))), '2026-01-01');
+});
+
+test('impNormDate: formatos de texto e serial do Excel seguem funcionando', () => {
+  const { impNormDate } = impData();
+  assert.strictEqual(impNormDate('03/08/2026'), '2026-08-03', 'DD/MM/YYYY');
+  assert.strictEqual(impNormDate('3-8-2026'), '2026-08-03', 'DD-M-YYYY sem zero à esquerda');
+  assert.strictEqual(impNormDate('2026-08-03'), '2026-08-03', 'já no formato final');
+  assert.strictEqual(impNormDate(46237), '2026-08-03', 'serial do Excel');
+});
+
+test('impNormDate: vazio, lixo e Date inválida devolvem string vazia', () => {
+  const { impNormDate } = impData();
+  for (const ruim of ['', null, undefined, 'quinta-feira', new Date('nao-e-data')]) {
+    assert.strictEqual(impNormDate(ruim), '', `entrada ${String(ruim)}`);
+  }
+});
+
 // IMPORTAÇÃO DE VALOR. Todo ponto era lido como separador de milhar, então
 // "1234.56" virava 123456 — cem vezes maior, calado. E esse é o formato que o
 // exportarCSV deste app escreve: exportar e reimportar inflava o faturamento.
