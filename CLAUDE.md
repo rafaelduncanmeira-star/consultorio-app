@@ -225,6 +225,12 @@ Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
   já tem identidade: o telefone. `_crmPorTelefone(_chatPhone)`, resolvido na hora do uso.
   Corolário de nomes: variável que recebe `_waConnected()` **não** se chama `zapiOk` — foi
   esse nome que convidou a regressão do card de lembretes. Há teste reprovando.
+- **Marco ancorado no fim se calcula a partir do FIM.** O "Renovar" da assinatura vinha de
+  `dataInicio + vigência − 30`, que só coincide com o vencimento na primeira inscrição: a
+  renovação estende a partir do vencimento **antigo** e recria o cronograma a partir de
+  **hoje**. Renovar antes de vencer adiantava o aviso pelos mesmos dias de antecedência, e
+  o desvio se acumulava a cada ciclo; renovar atrasado fazia o `addFu` descartar a linha e
+  a assinatura vencia sem lembrete. Ancore em `dataFim − N`, e aviso já vencido vale hoje.
 - **Nada lê `editState` depois do `closeModal`** — ele acabou de zerar tudo. `savePaciente`
   e `saveDespesa` montavam a linha do histórico ali, com `editState.idx != null`: **toda
   edição virava "Cadastrou"**, a alteração sumia do registro e aparecia uma criação que
