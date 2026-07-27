@@ -4244,7 +4244,15 @@ function _canalBadge(canal) {
 }
 
 function _diasDesde(dataStr) {
-  const diff = Math.floor((Date.now() - new Date(dataStr)) / 86400000);
+  // 'YYYY-MM-DD' sem hora é lido pelo JS como meia-noite UTC. Comparar isso com
+  // Date.now() (que é hora local) somava o fuso à conta: em UTC-3, a partir das
+  // 21:00 todo card ganhava um dia inteiro — contato feito à noite já aparecia
+  // como "1d", e os limiares de cor (verde/amarelo/vermelho) andavam junto.
+  // Ancorar os DOIS lados ao meio-dia local faz a conta cair sempre no dia certo.
+  const d = new Date(String(dataStr || '').slice(0, 10) + 'T12:00:00');
+  if (isNaN(d.getTime())) return { texto: '—', cor: '#94a3b8' };
+  const hoje = new Date(); hoje.setHours(12, 0, 0, 0);
+  const diff = Math.round((hoje - d) / 86400000);
   if (diff <= 0) return { texto: 'hoje',        cor: '#10b981' };
   if (diff <= 3) return { texto: `${diff}d`,     cor: '#10b981' };
   if (diff <= 14)return { texto: `${diff}d`,     cor: '#f59e0b' };

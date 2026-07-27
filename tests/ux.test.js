@@ -5,6 +5,55 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const { carregar } = require('./_extrair.js');
 
+// ---------- _diasDesde: idade do card no Kanban ----------
+// 'YYYY-MM-DD' é lido pelo JS como meia-noite UTC. Comparado com Date.now()
+// (hora local), em UTC-3 isso somava o fuso à conta: das 21:00 em diante, o
+// contato feito HOJE aparecia como "1d" e a cor do card pulava de verde pra
+// amarelo sozinha. O bug só existe em fuso negativo — daí o TZ fixo aqui, sem
+// ele o teste passaria numa máquina em UTC sem guardar nada. É o fuso do uso
+// real do app.
+process.env.TZ = 'America/Sao_Paulo';
+
+// Relógio parado numa data/hora LOCAL (componentes, não string ISO): assim o
+// instante acompanha o TZ acima em vez de depender do fuso da máquina.
+function _relogio(ano, mes, dia, hora, min) {
+  const fixo = new Date(ano, mes - 1, dia, hora, min, 0).getTime();
+  class DataFixa extends Date {
+    constructor(...a) { super(...(a.length ? a : [fixo])); }
+    static now() { return fixo; }
+  }
+  return DataFixa;
+}
+const _ambiente = D => ({ Date: D, String, isNaN, Math });
+
+test('_diasDesde: contato de hoje continua "hoje" às 21h (fuso não vira o dia)', () => {
+  for (const [h, m] of [[9, 0], [18, 0], [20, 59], [21, 0], [23, 59]]) {
+    const { _diasDesde } = carregar('_diasDesde', _ambiente(_relogio(2026, 8, 3, h, m)));
+    assert.strictEqual(_diasDesde('2026-08-03').texto, 'hoje',
+      `às ${h}:${m} o contato de hoje não pode virar "1d"`);
+  }
+});
+
+test('_diasDesde: conta dias de calendário, não blocos de 24h', () => {
+  // 23:59 de 03/08 olhando um contato de 01/08 = 2 dias de calendário.
+  const { _diasDesde } = carregar('_diasDesde', _ambiente(_relogio(2026, 8, 3, 23, 59)));
+  assert.strictEqual(_diasDesde('2026-08-01').texto, '2d');
+  assert.strictEqual(_diasDesde('2026-07-20').texto, '14d');
+  assert.strictEqual(_diasDesde('2026-07-19').texto, '15d atrás');
+});
+
+test('_diasDesde: data ausente ou lixo não vira "NaN d atrás" no card', () => {
+  const { _diasDesde } = carregar('_diasDesde', _ambiente(_relogio(2026, 8, 3, 10, 0)));
+  for (const ruim of [null, undefined, '', 'sem data']) {
+    assert.strictEqual(_diasDesde(ruim).texto, '—', `entrada ${JSON.stringify(ruim)}`);
+  }
+});
+
+test('_diasDesde: aceita timestamp completo, não só YYYY-MM-DD', () => {
+  const { _diasDesde } = carregar('_diasDesde', _ambiente(_relogio(2026, 8, 3, 10, 0)));
+  assert.strictEqual(_diasDesde('2026-08-01T22:15:00.000Z').texto, '2d');
+});
+
 // ---------- _comTituloMedico: nunca duplica "Dr./Dra." ----------
 test('_comTituloMedico adiciona "Dr." quando falta', () => {
   const { _comTituloMedico } = carregar('_comTituloMedico');
