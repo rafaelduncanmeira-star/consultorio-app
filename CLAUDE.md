@@ -358,6 +358,15 @@ falha de leitura.
 - **Poda antes de gravar.** O snapshot gravava e só depois podava; uma vez cheio o
   `localStorage`, o `setItem` lançava, a poda nunca rodava e o backup automático parava
   **para sempre**, calado (o chamador não tinha `.catch`).
+- **Toda chamada externa passa por `_fetchComPrazo`.** O `fetch()` do navegador **não tem
+  prazo**: servidor que aceita a conexão e nunca responde deixa a promise pendurada pra
+  sempre — não resolve, não rejeita, e **nenhum `catch`/`finally` do chamador roda**. No
+  webhook a requisição morre no fim da invocação; no app a página continua viva e o estado
+  congela junto: a trava `_cicloLembretesRodando` ficava presa e **nenhum paciente era
+  lembrado de novo naquela sessão**, o input do chat ficava desabilitado e o botão de teste
+  de conexão ficava eterno em "Testando…". `AbortController` à mão (não
+  `AbortSignal.timeout`, que não existe no Safari < 16) + corrida com timer; rejeita
+  **antes** de abortar pra a mensagem ser legível. `tests/rede.test.js` varre `fetch()` cru.
 - **`opacity: 0` não desliga clique.** O toast ficava sobre a nav inferior do celular e
   matava o botão central. Elemento que some precisa de `pointer-events: none`.
 - **SQL: `SETUP_EQUIPE.sql` sobrescreve policies que arquivos posteriores restringem.**
