@@ -16,13 +16,15 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const { carregar, fonte } = require('./_extrair.js');
 
-function ambiente({ owner = 'clinicaB', dono = null, outbox = {}, confirmar = true } = {}) {
+function ambiente({ owner = 'clinicaB', dono = null, outbox = {}, confirmar = true, onboarding = false } = {}) {
   const store = { consult_pacientes: '[{"nome":"Maria"}]', consult__outbox: '{}' };
   if (dono) store.consult__dono = dono;
+  if (onboarding) store.consult_onboarding_pending = '1';
   const eventos = [];
   const s = carregar(['const:_CHAVE_DONO', '_conferirDonoDoAparelho'], {
     currentUser: { id: owner },
     currentDataOwner: owner,
+    location: { reload: () => eventos.push('reload') },
     confirm: (txt) => { eventos.push(txt); return confirmar; },
     _outboxGet: () => outbox,
     _signOutIntencional: async () => { eventos.push('signout'); },
@@ -63,13 +65,26 @@ test('membro da mesma clínica não é tratado como outra conta', async () => {
   assert.deepStrictEqual(a.eventos, []);
 });
 
-test('outra conta: avisa, lista o que não subiu e só entra com confirmação', async () => {
+test('outra conta: avisa, lista o que não subiu, limpa e RECARREGA', async () => {
   const a = ambiente({ owner: 'clinicaB', dono: 'clinicaA', outbox: { pacientes: {}, crm: {} } });
-  assert.equal(await a._conferirDonoDoAparelho(), true);
+  // Falso de propósito: nada continua nesta página. Este caminho só existe
+  // porque a sessão caiu SEM trocar de página, então o estado de módulo do dono
+  // anterior (histórico da MaestrIA, canais de realtime no owner antigo) ainda
+  // está vivo aqui — limpar só o localStorage resolveria metade do problema.
+  assert.equal(await a._conferirDonoDoAparelho(), false);
   assert.match(a.eventos[0], /OUTRA conta/);
   assert.match(a.eventos[0], /pacientes, crm/, 'o que não subiu tem de aparecer por nome');
   assert.equal(a.store.consult_pacientes, undefined, 'os dados da outra conta saem do aparelho');
   assert.equal(a.store.consult__dono, 'clinicaB', 'a marca é regravada DEPOIS do wipe');
+  assert.ok(a.eventos.includes('reload'));
+});
+
+test('a marca de onboarding do cadastro em curso sobrevive ao wipe', async () => {
+  // Ela foi escrita há segundos pelo cadastro que está acontecendo, não é
+  // resíduo do dono anterior: sem ela o médico novo não vê os primeiros passos.
+  const a = ambiente({ owner: 'clinicaB', dono: 'clinicaA', onboarding: true });
+  await a._conferirDonoDoAparelho();
+  assert.equal(a.store.consult_onboarding_pending, '1');
 });
 
 test('recusando a confirmação, ninguém entra e nada é tocado', async () => {

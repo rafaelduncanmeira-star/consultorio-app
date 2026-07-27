@@ -290,6 +290,7 @@ async function _conferirDonoDoAparelho() {
     return true;
   }
   const pend = Object.keys(_outboxGet());
+  const pendenteOnboarding = localStorage.getItem('consult_onboarding_pending') === '1';
   if (!confirm(
       'Este aparelho ainda tem os dados de OUTRA conta'
       + (pend.length ? ', com alterações que nunca chegaram à nuvem (' + pend.join(', ') + ')' : '')
@@ -299,9 +300,20 @@ async function _conferirDonoDoAparelho() {
     await _signOutIntencional();
     return false;
   }
+  // Este caminho só existe porque a sessão caiu SEM trocar de página: todo
+  // estado de módulo do dono anterior continua vivo aqui (histórico da
+  // MaestrIA, conversa de WhatsApp aberta, canais de realtime assinados no
+  // owner antigo). Limpar o localStorage e seguir em frente resolveria metade
+  // do problema — a mesma metade que o logout resolvia antes de recarregar.
+  // A sessão do Supabase mora fora do consult_*, então sobrevive ao wipe e o
+  // checkSession da página nova entra direto, já com o aparelho no nome certo.
   Object.keys(localStorage).filter(k => k.startsWith('consult_')).forEach(k => localStorage.removeItem(k));
   localStorage.setItem(_CHAVE_DONO, owner);   // depois do wipe: a chave também começa com consult_
-  return true;
+  // Preserva a marca de onboarding: ela foi escrita há segundos por ESTE
+  // cadastro, não é resíduo do dono anterior.
+  if (pendenteOnboarding) localStorage.setItem('consult_onboarding_pending', '1');
+  location.reload();
+  return false;   // nada continua nesta página — quem assume é a recarga
 }
 
 // ============ OUTBOX — fila de escritas não confirmadas (offline/rejeitadas) ============
@@ -1055,7 +1067,7 @@ async function loginUser(email, password) {
     await resolveDataOwner();
     // ANTES de qualquer leitura/escrita: os dados que estão aqui são desta conta?
     if (!await _conferirDonoDoAparelho()) {
-      return { error: 'Entrada cancelada — os dados da outra conta continuam neste aparelho.' };
+      return { error: 'Entrada interrompida — este aparelho tinha dados de outra conta.' };
     }
     _auditLog('login', 'sistema', `Entrou no sistema`);
     // Sincroniza dados da nuvem
@@ -1091,7 +1103,7 @@ async function signUpUser(email, password, nome, role) {
       await _acceptInviteIfPending();
       await resolveDataOwner();
       if (!await _conferirDonoDoAparelho()) {
-        return { error: 'Cadastro feito, mas a entrada foi cancelada — os dados da outra conta continuam neste aparelho.' };
+        return { error: 'Conta criada. A entrada foi interrompida porque este aparelho tinha dados de outra conta.' };
       }
       initLeadsRealtime();
       return { ok: true, needsConfirmation: false };
@@ -14984,7 +14996,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await _acceptInviteIfPending();
     await resolveDataOwner();
     if (!await _conferirDonoDoAparelho()) {
-      await barrar('Entrada cancelada — os dados da outra conta continuam neste aparelho.');
+      await barrar('Entrada interrompida — este aparelho tinha dados de outra conta.');
       return;
     }
     // O app tem de ABRIR mesmo se a sincronização falhar. Sem este try, uma
