@@ -97,7 +97,8 @@ test('o exportarCSV continua citando quebra de linha e aspas', () => {
 // conhecia 'parcel' (de "Parcelado", vocabulário de planilha) e não 'parci' —
 // ou seja, não reconhecia o valor que o PRÓPRIO app grava.
 const normalizadores = () => carregar(
-  ['impParseCSV', 'impNormDate', 'impNormValor', 'impNormStatus', 'impNormTipo', '_normPhone'],
+  ['impParseCSV', '_dataValidaOuVazio', 'impNormDate', 'impNormValor', 'impNormStatus',
+   'impNormTipo', '_normPhone'],
   { String, Object, Number, Date, Math, parseFloat, parseInt, isNaN, RegExp });
 
 // Espelha exatamente a citação do exportarCSV.
@@ -145,4 +146,47 @@ test('ida e volta: data, valor e telefone voltam iguais', () => {
   assert.strictEqual(s.impNormValor(row.valor), orig.valor,
     'o separador da DIREITA é o decimal — é o formato que o exportarCSV grava');
   assert.strictEqual(s._normPhone(row.whatsapp), orig.whatsapp);
+});
+
+// ---------- data que não existe não pode entrar ----------
+// O formato batia mas o CONTEÚDO não era conferido: "31/02/2026" saía como
+// "2026-02-31" e "13/13/2026" como "2026-13-13", direto pra dentro da coleção.
+// E a tela de importação contava essas linhas como importadas COM SUCESSO.
+// O estrago é silencioso: getMes('2026-13-13') devolve '2026-13', e nenhum
+// seletor de mês do app oferece esse valor — o atendimento e o dinheiro dele
+// ficam fora de todo filtro por mês (invisíveis no Dashboard, no Relatório e no
+// PDF) mas presentes nos totais que varrem a base inteira. Os números param de
+// fechar entre telas e nada aponta pra causa.
+const normData = () => carregar(['_dataValidaOuVazio', 'impNormDate'],
+  { String, Date, Number, parseInt, isNaN, RegExp, Math }).impNormDate;
+
+test('data: dia ou mês que não existem são recusados', () => {
+  const f = normData();
+  for (const ruim of ['31/02/2026', '32/01/2026', '00/01/2026', '13/13/2026',
+                      '2026-02-31', '2026-13-01', '2026-00-10']) {
+    assert.strictEqual(f(ruim), '', `${ruim} não é uma data`);
+  }
+});
+
+test('data: 29 de fevereiro só passa em ano bissexto', () => {
+  const f = normData();
+  assert.strictEqual(f('29/02/2024'), '2024-02-29', '2024 é bissexto');
+  assert.strictEqual(f('29/02/2026'), '',
+    'o round-trip pelo Date é o que pega: 29/02/2026 rolaria pra 1º de março');
+});
+
+test('data: os formatos que já funcionavam continuam funcionando', () => {
+  const f = normData();
+  assert.strictEqual(f('05/08/2026'), '2026-08-05');
+  assert.strictEqual(f('5/8/2026'), '2026-08-05');
+  assert.strictEqual(f('05-08-2026'), '2026-08-05');
+  assert.strictEqual(f('2026-08-05'), '2026-08-05');
+  assert.strictEqual(f(''), '');
+  assert.strictEqual(f('texto'), '');
+});
+
+test('data: a linha recusada é contada como inválida, não como importada', () => {
+  const src = recortarFuncao('impExecute').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /const data = impNormDate\([\s\S]{0,40}?if \(!data\) \{ nSemData\+\+; return; \}/,
+    'devolver vazio só ajuda porque o impExecute pula a linha e a conta como inválida');
 });

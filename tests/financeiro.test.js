@@ -242,7 +242,7 @@ test('_novosNoMes: base vazia e mês sem estreia não quebram', () => {
 // texto "Mon Aug 03 2026 ...", não casava com nenhum formato e voltava ''.
 // Como impExecute descarta linha sem data, um .xlsx com coluna de data de
 // verdade importava ZERO linhas — e a tela dizia que estavam todas "sem data".
-const IMP_DATA = ['_ymd', 'impNormDate'];
+const IMP_DATA = ['_ymd', '_dataValidaOuVazio', 'impNormDate'];
 // O sandbox do node:vm tem realm próprio: sem passar o MESMO Date do teste,
 // o `s instanceof Date` lá dentro compara com outro construtor e dá falso.
 const impData = () => carregar(IMP_DATA, { String, Date, parseInt, isNaN });

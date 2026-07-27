@@ -14222,10 +14222,29 @@ function impNormDate(s) {
   }
   // DD/MM/YYYY ou DD-MM-YYYY
   const m1 = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-  if (m1) return `${m1[3]}-${m1[2].padStart(2,'0')}-${m1[1].padStart(2,'0')}`;
+  if (m1) return _dataValidaOuVazio(+m1[3], +m1[2], +m1[1]);
   // YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  const m2 = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m2) return _dataValidaOuVazio(+m2[1], +m2[2], +m2[3]);
   return '';
+}
+
+// Devolve 'AAAA-MM-DD' se a data EXISTIR; senão ''. O formato batia mas o
+// conteúdo não era conferido: "31/02/2026" saía como "2026-02-31" e "13/13/2026"
+// como "2026-13-13", direto pra dentro da coleção. E a tela de importação
+// contava essas linhas como importadas COM SUCESSO.
+// O estrago é silencioso: getMes('2026-13-13') devolve '2026-13', e nenhum
+// seletor de mês do app oferece esse valor — o atendimento (e o dinheiro dele)
+// fica fora de todo filtro por mês, invisível no Dashboard, no Relatório e no
+// PDF, mas presente nos totais que varrem a base inteira. Os números param de
+// fechar entre telas e nada aponta pra causa.
+// O truque do round-trip é o que pega fevereiro: new Date(2026, 1, 31) rola
+// sozinho pra 3 de março, então o dia que volta não é o que entrou.
+function _dataValidaOuVazio(ano, mes, dia) {
+  if (!(ano >= 1900 && ano <= 2200) || !(mes >= 1 && mes <= 12) || !(dia >= 1 && dia <= 31)) return '';
+  const d = new Date(ano, mes - 1, dia);
+  if (d.getFullYear() !== ano || d.getMonth() !== mes - 1 || d.getDate() !== dia) return '';
+  return `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
 }
 
 /* ── Normaliza valor monetário ── */
