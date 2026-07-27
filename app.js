@@ -1821,6 +1821,12 @@ function _pacientePorRef(pacId, pacIdx) {
 function _agVirouAtendimento(a) {
   return !!(a && (a.pacId || a.pacIdx != null));
 }
+// Card do CRM de um telefone já normalizado. Existe pra que nada precise
+// guardar índice de CRM: a coleção é reordenada por todo lead que chega.
+function _crmPorTelefone(fone) {
+  if (!fone) return null;
+  return DB.get('crm').find(c => c && _normPhone(c.whatsapp) === fone) || null;
+}
 function _crmPorRef(crmId, crmIdx) {
   const crm = DB.get('crm');
   if (crmId) { const c = crm.find(x => x.id === crmId); if (c) return c; }
@@ -11050,11 +11056,11 @@ function abrirPerfilPaciente(nomeEnc) {
   const whatsEl = document.getElementById('perfil-whats');
   if (whatsEl) {
     if (whats) {
-      const zapiOk = _waConnected();
+      const waOk = _waConnected();
       whatsEl.innerHTML =
         `<button onclick="falarComPacienteNome('${_jsArg(nome)}')" style="display:inline-flex;align-items:center;gap:6px;background:#dcfce7;color:#16a34a;border:none;border-radius:7px;padding:5px 12px;font-size:12.5px;font-weight:600;cursor:pointer;">💬 ${_esc(whats)}</button>` +
         `<button onclick="_editarWhatsPerfil('${_jsArg(nome)}')" style="background:none;border:none;color:#94a3b8;font-size:11.5px;cursor:pointer;margin-left:8px;">editar</button>` +
-        `<div style="font-size:10.5px;color:#94a3b8;margin-top:3px;">${zapiOk ? '↪ responde pelo CRM' : '↪ abre o WhatsApp'}</div>`;
+        `<div style="font-size:10.5px;color:#94a3b8;margin-top:3px;">${waOk ? '↪ responde pelo CRM' : '↪ abre o WhatsApp'}</div>`;
     } else {
       whatsEl.innerHTML =
         `<button onclick="_editarWhatsPerfil('${_jsArg(nome)}')" style="background:#f0fdf4;border:1px dashed #86efac;color:#16a34a;border-radius:7px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;">➕ Adicionar WhatsApp</button>`;
@@ -12943,7 +12949,6 @@ function disconnectZapi() {
 // ====================== CHAT PANEL ======================
 
 let _chatPhone = null;
-let _chatIdx   = null;
 let _chatSub   = null;
 
 function openCrmChat(ref) {
@@ -12951,41 +12956,35 @@ function openCrmChat(ref) {
   const idx = (typeof ref === 'string') ? data.findIndex(x => x.id === ref) : ref;
   const r = data[idx];
   if (!r) return;
-  abrirChatPorTelefone(r.nome, r.whatsapp, idx);
+  abrirChatPorTelefone(r.nome, r.whatsapp);
 }
 
 // Abre o chat interno (CRM) por telefone — funciona pra contatos do CRM E
 // pra pacientes/follow-ups que não estão no funil.
-function abrirChatPorTelefone(nome, whatsapp, crmIdx) {
+function abrirChatPorTelefone(nome, whatsapp) {
   // Normaliza pra forma local (sem DDI) — a MESMA chave que o webhook grava em
   // crm_messages. Contato salvo com +55 abria um chat vazio e as respostas do
   // paciente nunca apareciam.
   const wa = _normPhone(whatsapp);
   if (!wa) { alert('WhatsApp não cadastrado.'); return; }
-  // Se não veio um índice de CRM, tenta achar um contato com esse número
-  if (crmIdx === undefined || crmIdx === null) {
-    const i = DB.get('crm').findIndex(c => _normPhone(c.whatsapp) === wa);
-    crmIdx = i >= 0 ? i : null;
-  }
   _chatPhone = wa;
-  _chatIdx   = crmIdx;
 
   const nameEl  = document.getElementById('chat-contact-name');
   const phoneEl = document.getElementById('chat-contact-phone');
   if (nameEl)  nameEl.textContent  = nome || '—';
   if (phoneEl) phoneEl.textContent = whatsapp || wa;
 
-  const zapiOk     = _waConnected();
+  const waOk       = _waConnected();
   const inputArea  = document.getElementById('chat-input-area');
   const noZapiMsg  = document.getElementById('chat-no-zapi');
   const statusEl   = document.getElementById('chat-wa-status');
-  if (inputArea) inputArea.style.display = zapiOk ? 'flex' : 'none';
+  if (inputArea) inputArea.style.display = waOk ? 'flex' : 'none';
   const iaBtn = document.getElementById('chat-ia-btn');
   if (iaBtn) iaBtn.style.display = getIaConfig().enabled ? '' : 'none';
-  if (noZapiMsg) noZapiMsg.style.display = zapiOk ? 'none' : '';
+  if (noZapiMsg) noZapiMsg.style.display = waOk ? 'none' : '';
   if (statusEl)  {
-    statusEl.textContent = zapiOk ? '● WhatsApp' : 'sem integração';
-    statusEl.style.color = zapiOk ? '#10b981' : '#94a3b8';
+    statusEl.textContent = waOk ? '● WhatsApp' : 'sem integração';
+    statusEl.style.color = waOk ? '#10b981' : '#94a3b8';
   }
 
   document.getElementById('crm-chat-panel')?.classList.add('open');
@@ -13001,8 +13000,8 @@ function abrirChatPorTelefone(nome, whatsapp, crmIdx) {
 function falarComPaciente(nome, whatsapp, mensagem) {
   const wa = String(whatsapp || '').replace(/\D/g, '');
   if (!wa) { alert('WhatsApp não cadastrado para ' + (nome || 'este paciente') + '.'); return; }
-  const zapiOk = _waConnected();
-  if (zapiOk) {
+  const waOk = _waConnected();
+  if (waOk) {
     abrirChatPorTelefone(nome, whatsapp);
     if (mensagem) { const inp = document.getElementById('chat-input-text'); if (inp) { inp.value = mensagem; inp.focus(); } }
   } else {
@@ -13027,7 +13026,6 @@ function closeCrmChat() {
   document.getElementById('crm-chat-panel')?.classList.remove('open');
   document.getElementById('crm-chat-panel-overlay')?.classList.remove('open');
   _chatPhone = null;
-  _chatIdx   = null;
   if (_chatSub && _supa) { _supa.removeChannel(_chatSub); _chatSub = null; }
 }
 
@@ -13052,7 +13050,14 @@ async function loadChatHistory(phone) {
     if (error) throw error;
     if (!data || data.length === 0) {
       // Fallback p/ contatos antigos: a 1ª mensagem ficava só no obs do card
-      const c = (_chatIdx != null) ? DB.get('crm')[_chatIdx] : null;
+      // Pelo TELEFONE, que é a identidade da conversa — nunca por um índice do
+      // CRM congelado quando o chat abriu. O CRM recebe leads por realtime e
+      // cada um entra com unshift, deslocando tudo: o índice guardado passava a
+      // apontar pro card de OUTRO contato, e esta conversa exibia a primeira
+      // mensagem de outro paciente como se fosse dele. Numa clínica isso é
+      // dado de saúde na tela errada. (E ficou mais fácil de acontecer depois
+      // que o loadChatHistory passou a rodar também na reconexão do canal.)
+      const c = _crmPorTelefone(_chatPhone);
       const m = c && c.obs && c.obs.match(/^Primeira msg:\s*([\s\S]+)/);
       if (m && m[1].trim()) {
         _renderChatMessages(container, [{
