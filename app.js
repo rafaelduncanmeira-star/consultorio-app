@@ -663,9 +663,15 @@ async function cancelarConvite(inviteId) {
 
 // Copia link de convite pro clipboard
 function _copyLinkConvite(link) {
+  // O writeText REJEITA quando a aba não está em foco ou a permissão foi negada
+  // (acontece direto depois de um alert/confirm, e em http). Sem catch, o toast
+  // não aparecia E nada ia pro clipboard: o médico colava no WhatsApp o que
+  // estivesse lá de antes e mandava isso pra pessoa que ele quer convidar.
+  // Os dois outros pontos que copiam link (_copyWebhookUrl e
+  // _copyWebhookUrlProf) já caíam num alert com o texto — só este não caía.
   navigator.clipboard.writeText(link).then(() => {
     if (typeof toast === 'function') toast('🔗 Link copiado! Envie pelo WhatsApp ou email.');
-  });
+  }).catch(() => alert('Não consegui copiar. Copie o link manualmente:\n\n' + link));
 }
 
 // Verifica URL: ?invite=TOKEN → guarda em localStorage pra aceitar após login

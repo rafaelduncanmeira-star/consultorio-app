@@ -602,3 +602,26 @@ test('contexto: o histórico de consultas esconde valor e status de pagamento', 
   assert.match(trecho, /veFinanceiro\s*\n?\s*\?/,
     'sem o gate, cada linha do histórico leva o valor e o statusPgto junto');
 });
+
+// ---------- copiar link não pode falhar em silêncio ----------
+// navigator.clipboard.writeText REJEITA quando a aba não está em foco ou a
+// permissão foi negada (acontece direto depois de um alert/confirm, e em http).
+// Sem catch, o toast de sucesso não aparece E nada vai pro clipboard: o médico
+// cola no WhatsApp o que estivesse lá de antes e manda isso pra pessoa que ele
+// quer convidar pra clínica.
+test('todo copiar-link tem plano B quando o clipboard recusa', () => {
+  const { fonte } = require('./_extrair.js');
+  const semCom = fonte.replace(/\/\/[^\n]*/g, '');
+  const semPlanoB = [];
+  for (const m of semCom.matchAll(/navigator\.clipboard\.writeText\([^)]*\)([\s\S]{0,320}?)(?=\n\}|\nfunction )/g)) {
+    if (!/\.catch\(/.test(m[1])) semPlanoB.push(m[0].slice(0, 70));
+  }
+  assert.deepStrictEqual(semPlanoB, [],
+    'falha de clipboard é silenciosa: nem o toast aparece, nem o texto é copiado');
+});
+
+test('_copyLinkConvite mostra o link quando não consegue copiar', () => {
+  const src = _rec('_copyLinkConvite').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /\.catch\(/);
+  assert.match(src, /\+ link/, 'o plano B tem de MOSTRAR o link, senão a pessoa fica sem ele');
+});
