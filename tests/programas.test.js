@@ -184,3 +184,56 @@ test('nenhuma tela volta a classificar programa pelo texto de obs', () => {
   assert.deepStrictEqual(crus.map(m => m[0]), [],
     'obs é editável pelo médico — o vínculo tem de ser campo');
 });
+
+// ---------- o aviso de renovação tem de olhar o VENCIMENTO ----------
+// O cronograma de assinatura nasce em duas situações e elas não são iguais:
+//   · criarInscricao passa (dataInicio, dataInicio + vigência) — os dois batem;
+//   · saveRenovacao passa (HOJE, vencimentoAntigo + vigência) — não batem.
+// Ancorar o "Renovar" em dataInicio + vigência só acerta o primeiro caso. Quem
+// renova 60 dias antes de vencer — o normal, porque se renova quando se fala
+// com o paciente — recebia o aviso 90 dias antes do vencimento real, e o desvio
+// se acumulava a cada ciclo. Quem renovava atrasado ficava sem antecedência
+// nenhuma.
+function cronograma(inicio, fim, vigencia = 'Anual') {
+  const { _gerarCronogramaFollowups } = carregar(
+    ['_ymd', '_addDaysIso', '_vigenciaDias', '_novoId', '_gerarCronogramaFollowups'],
+    { Date, Math, String });
+  return _gerarCronogramaFollowups(
+    { id: 'ins1', pacienteNome: 'Ana', profissionalId: null },
+    { tipo: 'Assinatura', nome: 'Compagni', vigencia },
+    inicio, fim);
+}
+const renovar = (fus) => fus.find(f => f.obs.startsWith('Renovar'));
+
+test('assinatura nova: o "Renovar" cai 30 dias antes do vencimento', () => {
+  const fus = cronograma('2026-01-01', '2027-01-01');
+  assert.strictEqual(renovar(fus).dataContato, '2026-12-02');
+});
+
+test('renovação antecipada: o "Renovar" continua colado no vencimento novo', () => {
+  // Vencia em 2026-03-01; renovou 60 dias antes (2026-01-01).
+  // Novo vencimento = 2027-03-01, então o aviso é 2027-01-30 — não 2026-12-02.
+  const fus = cronograma('2026-01-01', '2027-03-01');
+  assert.strictEqual(renovar(fus).dataContato, '2027-01-30',
+    'ancorar em dataInicio+vigência avisaria 90 dias cedo demais');
+});
+
+test('renovação atrasada ainda deixa o aviso dentro do período', () => {
+  // Venceu e só renovou depois: o novo vencimento está a menos de 30 dias.
+  const fus = cronograma('2026-01-01', '2026-01-20');
+  assert.strictEqual(renovar(fus).dataContato, '2026-01-01',
+    'aviso já vencido vale HOJE — descartar deixaria a renovação sem lembrete');
+});
+
+test('o "Renovar" nunca é descartado por cair fora da janela', () => {
+  for (const vig of ['Mensal', 'Trimestral', 'Semestral', 'Anual']) {
+    const fus = cronograma('2026-01-01', '2026-01-10', vig);
+    assert.ok(renovar(fus), `${vig}: sem o aviso, a assinatura vence em silêncio`);
+  }
+});
+
+test('os check-ins continuam ancorados no início do período', () => {
+  const fus = cronograma('2026-01-01', '2027-03-01');
+  const boasVindas = fus.find(f => f.obs.startsWith('Boas-vindas'));
+  assert.strictEqual(boasVindas.dataContato, '2026-01-08');
+});

@@ -2796,7 +2796,6 @@ function _gerarCronogramaFollowups(ins, prog, dataInicio, dataFim) {
                      dataReav: dataFim, programaInscricaoId: ins.id,
                      profissionalId: ins.profissionalId || null };
   const fus = [];
-  const vigDias = _vigenciaDias(prog.vigencia);
 
   function addFu(dias, etiqueta, ultConsultaOverride) {
     const dataContato = _addDaysIso(dataInicio, dias);
@@ -2811,28 +2810,49 @@ function _gerarCronogramaFollowups(ins, prog, dataInicio, dataFim) {
     });
   }
 
+  // O aviso de RENOVAÇÃO se ancora no vencimento, não em dataInicio + vigência.
+  // Os dois só coincidem na primeira inscrição. Na renovação o cronograma é
+  // recriado a partir de HOJE, enquanto o vencimento novo sai do vencimento
+  // ANTIGO + vigência — quem renova 60 dias antes de vencer (o normal: renova-se
+  // quando se fala com o paciente) receberia o "Renovar" 90 dias antes do
+  // vencimento real, e o desvio se acumula a cada ciclo. Quem renova atrasado
+  // caía no oposto: o aviso nascia em cima do vencimento, sem antecedência.
+  function addFuAntesDoFim(dias, etiqueta) {
+    let dataContato = _addDaysIso(dataFim, -dias);
+    // Já passou (renovação feita perto do novo vencimento): vale hoje mesmo —
+    // é justamente quando o médico precisa ver o aviso, não é caso de descartar.
+    if (dataContato < dataInicio) dataContato = dataInicio;
+    fus.push({
+      id: _novoId('fu'),
+      ...tipoBase,
+      ultConsulta: dataInicio,
+      dataContato,
+      obs: etiqueta,
+    });
+  }
+
   if (prog.vigencia === 'Mensal') {
     // 7 dias: boas-vindas | 25 dias: renovação (5 dias antes do fim)
     addFu(7,  `Check-in inicial · ${prog.nome}`);
-    addFu(Math.max(vigDias - 5, 15), `Renovar ${prog.nome}`);
+    addFuAntesDoFim(5, `Renovar ${prog.nome}`);
   } else if (prog.vigencia === 'Trimestral') {
     // 7d boas-vindas · 45d meio · 80d renovação (10d antes)
     addFu(7,  `Boas-vindas · ${prog.nome}`);
     addFu(45, `Check-in intermediário · ${prog.nome}`);
-    addFu(vigDias - 10, `Renovar ${prog.nome}`);
+    addFuAntesDoFim(10, `Renovar ${prog.nome}`);
   } else if (prog.vigencia === 'Semestral') {
     // 7d, 60d, 120d, renovação 30d antes do fim
     addFu(7,   `Boas-vindas · ${prog.nome}`);
     addFu(60,  `Check-in 2 meses · ${prog.nome}`);
     addFu(120, `Check-in 4 meses · ${prog.nome}`);
-    addFu(vigDias - 30, `Renovar ${prog.nome}`);
+    addFuAntesDoFim(30, `Renovar ${prog.nome}`);
   } else {
     // Anual (365d): 7d, 90d, 180d (meio), 270d, renovação 30d antes
     addFu(7,   `Boas-vindas · ${prog.nome}`);
     addFu(90,  `Check-in trimestral · ${prog.nome}`);
     addFu(180, `Check-in semestral · ${prog.nome}`);
     addFu(270, `Check-in 9 meses · ${prog.nome}`);
-    addFu(vigDias - 30, `Renovar ${prog.nome}`);
+    addFuAntesDoFim(30, `Renovar ${prog.nome}`);
   }
   return fus;
 }
