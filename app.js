@@ -3785,7 +3785,7 @@ function _statusPgtoCanonico(valor) {
   return STATUS_PGTO.includes(valor) ? valor : 'Pendente';
 }
 
-function pgtoSelect(status, idx) {
+function pgtoSelect(status, ref) {
   const val = (!status || status === 'null' || status === 'undefined') ? 'Pendente' : status;
   // 'Parcial' é gravado por toda inscrição parcelada em programa
   // (inscreverEmPrograma) e contado por _resumoFin. Sem ele na lista, nenhuma
@@ -3801,16 +3801,30 @@ function pgtoSelect(status, idx) {
   const s = styles[val] || styles['Pendente'];
   const opts = ['Pago','Parcial','Pendente','Isento']
     .map(o => `<option value="${o}"${val===o?' selected':''}>${o}</option>`).join('');
-  return `<select onchange="updatePacStatus(${idx},this.value)" style="${s};border:none;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:600;cursor:pointer;outline:none;-webkit-appearance:none;appearance:none;text-align:center;">${opts}</select>`;
+  // `ref` já vem pronto do chamador: "'pac_x9'" (com aspas) ou um número.
+  return `<select onchange="updatePacStatus(${ref},this.value)" style="${s};border:none;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:600;cursor:pointer;outline:none;-webkit-appearance:none;appearance:none;text-align:center;">${opts}</select>`;
 }
 
-function updatePacStatus(idx, newStatus) {
+// `ref` é o id estável (string) ou, pra registro legado, o índice (número).
+// Resolve no MOMENTO da ação: entre o render e o clique a coleção pode ter
+// mudado, e um índice congelado aponta pro atendimento de outro paciente.
+function _acharPacPorRef(data, ref) {
+  if (typeof ref === 'string') return data.findIndex(p => p && p.id === ref);
+  return (typeof ref === 'number' && data[ref]) ? ref : -1;
+}
+
+function updatePacStatus(ref, newStatus) {
   const data = DB.get('pacientes');
+  const idx = _acharPacPorRef(data, ref);
   const entrada = data[idx];
+  // Sem esta guarda, `entrada.pagamento` lançava quando o índice não existia
+  // mais — e como quem chama é o onchange de um <select>, a exceção sumia: o
+  // dropdown passava a mostrar o status novo com o dado inalterado embaixo.
+  if (!entrada) { toast('Este atendimento não está mais na lista. Atualize a tela.', 3000); renderPacientes(); return; }
 
   // Se estava "A receber" e agora vai ser "Pago", perguntar a forma real de pagamento
   if (newStatus === 'Pago' && entrada.pagamento === 'A receber') {
-    openModalPagtoReal(idx, newStatus);
+    openModalPagtoReal(entrada.id || idx, newStatus);
     return; // espera o modal confirmar
   }
 
@@ -3828,25 +3842,38 @@ function updatePacStatus(idx, newStatus) {
 }
 
 // Modal rápido para capturar forma de pagamento real quando "A receber" → "Pago"
-function openModalPagtoReal(idx, newStatus) {
+function openModalPagtoReal(ref, newStatus) {
   document.getElementById('modal-pgto-real').style.display = 'flex';
-  document.getElementById('modal-pgto-real').dataset.idx = idx;
+  // Guarda o ID no dataset, não o índice. O modal fica aberto enquanto a pessoa
+  // escolhe a forma de pagamento; um índice congelado aí dentro é a definição
+  // do problema — quando ela confirma, ele pode já apontar pra outro registro.
+  document.getElementById('modal-pgto-real').dataset.ref = String(ref);
   document.getElementById('modal-pgto-real').dataset.status = newStatus;
 }
 
 function confirmarPagtoReal(forma) {
   const modal = document.getElementById('modal-pgto-real');
-  const idx    = parseInt(modal.dataset.idx);
+  const refRaw = modal.dataset.ref;
   const newStatus = modal.dataset.status;
   modal.style.display = 'none';
 
   const data = DB.get('pacientes');
-  data[idx].statusPgto = newStatus;
-  if (forma) data[idx].pagamento = forma; // atualiza forma de pagamento real
+  // Relê e reencontra por id. Antes: `data[idx].statusPgto = ...` num array
+  // relido AGORA, com o índice congelado antes do modal abrir. Se a coleção
+  // mudou nesse intervalo, isso marcava como Pago — e trocava a forma de
+  // pagamento — do atendimento de OUTRO paciente. E se o índice não existisse
+  // mais, lançava: o clique em "Pix"/"Cartão" não fazia nada e o pagamento
+  // nunca era registrado.
+  const ref = /^\d+$/.test(refRaw) ? parseInt(refRaw, 10) : refRaw;
+  const idx = _acharPacPorRef(data, ref);
+  const alvo = data[idx];
+  if (!alvo) { toast('Este atendimento não está mais na lista. Nada foi alterado.', 3000); renderPacientes(); return; }
+  alvo.statusPgto = newStatus;
+  if (forma) alvo.pagamento = forma; // atualiza forma de pagamento real
   DB.set('pacientes', data);
 
-  const val = BRL(data[idx].valor || 0);
-  toast(`✅ Pago via ${forma || 'A receber'} · ${data[idx].nome} · ${val} registrado!`);
+  const val = BRL(alvo.valor || 0);
+  toast(`✅ Pago via ${forma || 'A receber'} · ${alvo.nome} · ${val} registrado!`);
 
   renderPacientes();
   renderDashboard();
@@ -4981,11 +5008,24 @@ function savePaciente(e) {
     obs: fd.get('obs')
   };
   const data = DB.get('pacientes');
-  // id estável: preserva no editar, gera no criar
-  item.id = (editState.col === 'pacientes' && editState.idx !== null && data[editState.idx] && data[editState.idx].id) || _novoId('pac');
-  if (editState.col === 'pacientes' && editState.idx !== null) {
-    data[editState.idx] = item;
+  // Resolve o alvo da edição por ID no momento do save, não pelo índice
+  // congelado quando o modal abriu — mesma correção que o saveCrm já tinha.
+  // O modal fica aberto o tempo que a pessoa levar preenchendo; qualquer
+  // escrita na coleção nesse intervalo (outra aba do app, o copiloto
+  // registrando um atendimento com unshift) desloca todos os índices. Gravar
+  // em data[idx] passava por cima do atendimento de OUTRO paciente e ainda
+  // adotava o id dele: a vítima sumia e nada na tela indicava o que houve.
+  const editIdx = (editState.col !== 'pacientes') ? -1
+    : (editState.id ? data.findIndex(p => p && p.id === editState.id)
+                    : (editState.idx ?? -1));
+  if (editIdx >= 0 && data[editIdx]) {
+    item.id = data[editIdx].id || _novoId('pac');
+    data[editIdx] = item;
   } else {
+    // Ou é registro novo, ou o que estava sendo editado sumiu (excluído em
+    // outro aparelho). Nos dois casos entra como novo — nunca sobrescrevendo
+    // quem por acaso ocupa aquela posição agora.
+    item.id = (editState.col === 'pacientes' && editState.id) || _novoId('pac');
     data.unshift(item);
   }
   DB.set('pacientes', data);
@@ -5138,6 +5178,10 @@ function renderPacientes() {
   const info = _paginate('pacientes', sorted);
   tbody.innerHTML = info.slice.map(r => {
     const i = r._origIdx;
+    // Referência por ID sempre que existir. Índice congelado no HTML aponta pro
+    // registro errado assim que a coleção muda entre o render e o clique — e o
+    // CRM já fazia por id. Número só como reserva pra registro legado sem id.
+    const ref = r.id ? `'${r.id}'` : i;
     return `
     <tr data-search="${_esc(r.nome)} ${_esc(r.tipo)}" data-status="${r.statusPgto === 'Pago' ? 'Ativo' : 'Inativo'}" class="border-b border-gray-50 hover:bg-gray-50">
       <td class="px-4 py-3 text-gray-600">${formatDate(r.data)}</td>
@@ -5145,13 +5189,13 @@ function renderPacientes() {
       <td class="px-4 py-3 text-gray-600">${_esc(r.tipo)}</td>
       <td class="px-4 py-3 font-semibold text-gray-900">${BRL(r.valor)}</td>
       <td class="px-4 py-3 text-gray-600">${_esc(r.pagamento)}</td>
-      <td class="px-4 py-3">${pgtoSelect(r.statusPgto, i)}</td>
+      <td class="px-4 py-3">${pgtoSelect(r.statusPgto, ref)}</td>
       <td class="px-4 py-3">
         <button onclick="abrirPerfilPaciente('${_jsArg(r.nome)}')" style="background:#f1f5f9;border:none;border-radius:6px;padding:4px 9px;font-size:11.5px;cursor:pointer;color:#475569;font-weight:600;" title="Ver perfil completo" onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f1f5f9'">👤 Ver</button>
       </td>
       <td class="px-4 py-3" style="white-space:nowrap;">
-        <button onclick="editRow('pacientes',${i})" class="text-blue-400 hover:text-blue-600 text-xs mr-2" title="Editar">✏️</button>
-        <button onclick="deleteRow('pacientes',${i})" class="text-red-400 hover:text-red-600 text-xs" title="Excluir">🗑️</button>
+        <button onclick="editRow('pacientes',${ref})" class="text-blue-400 hover:text-blue-600 text-xs mr-2" title="Editar">✏️</button>
+        <button onclick="deleteRow('pacientes',${ref})" class="text-red-400 hover:text-red-600 text-xs" title="Excluir">🗑️</button>
       </td>
     </tr>`;
   }).join('');
@@ -5165,13 +5209,17 @@ function saveFollowup(e) {
   e.preventDefault();
   const fd = new FormData(e.target);
   const data = DB.get('followup');
-  const editIns = (editState.col === 'followup' && editState.idx !== null) ? data[editState.idx] : null;
+  // Por id, não pelo índice congelado ao abrir o modal (ver savePaciente).
+  const fuIdx = (editState.col !== 'followup') ? -1
+    : (editState.id ? data.findIndex(f => f && f.id === editState.id)
+                    : (editState.idx ?? -1));
+  const editIns = (fuIdx >= 0) ? data[fuIdx] : null;
   const existFeito = editIns ? (editIns.feito || false) : false;
   const item = { nome: fd.get('nome'), whatsapp: (fd.get('whatsapp') || '').trim(), ultConsulta: fd.get('ultConsulta'), dataContato: fd.get('dataContato'), tipoContato: fd.get('tipoContato'), feito: existFeito, dataReav: fd.get('dataReav'), obs: fd.get('obs') };
   // Blindagem: id estável + dono profissional (preserva no editar)
   item.id = (editIns && editIns.id) || _novoId('fu');
   item.profissionalId = (editIns && editIns.profissionalId) || _profDoPaciente(fd.get('nome')) || null;
-  if (editState.col === 'followup' && editState.idx !== null) { data[editState.idx] = item; } else { data.unshift(item); }
+  if (editIns) { data[fuIdx] = item; } else { data.unshift(item); }
   DB.set('followup', data);
   // Marcar paciente como followup criado
   if (editState.pacIdx !== null && editState.pacIdx !== undefined) {
@@ -6529,10 +6577,14 @@ function saveDespesa(e) {
   if (valorDesp < 0) { alert('Valor não pode ser negativo.'); return; }
   const item = { data: fd.get('data'), descricao: fd.get('descricao'), categoria: fd.get('categoria'), tipo: fd.get('tipo'), valor: valorDesp, formaPgto: fd.get('formaPgto') };
   const data = DB.get('despesas');
-  if (editState.col === 'despesas' && editState.idx !== null) {
-    item.id = (data[editState.idx] && data[editState.idx].id) || _novoId('desp'); // id estável sobrevive à edição
-    data[editState.idx] = item;
-  } else { item.id = _novoId('desp'); data.unshift(item); }
+  // Por id, não pelo índice congelado ao abrir o modal (ver savePaciente).
+  const despIdx = (editState.col !== 'despesas') ? -1
+    : (editState.id ? data.findIndex(d => d && d.id === editState.id)
+                    : (editState.idx ?? -1));
+  if (despIdx >= 0 && data[despIdx]) {
+    item.id = data[despIdx].id || _novoId('desp'); // id estável sobrevive à edição
+    data[despIdx] = item;
+  } else { item.id = (editState.col === 'despesas' && editState.id) || _novoId('desp'); data.unshift(item); }
   DB.set('despesas', data);
   closeModal('modal-despesa');
   renderDespesas();
@@ -6689,19 +6741,22 @@ function renderReceita() {
   }
   // Ordena por data desc
   linhasFiltradas.sort((a, b) => (b.p.data || '').localeCompare(a.p.data || ''));
-  tbody.innerHTML = linhasFiltradas.map(({ p, idx }) => `
+  tbody.innerHTML = linhasFiltradas.map(({ p, idx }) => {
+    // Idem renderPacientes: id sempre que houver, índice só pra registro legado.
+    const ref = p.id ? `'${p.id}'` : idx;
+    return `
     <tr>
       <td style="color:#475569;">${formatDate(p.data)}</td>
       <td style="font-weight:600;color:#0f172a;">${_esc(p.nome)}</td>
       <td style="color:#475569;">${_esc(p.tipo || '—')}</td>
       <td style="text-align:right;font-weight:700;color:#0f172a;">${BRL(p.valor)}</td>
       <td style="color:#475569;">${_esc(p.pagamento || '—')}</td>
-      <td>${pgtoSelect(p.statusPgto, idx)}</td>
+      <td>${pgtoSelect(p.statusPgto, ref)}</td>
       <td style="white-space:nowrap;">
-        <button onclick="editRow('pacientes',${idx})" class="text-blue-400 hover:text-blue-600 text-xs mr-2" title="Editar">✏️</button>
-        <button onclick="deleteRow('pacientes',${idx})" class="text-red-400 hover:text-red-600 text-xs" title="Excluir">🗑️</button>
+        <button onclick="editRow('pacientes',${ref})" class="text-blue-400 hover:text-blue-600 text-xs mr-2" title="Editar">✏️</button>
+        <button onclick="deleteRow('pacientes',${ref})" class="text-red-400 hover:text-red-600 text-xs" title="Excluir">🗑️</button>
       </td>
-    </tr>`).join('');
+    </tr>`; }).join('');
   // Rodapé com totais filtrados — discrimina Pago / Pendente / Isento
   const totPago     = linhasFiltradas.filter(({p}) => p.statusPgto === 'Pago').reduce((s, {p}) => s + (p.valor || 0), 0);
   const totPendente = linhasFiltradas.filter(({p}) => p.statusPgto === 'Pendente').reduce((s, {p}) => s + (p.valor || 0), 0);
