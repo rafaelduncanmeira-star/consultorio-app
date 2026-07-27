@@ -111,6 +111,11 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- **Remarcar agendamento acontece em QUATRO telas** (modal, arrastar na agenda, arrastar
+  entre profissionais, copiloto) — todas passam por `_limparLembreteSeRemarcou`. Lembrete
+  já enviado aponta pro horário velho, e `_agendamentosParaLembrar` filtra
+  `!ag._lembreteEnviado`: sem rearmar, aquele agendamento sai de **todo** ciclo futuro.
+  Toda validação de agenda (conflito **e** `_isBloqueado`) vale nos quatro.
 - 🔴 **Índice no `onclick` é o índice de OUTRO registro.** Ele é calculado no *render* e
   usado no *clique*; entre os dois a coleção muda (unshift do copiloto, outra aba, pull).
   Pior ainda congelado num `dataset` do DOM atravessando um modal — era assim que
