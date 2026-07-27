@@ -4234,6 +4234,22 @@ const AG_FALTOU = 'No-show';
 // Status de pagamento válidos, na ordem em que aparecem nos <select>.
 const STATUS_PGTO = ['Pago', 'Parcial', 'Pendente', 'Isento'];
 
+// Vocabulário da FORMA de pagamento — o mesmo do <select> do modal, do
+// TAXA_PAGAMENTO e das três tabelas de "Mix de pagamento" (Receita, DRE e
+// relatório), que filtram com `p.pagamento === f`. Valor fora daqui não cai em
+// linha nenhuma: some da tabela sem erro e sem rastro, e as linhas passam a
+// somar menos que o próprio Total.
+const FORMAS_PAGAMENTO = ['PIX', 'Cartão crédito', 'Cartão débito', 'Dinheiro', 'A receber'];
+
+// Devolve a forma canônica quando dá pra reconhecer só por caixa/espaço — que é
+// como o LLM erra ("pix", "Cartão Crédito ", "DINHEIRO"). Fora disso devolve ''
+// em vez de escolher uma: chutar aqui inventaria como o paciente pagou.
+function _pagamentoCanonico(valor) {
+  const alvo = String(valor || '').toLowerCase().trim();
+  if (!alvo) return '';
+  return FORMAS_PAGAMENTO.find(f => f.toLowerCase() === alvo) || '';
+}
+
 // Devolve sempre um status canônico. 'Pendente' é o padrão seguro: assumir
 // 'Pago' por omissão conta como recebido dinheiro que não entrou.
 function _statusPgtoCanonico(valor) {
@@ -4463,6 +4479,16 @@ function editRow(col, ref) {
     if (form.whatsapp) form.whatsapp.value = r.whatsapp || '';
     _popularProfissionalSelect(r.profissionalId, 'pac-profissional');
     form.valor.value = r.valor || '';
+    // Forma de pagamento fora do vocabulário (registro antigo, backup editado,
+    // ditado que o copiloto não reconheceu): entra como opção legada, igual ao
+    // procedimento logo acima. Atribuir um valor que não existe no <select>
+    // deixa selectedIndex = -1, e aí o FormData devolve '' no save — a forma de
+    // pagamento seria APAGADA só por abrir e salvar o atendimento.
+    if (r.pagamento && !_pagamentoCanonico(r.pagamento)) {
+      const selPg = document.getElementById('pac-pagamento');
+      if (selPg) selPg.insertAdjacentHTML('beforeend',
+        `<option value="${_esc(r.pagamento)}">${_esc(r.pagamento)} (legado)</option>`);
+    }
     form.pagamento.value = r.pagamento || '';
     // _statusPgtoCanonico: se o valor gravado não existir no <select>, o
     // navegador deixa selectedIndex = -1 e o form devolve '' no save — apagando
@@ -7190,7 +7216,7 @@ function renderReceita() {
 
   // ===== Quebra por forma de pagamento (só pagos) =====
   const pagosPorForma = pacs.filter(p => p.statusPgto === 'Pago');
-  const formas = ['PIX','Cartão crédito','Cartão débito','Dinheiro','A receber'];
+  const formas = FORMAS_PAGAMENTO;
   const formasStats = formas.map(f => {
     const lista = pagosPorForma.filter(p => p.pagamento === f);
     return { forma: f, qtd: lista.length, total: lista.reduce((s, p) => s + (p.valor || 0), 0) };
@@ -8969,7 +8995,7 @@ function gerarPDF(mes) {
     .sort((a, b) => b.total - a.total);
 
   // Mix pagamento
-  const formasStats = ['PIX','Cartão crédito','Cartão débito','Dinheiro','A receber'].map(f => {
+  const formasStats = FORMAS_PAGAMENTO.map(f => {
     const lista = pacs.filter(p => p.pagamento === f);
     const total = lista.reduce((s, p) => s + (p.valor || 0), 0);
     const taxa  = TAXA_PAGAMENTO[f] || 0;
@@ -9632,7 +9658,7 @@ function renderRelatorio(mes) {
   const mostrarProfSection = _profsList.length > 1 || pacs.some(p => p.profissionalId);
 
   // ===== Mix de pagamento + taxa estimada =====
-  const formas = ['PIX', 'Cartão crédito', 'Cartão débito', 'Dinheiro', 'A receber'];
+  const formas = FORMAS_PAGAMENTO;
   const formasStats = formas.map(f => {
     const lista = pacs.filter(p => p.pagamento === f);
     const total = lista.reduce((s, p) => s + (p.valor || 0), 0);
@@ -10787,11 +10813,24 @@ function executeAIAction(action) {
     // O statusPgto tem o problema irmão: fora da lista canônica o atendimento
     // não cai em balde NENHUM de _resumoFin — o dinheiro some dos relatórios
     // sem erro, sem aviso, sem rastro.
+    // A FORMA de pagamento tem o mesmo problema do statusPgto: fora do
+    // vocabulário, o atendimento some das três tabelas de "Mix de pagamento" e
+    // do cálculo de taxa de cartão. _pagamentoCanonico conserta o que dá pra
+    // reconhecer por caixa/espaço ("pix" → "PIX"), que é como o LLM erra.
+    // O que não dá, NÃO é chutado — chutar inventaria como o paciente pagou.
+    // Fica como veio (o médico ditou aquilo) e ele é avisado na hora, senão o
+    // valor sumiria da tabela em silêncio.
+    const pagCanon = _pagamentoCanonico(dados.pagamento);
     arr.unshift({ ...dados, valor: impNormValor(dados.valor),
                   statusPgto: _statusPgtoCanonico(dados.statusPgto),
+                  pagamento: pagCanon || dados.pagamento || '',
                   id: _novoId('pac'), profissionalId: currentProfissionalId || null });
     DB.set('pacientes', arr);
     appendChatMsg('system-ok', `✅ Atendimento de ${dados.nome} registrado — ${BRL(dados.valor)}`);
+    if (dados.pagamento && !pagCanon) {
+      appendChatMsg('system-ok', `⚠️ Não reconheci a forma de pagamento "${dados.pagamento}". `
+        + `Ela não entra no Mix de pagamento — ajuste no ✏️ do atendimento (${FORMAS_PAGAMENTO.join(', ')}).`);
+    }
     if (document.getElementById('page-pacientes').classList.contains('active')) renderPacientes();
     renderDashboard();
 

@@ -273,7 +273,8 @@ function montarIA(banco = {}) {
   const dados = { pacientes: [], crm: [], despesas: [], agendamentos: [], ...banco };
   const objs = { metas: {} };
   const msgs = [];
-  const s = carregar(['const:STATUS_PGTO', 'const:KANBAN_COLUNAS', '_statusPgtoCanonico',
+  const s = carregar(['const:STATUS_PGTO', 'const:FORMAS_PAGAMENTO', 'const:KANBAN_COLUNAS',
+                      '_statusPgtoCanonico', '_pagamentoCanonico',
                       '_statusCrmCanonico', 'impNormValor', '_nomeNorm',
                       '_nomeCasaParcial', '_acharPorNome', '_acharCrmPorNome',
                       'executeAIAction'], {
@@ -384,7 +385,8 @@ function montarProc(procs = []) {
   const banco = { procedimentos: JSON.parse(JSON.stringify(procs)) };
   const msgs = [];
   const s = require('./_extrair.js').carregar(
-    ['const:STATUS_PGTO', 'const:KANBAN_COLUNAS', '_statusPgtoCanonico', '_statusCrmCanonico',
+    ['const:STATUS_PGTO', 'const:FORMAS_PAGAMENTO', 'const:KANBAN_COLUNAS',
+     '_statusPgtoCanonico', '_pagamentoCanonico', '_statusCrmCanonico',
      'impNormValor', '_nomeNorm', '_nomeCasaParcial', '_acharPorNome', '_acharCrmPorNome',
      'executeAIAction'], {
     JSON, Array, Object, Date, Math, String, Number, parseFloat, parseInt, isNaN, RegExp, console,
@@ -503,4 +505,40 @@ test('as duas telas que gravam procedimento usam a mesma comparação de nome', 
   const saveProc = recortarFuncao('saveProc');
   assert.match(saveProc, /_nomeNorm\(p\.nome\) === _nomeNorm\(item\.nome\)/,
     'comparar sem trim deixa passar o duplicado que o copiloto já criou');
+});
+
+// ---------- forma de pagamento ditada ----------
+// O statusPgto já era canonizado ("fora da lista o dinheiro some dos
+// relatórios"); a FORMA de pagamento não era. Ela alimenta as três tabelas de
+// "Mix de pagamento" e a estimativa de taxa de cartão, todas filtrando com
+// `p.pagamento === f`. Um "pix" minúsculo bastava pra o atendimento sumir de
+// todas elas — e as linhas passarem a somar menos que o próprio Total.
+function criarPac(dados) {
+  const a = montarProc();
+  a.executeAIAction({ tipo: 'criar_paciente', dados: { nome: 'Ana', data: '2026-08-03', valor: 500, ...dados } });
+  return a;
+}
+
+test('copiloto: "pix" minúsculo entra como PIX', () => {
+  const a = criarPac({ pagamento: 'pix' });
+  assert.strictEqual(a.banco.pacientes[0].pagamento, 'PIX');
+});
+
+test('copiloto: espaço e caixa na forma de pagamento são corrigidos', () => {
+  assert.strictEqual(criarPac({ pagamento: ' Cartão Crédito ' }).banco.pacientes[0].pagamento, 'Cartão crédito');
+  assert.strictEqual(criarPac({ pagamento: 'DINHEIRO' }).banco.pacientes[0].pagamento, 'Dinheiro');
+});
+
+test('copiloto: forma desconhecida não é chutada — é avisada', () => {
+  const a = criarPac({ pagamento: 'boleto' });
+  assert.strictEqual(a.banco.pacientes[0].pagamento, 'boleto',
+    'o médico ditou aquilo; trocar por uma das cinco inventaria como ele foi pago');
+  assert.match(a.msgs.join(' '), /Não reconheci a forma de pagamento/,
+    'sem aviso, o atendimento sumiria do Mix de pagamento em silêncio');
+});
+
+test('copiloto: sem forma de pagamento não inventa nem avisa', () => {
+  const a = criarPac({});
+  assert.strictEqual(a.banco.pacientes[0].pagamento, '');
+  assert.ok(!/Não reconheci a forma/.test(a.msgs.join(' ')));
 });

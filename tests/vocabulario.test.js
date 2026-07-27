@@ -235,3 +235,61 @@ test('DB.set não carimba coleção que não é blindada', async () => {
   assert.strictEqual(lido('despesas')[0].id, undefined,
     'despesas vai no blob e não passa pelo filtro por id — carimbar aqui seria ruído');
 });
+
+// ---------- forma de pagamento: vocabulário único ----------
+// O <select> do modal, o TAXA_PAGAMENTO e as três tabelas de "Mix de pagamento"
+// (Receita, DRE e relatório) usam a mesma lista de cinco formas e filtram com
+// `p.pagamento === f`. Valor fora dela some da tabela sem erro nenhum, e as
+// linhas passam a somar menos que o próprio Total. O copiloto gravava o que o
+// LLM mandasse — "pix", "Cartão Crédito " — direto no registro.
+const { carregar: _carrega } = require('./_extrair.js');
+
+test('pagamento: a lista do código é a mesma do <select> do modal', () => {
+  const html = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'index.html'), 'utf8');
+  const { FORMAS_PAGAMENTO } = _carrega('const:FORMAS_PAGAMENTO', {});
+  const bloco = html.slice(html.indexOf('name="pagamento"'));
+  const opcoes = [...bloco.slice(0, bloco.indexOf('</select>')).matchAll(/<option>([^<]+)<\/option>/g)]
+    .map(m => m[1]);
+  assert.deepStrictEqual(opcoes, JSON.parse(JSON.stringify(FORMAS_PAGAMENTO)),
+    'select e código divergindo é a definição do problema');
+});
+
+test('pagamento: a tabela de taxas cobre exatamente as cinco formas', () => {
+  const s = _carrega(['const:FORMAS_PAGAMENTO', 'const:TAXA_PAGAMENTO'], {});
+  assert.deepStrictEqual(Object.keys(s.TAXA_PAGAMENTO).sort(),
+    [...s.FORMAS_PAGAMENTO].sort(),
+    'forma sem taxa declarada entra como 0% e some da estimativa de custo de cartão');
+});
+
+test('_pagamentoCanonico conserta caixa e espaço, e não chuta o resto', () => {
+  const { _pagamentoCanonico } = _carrega(
+    ['const:FORMAS_PAGAMENTO', '_pagamentoCanonico'], { String });
+  assert.strictEqual(_pagamentoCanonico('pix'), 'PIX');
+  assert.strictEqual(_pagamentoCanonico('  DINHEIRO '), 'Dinheiro');
+  assert.strictEqual(_pagamentoCanonico('Cartão Crédito'), 'Cartão crédito');
+  assert.strictEqual(_pagamentoCanonico('boleto'), '',
+    'inventar a forma seria afirmar como o paciente pagou');
+  assert.strictEqual(_pagamentoCanonico(''), '');
+  assert.strictEqual(_pagamentoCanonico(null), '');
+});
+
+test('nenhuma tela reescreve a lista de formas de pagamento à mão', () => {
+  const { fonte } = require('./_extrair.js');
+  const linhas = fonte.split('\n');
+  const ruins = [];
+  linhas.forEach((l, i) => {
+    if (l.includes('const FORMAS_PAGAMENTO')) return;
+    if (/'Cartão crédito'\s*,\s*'Cartão débito'/.test(l)) ruins.push((i + 1) + ': ' + l.trim().slice(0, 100));
+  });
+  assert.deepStrictEqual(ruins, [],
+    'cópia inline diverge — foi assim que o Mix de pagamento e o select se desencontraram');
+});
+
+test('editRow guarda forma de pagamento fora do vocabulário como opção legada', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  const src = recortarFuncao('editRow');
+  assert.match(src, /_pagamentoCanonico\(r\.pagamento\)/);
+  assert.match(src, /pac-pagamento[\s\S]{0,200}legado/,
+    'sem a opção, o <select> fica com selectedIndex -1 e o save APAGA a forma de pagamento');
+});
