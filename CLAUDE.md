@@ -111,6 +111,10 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- **Conexão de WhatsApp se pergunta com `_waConnected()`** — nunca olhando `getZapiConfig()`
+  direto. São dois provedores (Z-API e Cloud API): o card de lembretes checava só o
+  Z-API e mentia nos dois sentidos — "não conectado" com tudo funcionando, e "✓ Ativo"
+  enquanto todo ciclo falhava.
 - **Versão nova só entra na próxima navegação — e ninguém navega.** O SW é network-first
   com `skipWaiting`, mas a recepção deixa o app aberto a semana toda: sem recarregar, o
   código antigo continua rodando mesmo depois de uma correção de dado. `_observarAtualizacaoSW`
