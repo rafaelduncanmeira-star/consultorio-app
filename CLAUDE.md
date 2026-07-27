@@ -111,6 +111,13 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- 🔴 **O gate do financeiro vale no PROMPT também.** `_podeVerFinanceiro()` já era
+  consultado pela sidebar, pelo `showPage` e pelo `_applyRole` — o prompt do copiloto
+  era a quarta porta e entregava faturamento, lucro, "quem deve" com nomes e valores,
+  tabela de preços e o histórico com `valor`/`statusPgto`. E *ensinava* a IA a responder
+  isso. Sem o dado, a **instrução** tem de sair junto: mandar responder o que não se
+  recebeu faz a IA inventar número. Corte em **duas pontas** (contexto e prompt) — o
+  prompt só interpola o que recebe.
 - **Remarcar agendamento acontece em QUATRO telas** (modal, arrastar na agenda, arrastar
   entre profissionais, copiloto) — todas passam por `_limparLembreteSeRemarcou`. Lembrete
   já enviado aponta pro horário velho, e `_agendamentosParaLembrar` filtra
