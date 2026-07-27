@@ -96,3 +96,37 @@ test('os dois pontos que criam registro de marco gravam followupId', () => {
     assert.match(src, /followupId:\s*fu\w*\.id/, `${fn} tem de guardar o id do follow-up`);
   }
 });
+
+// ---------- "já virou atendimento?" não pode confundir índice 0 com "não" ----------
+// O atendimento novo entra na coleção com unshift, ou seja, no índice 0. A
+// conversão gravava `a.pacIdx = 0` — falsy. A checagem `!a.pacIdx` lia isso
+// como "nunca converteu" e reoferecia registrar o atendimento a cada toque no
+// agendamento; cada "sim" criava outro atendimento e inflava o faturamento.
+test('_agVirouAtendimento: índice 0 é vínculo, não ausência de vínculo', () => {
+  const { _agVirouAtendimento } = carregar('_agVirouAtendimento', {});
+  assert.strictEqual(_agVirouAtendimento({ pacIdx: 0 }), true,
+    'zero é o índice do atendimento recém-criado — o caso mais comum de todos');
+  assert.strictEqual(_agVirouAtendimento({ pacId: 'pac_x' }), true);
+  assert.strictEqual(_agVirouAtendimento({ pacId: 'pac_x', pacIdx: 0 }), true);
+  assert.strictEqual(_agVirouAtendimento({ pacIdx: 7 }), true);
+});
+
+test('_agVirouAtendimento: sem vínculo nenhum continua sendo "não"', () => {
+  const { _agVirouAtendimento } = carregar('_agVirouAtendimento', {});
+  for (const a of [{}, { pacIdx: null }, { pacId: null, pacIdx: null },
+                   { pacId: '', pacIdx: undefined }, null, undefined]) {
+    assert.strictEqual(_agVirouAtendimento(a), false, JSON.stringify(a));
+  }
+});
+
+test('a conversão grava pacId — é ele o sinal de que virou atendimento', () => {
+  const src = recortarFuncao('savePaciente').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /a\.pacId\s*=\s*item\.id/, 'sem isto o helper perde o sinal confiável');
+  assert.match(src, /a\.status\s*=\s*'Compareceu'/);
+});
+
+test('nenhum ponto volta a testar o vínculo com o falsy do índice', () => {
+  const semCom = fonte.replace(/\/\/[^\n]*/g, '');
+  assert.doesNotMatch(semCom, /!\s*\w+\.pacIdx\b/,
+    'pacIdx 0 é vínculo válido — teste com != null ou use _agVirouAtendimento');
+});

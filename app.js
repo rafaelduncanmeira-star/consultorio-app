@@ -1577,6 +1577,19 @@ function _pacientePorRef(pacId, pacIdx) {
   if (pacId) { const p = pacs.find(x => x.id === pacId); if (p) return p; }
   return (pacIdx != null && pacs[pacIdx]) ? pacs[pacIdx] : null;
 }
+// Este agendamento já virou atendimento registrado?
+// A checagem antiga era `!a.pacIdx` — e estava errada de duas formas. O
+// atendimento novo entra na coleção com `unshift`, ou seja, no índice 0; a
+// conversão gravava `a.pacIdx = 0`, que é FALSY. Resultado: o app achava que
+// nunca tinha convertido e oferecia "registrar o atendimento agora?" toda vez
+// que aquele agendamento fosse tocado — e cada "sim" criava OUTRO atendimento,
+// inflando o faturamento com a mesma consulta repetida.
+// O sinal certo é o `pacId`, gravado num único lugar: no instante da conversão.
+// O índice fica de reserva para agendamento anterior ao pacId — e usar `!= null`
+// (não `!`) é o ponto todo: zero é um vínculo válido.
+function _agVirouAtendimento(a) {
+  return !!(a && (a.pacId || a.pacIdx != null));
+}
 function _crmPorRef(crmId, crmIdx) {
   const crm = DB.get('crm');
   if (crmId) { const c = crm.find(x => x.id === crmId); if (c) return c; }
@@ -5692,7 +5705,7 @@ function saveAgendamento(e) {
   closeModal('modal-agendamento');
 
   // Se status = "Compareceu" e ainda não virou paciente → propõe registrar atendimento
-  if (item.status === 'Compareceu' && !item.pacIdx) {
+  if (item.status === 'Compareceu' && !_agVirouAtendimento(item)) {
     setTimeout(() => {
       if (confirm(`${item.pacienteNome} compareceu — deseja registrar o atendimento agora?`)) {
         _registrarAtendimentoDeAgendamento(item);
@@ -5817,7 +5830,7 @@ function updateAgStatus(id, novo) {
     }
   }
 
-  if (novo === 'Compareceu' && !a.pacIdx) {
+  if (novo === 'Compareceu' && !_agVirouAtendimento(a)) {
     if (confirm(`${a.pacienteNome} compareceu — registrar o atendimento agora?`)) {
       _registrarAtendimentoDeAgendamento(a);
     }
