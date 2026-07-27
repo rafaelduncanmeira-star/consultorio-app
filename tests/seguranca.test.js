@@ -530,3 +530,75 @@ test('doLogin: exceção no meio do login derruba a sessão (falha fechado)', ()
   assert.match(src, /catch \(e\) \{[\s\S]*?errEl\.style\.display = 'block'/,
     'e a pessoa tem de ver uma mensagem, não um botão morto');
 });
+
+// ---------- o copiloto não pode recitar o que a tela esconde ----------
+// _podeVerFinanceiro() é o gate do financeiro no app inteiro: sidebar, showPage
+// e _applyRole consultam ele. O prompt do copiloto era a QUARTA porta e não
+// consultava. Médico MEMBRO de outra clínica tem Faturamento, Lucro, DRE e
+// Preços bloqueados na interface — e bastava perguntar "quem tá devendo?" no
+// chat pra receber a lista com nomes e valores. O próprio prompt ensinava a IA
+// a responder exatamente isso.
+const CTX_BASE = {
+  hoje: '2026-08-05', amanha: '2026-08-06', mesAtual: '2026-08', mesAnt: '2026-07',
+  faturamento: 48000, despesas: 12000, lucro: 36000, faturamentoAnt: 41000,
+  variacaoMes: '17.1', projecaoMes: 60000, metaFat: 50000, metaPac: 40, pctMeta: '96.0',
+  pacientesMes: 38, pagos: 30, pendentes: 8, totalPendente: 7300,
+  pacPendentesLista: 'Ana (R$ 1.000, 02/08) | Bruno (R$ 900, 03/08)',
+  ticketMedio: 1263, procBreakdown: 'Consulta:30', noShowsMes: 2,
+  crmTotal: 12, crmMarcouPendente: 3, crmMarcados: 'Ana', followupHoje: 1,
+  followupPendenteNomes: 'Ana', followupLista: 'Ana (vence 2026-08-05)',
+  agendaHoje: '09:00 Ana', agendaAmanha: 'vazia', agendaSemana: 'vazia',
+  procedimentos: 'Consulta: PIX R$1000/Cartão R$1050',
+  todosPacientes: 'Ana|2026-08-02|Consulta|R$ 1.000,00|Pendente',
+};
+
+const promptCom = (veFinanceiro) => require('./_extrair.js').carregar('buildSystemPrompt', {
+  getClinicaConfig: () => ({ nome: 'Clínica X', especialidade: 'Geriatria', cidade: 'SP' }),
+  currentNome: 'Fulano', currentRole: 'medico', String, Number, Math,
+}).buildSystemPrompt({ ...CTX_BASE, veFinanceiro });
+
+test('prompt: quem NÃO passa no gate não recebe financeiro nenhum', () => {
+  const p = promptCom(false);
+  // Valores da CLÍNICA. ("1050" solto não serve: o prompt usa esse número num
+  // exemplo de como interpretar "mil e cinquenta" falado, que não é dado dela.)
+  for (const vazado of ['48000', '36000', '12000', 'Quem deve', 'FINANCEIRO:',
+                        'TABELA DE PREÇOS', 'PIX R$1000/Cartão R$1050', '7300',
+                        'Bruno (R$ 900', 'R$ 1.000,00|Pendente']) {
+    assert.ok(!p.includes(vazado), `vazou "${vazado}" pra quem a tela esconde o financeiro`);
+  }
+});
+
+test('prompt: sem os dados, as instruções não mandam a IA respondê-los', () => {
+  const p = promptCom(false);
+  assert.ok(!p.includes('liste os nomes e valores'),
+    'instruir sem ter o dado faz a IA inventar número — pior que recusar');
+  assert.match(p, /não estão disponíveis no seu acesso/);
+  assert.match(p, /NÃO invente valor/,
+    'a regra de preencher valor mandava consultar a tabela de preços — que agora não está no prompt');
+});
+
+test('prompt: quem passa no gate continua recebendo tudo', () => {
+  const p = promptCom(true);
+  for (const esperado of ['FINANCEIRO:', 'Quem deve', 'TABELA DE PREÇOS',
+                          'Lucro líquido', 'liste os nomes e valores']) {
+    assert.ok(p.includes(esperado), `o dono perdeu "${esperado}" do prompt`);
+  }
+});
+
+test('prompt: a agenda e o CRM continuam valendo para os dois', () => {
+  for (const ve of [true, false]) {
+    const p = promptCom(ve);
+    assert.match(p, /AGENDA:/);
+    assert.match(p, /CRM E FOLLOW-UP:/);
+    assert.ok(p.includes('09:00 Ana'), 'agenda não é financeiro — profissional precisa dela');
+  }
+});
+
+test('contexto: o histórico de consultas esconde valor e status de pagamento', () => {
+  const src = require('./_extrair.js').fonte;
+  const i = src.indexOf('const todosPacientes = pacs.slice(0, 50)');
+  assert.ok(i > 0, 'a premissa: o histórico é montado aqui');
+  const trecho = src.slice(i, i + 400);
+  assert.match(trecho, /veFinanceiro\s*\n?\s*\?/,
+    'sem o gate, cada linha do histórico leva o valor e o statusPgto junto');
+});

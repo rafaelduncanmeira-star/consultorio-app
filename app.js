@@ -9969,9 +9969,15 @@ function buildContext() {
 
   // Histórico do paciente buscado (últimas 5 consultas de cada nome único para consultas nominais)
   // Armazena lista completa de pacs para busca nominal
-  const todosPacientes = pacs.slice(0, 50).map(p => `${p.nome}|${p.data}|${p.tipo}|${BRL(p.valor)}|${p.statusPgto}`).join('; ');
+  // O histórico traz valor e status de pagamento de cada consulta — é
+  // financeiro. Quem não passa no gate recebe a mesma lista sem o dinheiro.
+  const veFinanceiro = _podeVerFinanceiro();
+  const todosPacientes = pacs.slice(0, 50).map(p => veFinanceiro
+    ? `${p.nome}|${p.data}|${p.tipo}|${BRL(p.valor)}|${p.statusPgto}`
+    : `${p.nome}|${p.data}|${p.tipo}`).join('; ');
 
   return {
+    veFinanceiro,
     hoje: today, amanha, mesAtual, mesAnt,
     faturamento: fat, despesas: desp, lucro: fat - desp,
     faturamentoAnt: fatAnt,
@@ -10003,6 +10009,37 @@ function buildContext() {
 }
 
 function buildSystemPrompt(ctx) {
+  // _podeVerFinanceiro() é o gate do financeiro no app inteiro — sidebar,
+  // showPage e _applyRole consultam ele. O prompt do copiloto era a QUARTA
+  // porta e não consultava: o médico MEMBRO de outra clínica tem Faturamento,
+  // Lucro, DRE e a tabela de Preços bloqueados na interface, e bastava
+  // perguntar "quem tá devendo?" no chat pra receber a lista com nomes e
+  // valores, o faturamento do mês, o ticket médio e a tabela inteira de preços
+  // — o próprio prompt ensinava a IA a responder exatamente isso.
+  const veFin = ctx.veFinanceiro !== false;
+  const blocoFinanceiro = !veFin ? '' : `FINANCEIRO:
+- Mês ${ctx.mesAtual}: faturamento R$${ctx.faturamento.toFixed(0)} | meta R$${ctx.metaFat} (${ctx.pctMeta}%) | projeção fim do mês R$${ctx.projecaoMes}
+- Mês anterior (${ctx.mesAnt}): R$${ctx.faturamentoAnt.toFixed(0)} | variação: ${ctx.variacaoMes}%
+- Despesas: R$${ctx.despesas.toFixed(0)} | Lucro líquido: R$${ctx.lucro.toFixed(0)}
+- Ticket médio: R$${ctx.ticketMedio} | Procedimentos: ${ctx.procBreakdown}
+- Inadimplência: ${ctx.pendentes} pendentes | Total em aberto: R$${ctx.totalPendente.toFixed(0)} | Quem deve: ${ctx.pacPendentesLista}
+`;
+  const blocoPrecos = !veFin ? '' : `TABELA DE PREÇOS:
+- ${ctx.procedimentos}
+`;
+  // Sem os dados, as instruções não podem continuar mandando a IA respondê-las:
+  // ela inventaria número, que é pior que recusar.
+  const exemplosFin = !veFin ? `- perguntas sobre faturamento, lucro, quem deve ou preços → responda que esses dados não estão disponíveis no seu acesso.
+` : `- "quem tá devendo?" → liste os nomes e valores de "Quem deve" acima
+- "como tá meu mês?" → faturamento, % meta, projeção, lucro
+`;
+  // Segunda camada: o construtor do contexto já monta o histórico sem dinheiro
+  // quando o gate está fechado, mas o prompt não pode DEPENDER disso — ele só
+  // interpola o que recebe, e uma mudança lá vazaria por aqui sem ninguém ver.
+  // O formato é `nome|data|tipo|valor|statusPgto`; sem o gate, corta no 3º campo.
+  const histPacientes = veFin ? ctx.todosPacientes
+    : String(ctx.todosPacientes || '').split('; ')
+        .map(r => r.split('|').slice(0, 3).join('|')).join('; ');
   const clinica = getClinicaConfig();
   const nomeDr  = clinica.nome || currentNome || 'do médico';
   const tratamento = currentRole === 'medico' ? `Dr(a). ${nomeDr}` : nomeDr;
@@ -10029,16 +10066,10 @@ MaestrIA: Paciente atendido: Nome: Ana, Valor: 1000... Ação registrada: ✅
 
 
 SITUAÇÃO ATUAL (${ctx.hoje}):
-FINANCEIRO:
-- Mês ${ctx.mesAtual}: faturamento R$${ctx.faturamento.toFixed(0)} | meta R$${ctx.metaFat} (${ctx.pctMeta}%) | projeção fim do mês R$${ctx.projecaoMes}
-- Mês anterior (${ctx.mesAnt}): R$${ctx.faturamentoAnt.toFixed(0)} | variação: ${ctx.variacaoMes}%
-- Despesas: R$${ctx.despesas.toFixed(0)} | Lucro líquido: R$${ctx.lucro.toFixed(0)}
-- Ticket médio: R$${ctx.ticketMedio} | Procedimentos: ${ctx.procBreakdown}
-- Inadimplência: ${ctx.pendentes} pendentes | Total em aberto: R$${ctx.totalPendente.toFixed(0)} | Quem deve: ${ctx.pacPendentesLista}
-
+${blocoFinanceiro}
 PACIENTES:
 - Atendidos no mês: ${ctx.pacientesMes} (${ctx.pagos} pagos, ${ctx.pendentes} pendentes) | No-shows: ${ctx.noShowsMes}
-- Meta pacientes: ${ctx.metaPac} | Histórico recente: ${ctx.todosPacientes}
+- Meta pacientes: ${ctx.metaPac} | Histórico recente: ${histPacientes}
 
 AGENDA:
 - Hoje (${ctx.hoje}): ${ctx.agendaHoje}
@@ -10050,15 +10081,11 @@ CRM E FOLLOW-UP:
 - Follow-ups vencidos hoje: ${ctx.followupHoje} — ${ctx.followupPendenteNomes || 'nenhum'}
 - Todos os follow-ups pendentes: ${ctx.followupLista}
 
-TABELA DE PREÇOS:
-- ${ctx.procedimentos}
-
+${blocoPrecos}
 MODO CONSULTORA — quando o usuário faz uma PERGUNTA (não pede para registrar):
 Responda diretamente com os dados reais acima. Seja concisa, use números reais. NÃO emita bloco action.
 Exemplos de perguntas e como responder:
-- "quem tá devendo?" → liste os nomes e valores de "Quem deve" acima
-- "como tá meu mês?" → faturamento, % meta, projeção, lucro
-- "o que tenho amanhã?" → liste os agendamentos de amanhã
+${exemplosFin}- "o que tenho amanhã?" → liste os agendamentos de amanhã
 - "e hoje?" → liste os agendamentos de hoje
 - "quanto a [nome] me deve?" → busque em Histórico recente pelo nome
 - "se mantiver o ritmo, fecho em quanto?" → use o valor de projeção acima
@@ -10105,7 +10132,7 @@ FINANCEIRO/ADMIN:
 REGRAS:
 - Se a data não for dita, use hoje: ${ctx.hoje}
 - Valores monetários: extraia do texto ("mil e cinquenta" = 1050, "oitocentos" = 800)
-- Se o valor não for mencionado, consulte a lista de procedimentos acima e use o valorPix do procedimento correspondente
+${veFin ? '- Se o valor não for mencionado, consulte a lista de procedimentos acima e use o valorPix do procedimento correspondente' : '- Se o valor não for mencionado, deixe valor 0 e avise que o preço não está no seu acesso — NÃO invente valor'}
 - Se a forma de pagamento não for mencionada, use PIX como padrão
 - Se o statusPgto não for mencionado, use Pago como padrão
 - Para cancelar/mover: use o nome exato ou parte do nome do paciente que aparece na agenda
