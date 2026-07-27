@@ -358,6 +358,12 @@ falha de leitura.
 - **Poda antes de gravar.** O snapshot gravava e só depois podava; uma vez cheio o
   `localStorage`, o `setItem` lançava, a poda nunca rodava e o backup automático parava
   **para sempre**, calado (o chamador não tinha `.catch`).
+- **"Releia depois do gap" vale pra CONFIG, não só pra coleção — e grave só o campo que
+  é seu.** `rodarCicloLembretes` lia `lembretes_config` antes do primeiro envio e a
+  regravava inteira no fim, só pra carimbar `ultimoEnvio`. O laço leva meio minuto ou mais
+  (800ms por paciente + até 15s por envio pendurado) com a tela viva: desligar os lembretes
+  no meio da rodada — que é exatamente o que o médico faz ao ver mensagem errada saindo —
+  era **desfeito** no fim. `_marcarLembretesRodaramHoje` relê e toca um campo só.
 - **Chave que o app grava com `localStorage.setItem` cru NÃO sincroniza — e restaurar
   não pode mudar isso.** `audit_log` e `chat_history` são as duas únicas assim
   (`_CHAVES_SO_LOCAIS`); as outras 22 do `BACKUP_KEYS` passam por `DB.set`. Restaurar/
