@@ -111,6 +111,16 @@ como invariante** (quebrar reintroduz o bug):
 
 Encontrados depois que o Grupo A fechou. Viraram invariante igual aos de cima.
 
+- **`_resumoFin`/`_lucroFin` não são "uma forma de calcular" — são A forma.** O gráfico de
+  12 meses fazia a própria conta: somava `p.valor` de todo mundo, chamava de *Faturamento*
+  (contando o isento, que `faturado` exclui) e tirava o *Lucro* dali. Desenhava como lucro
+  dinheiro não recebido e dinheiro isentado. Idem `renderFluxoCaixa`, que projetava
+  **caixa** a partir de isenção — recebimento que por definição nunca chega.
+- **`p.valor` sem `|| 0` contamina a tela inteira.** `s + undefined` é `NaN`. Havia 17
+  somas nuas, algumas duas linhas abaixo de outra guardada.
+- **`BACKUP_KEYS` manda em QUATRO rotas** (export, snapshot automático, restaurar,
+  importar). Chave de fora não é salva por nenhuma — e só aparece no dia do resgate.
+  `profissionais` ficou de fora e levava junto o repasse de cada um.
 - 🔴 **Dado do LLM entra normalizado ou não entra.** `executeAIAction` espalhava `dados`
   cru. `valor: "1.200,50"` (o formato que o médico dita) virava **string** no registro —
   e a soma de `_resumoFin` é `s + (p.valor || 0)`, que com string **concatena**:
@@ -259,6 +269,14 @@ falha de leitura.
   `node:vm`. Leia a mensagem antes de "consertar" o código.
 
 ### Grupo B — precisa de decisão do usuário
+
+- 🟡 **O backup exportado leva as chaves de API em texto puro.** `BACKUP_KEYS` inclui
+  `llm_config` (que guarda `claudeKey`, `openrouterKey`, `customKey`), `zapi_config`
+  (token) e `wa_cloud_config`. O `gemini_key_secure` é excluído de propósito — e o
+  `_limparSensiveisProfissional` (app.js:382) trata os quatro como sensíveis. Ou seja:
+  o app já classificou, e o backup contraria em três dos quatro. **Escolha dele:**
+  (a) tirar os segredos do export — restaurar passa a exigir reconfigurar as
+  integrações; ou (b) manter e avisar na tela que o arquivo contém credenciais.
 
 - **MRR tem duas fórmulas convivendo:** `renderProgramas` usa `valorTotal / vigência × 30`
   (o contratado); `_mrrDeInscricao` usa `precoAVista / dias × 30`. Programas e Dashboard
