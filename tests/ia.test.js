@@ -257,3 +257,119 @@ test('copiloto: o vínculo é resolvido ANTES de gravar o agendamento', () => {
   assert.ok(posCrm > 0 && posCrm < posSet,
     'gravar primeiro e vincular depois perde o vínculo: DB.set serializa um instantâneo');
 });
+
+// ---------- número e status vindos do LLM não podem entrar crus ----------
+// `dados` é gerado por um modelo a partir do que o médico DITOU. Dois estragos
+// distintos, os dois silenciosos:
+//
+//  · valor como TEXTO. A soma de _resumoFin é `s + (p.valor || 0)`: com string
+//    ela CONCATENA. 300 + "1.200,50" = "3001.200,50", e o _centavos disso é NaN.
+//    Um único atendimento criado pelo copiloto zerava o financeiro inteiro.
+//    parseFloat não salvava: para no primeiro ponto e devolve 1.2.
+//  · status fora da lista canônica. O atendimento não cai em balde NENHUM de
+//    _resumoFin — o dinheiro some de todos os relatórios sem erro nenhum.
+function montarIA(banco = {}) {
+  const { carregar } = require('./_extrair.js');
+  const dados = { pacientes: [], crm: [], despesas: [], agendamentos: [], ...banco };
+  const objs = { metas: {} };
+  const msgs = [];
+  const s = carregar(['const:STATUS_PGTO', 'const:KANBAN_COLUNAS', '_statusPgtoCanonico',
+                      '_statusCrmCanonico', 'impNormValor', '_nomeNorm',
+                      '_nomeCasaParcial', '_acharPorNome', '_acharCrmPorNome',
+                      'executeAIAction'], {
+    JSON, Array, Object, Date, Math, String, Number, parseFloat, parseInt, isNaN, console,
+    DB: {
+      get: (k) => JSON.parse(JSON.stringify(dados[k] || [])),
+      set: (k, v) => { dados[k] = JSON.parse(JSON.stringify(v)); },
+      getObj: (k, def) => (objs[k] === undefined ? def : JSON.parse(JSON.stringify(objs[k]))),
+      setObj: (k, v) => { objs[k] = JSON.parse(JSON.stringify(v)); },
+    },
+    _novoId: (p) => p + '_novo',
+    currentProfissionalId: null,
+    _profDoPaciente: () => null,
+    appendChatMsg: (_role, texto) => msgs.push(texto),
+    BRL: (v) => 'R$ ' + v,
+    formatDate: (d) => d,
+    document: { getElementById: () => ({ classList: { contains: () => false } }) },
+    renderDashboard: () => {}, renderPacientes: () => {}, renderCrm: () => {},
+    renderFollowup: () => {}, renderDespesas: () => {}, renderPrecos: () => {},
+    renderAgenda: () => {},
+  });
+  return { executeAIAction: s.executeAIAction, dados, objs, msgs };
+}
+
+test('copiloto: valor ditado em formato brasileiro vira número, não texto', () => {
+  const { executeAIAction, dados } = montarIA();
+  executeAIAction({ tipo: 'criar_paciente', dados: {
+    nome: 'Ana', data: '2026-07-20', valor: '1.200,50', statusPgto: 'Pago' } });
+  const p = dados.pacientes[0];
+  assert.strictEqual(typeof p.valor, 'number', 'valor em texto faz a soma concatenar');
+  assert.strictEqual(p.valor, 1200.5, 'parseFloat cru daria 1.2 — mil vezes menos');
+});
+
+test('copiloto: a soma financeira continua somando depois de um registro do LLM', () => {
+  const { executeAIAction, dados } = montarIA({
+    pacientes: [{ nome: 'Zé', data: '2026-07-01', valor: 300, statusPgto: 'Pago' }] });
+  executeAIAction({ tipo: 'criar_paciente', dados: {
+    nome: 'Ana', data: '2026-07-20', valor: '1.200,50', statusPgto: 'Pago' } });
+  const soma = dados.pacientes.filter(p => p.statusPgto === 'Pago')
+    .reduce((s, p) => s + (p.valor || 0), 0);
+  assert.strictEqual(Math.round(soma * 100) / 100, 1500.5,
+    `a soma virou ${JSON.stringify(soma)} — com string ela concatena e o _centavos disso é NaN`);
+});
+
+test('copiloto: status de pagamento inventado cai no canônico, não some do balde', () => {
+  const { executeAIAction, dados } = montarIA();
+  executeAIAction({ tipo: 'criar_paciente', dados: {
+    nome: 'Ana', data: '2026-07-20', valor: 500, statusPgto: 'Quitado' } });
+  const { STATUS_PGTO } = montarIA();
+  assert.ok(['Pago','Parcial','Pendente','Isento'].includes(dados.pacientes[0].statusPgto),
+    'status fora do canônico deixa o atendimento fora de TODOS os baldes de _resumoFin');
+});
+
+test('copiloto: despesa ditada também vira número', () => {
+  const { executeAIAction, dados } = montarIA();
+  executeAIAction({ tipo: 'criar_despesa', dados: { descricao: 'Aluguel', valor: 'R$ 2.500,00' } });
+  assert.strictEqual(dados.despesas[0].valor, 2500);
+});
+
+test('copiloto: atualizar_pagamento recusa status inválido em vez de rebaixar', () => {
+  const { executeAIAction, dados, msgs } = montarIA({
+    pacientes: [{ nome: 'Ana', data: '2026-07-20', valor: 500, statusPgto: 'Pago' }] });
+  executeAIAction({ tipo: 'atualizar_pagamento', dados: { nome: 'Ana', novoStatus: 'Quitado' } });
+  assert.strictEqual(dados.pacientes[0].statusPgto, 'Pago',
+    'cair no padrão aqui rebaixaria pra Pendente um atendimento já pago');
+  assert.match(msgs.join(' '), /não é um status de pagamento/);
+});
+
+test('copiloto: atualizar_pagamento aceita zerar o valor (atendimento gratuito)', () => {
+  const { executeAIAction, dados } = montarIA({
+    pacientes: [{ nome: 'Ana', data: '2026-07-20', valor: 500, statusPgto: 'Pago' }] });
+  executeAIAction({ tipo: 'atualizar_pagamento', dados: { nome: 'Ana', valor: 0, novoStatus: 'Isento' } });
+  assert.strictEqual(dados.pacientes[0].valor, 0, '`if (dados.valor)` tratava zero como "não informado"');
+  assert.strictEqual(dados.pacientes[0].statusPgto, 'Isento');
+});
+
+test('copiloto: atualizar_status_crm recusa etapa que não existe no funil', () => {
+  const { executeAIAction, dados, msgs } = montarIA({
+    crm: [{ id: 'c1', nome: 'Ana', status: 'Em negociação' }] });
+  executeAIAction({ tipo: 'atualizar_status_crm', dados: { nome: 'Ana', novoStatus: 'Fechado' } });
+  assert.strictEqual(dados.crm[0].status, 'Em negociação',
+    'status fora das colunas faz o card sumir da tela e do funil');
+  assert.match(msgs.join(' '), /não é uma etapa do funil/);
+});
+
+test('copiloto: atualizar_status_crm aceita etapa válida', () => {
+  const { executeAIAction, dados } = montarIA({
+    crm: [{ id: 'c1', nome: 'Ana', status: 'Em negociação' }] });
+  executeAIAction({ tipo: 'atualizar_status_crm', dados: { nome: 'Ana', novoStatus: 'Marcou' } });
+  assert.strictEqual(dados.crm[0].status, 'Marcou');
+});
+
+test('copiloto: meta ditada não vira NaN (que o JSON grava como null)', () => {
+  const { executeAIAction, objs } = montarIA();
+  executeAIAction({ tipo: 'definir_meta', dados: { fat: 'R$ 50.000,00', pac: '80 pacientes' } });
+  assert.strictEqual(objs.metas.fat, 50000, 'parseFloat("R$ 50.000,00") é NaN → grava null → meta some');
+  assert.strictEqual(objs.metas.pac, 80);
+  assert.ok(Number.isFinite(objs.metas.fat) && Number.isFinite(objs.metas.pac));
+});

@@ -10076,7 +10076,21 @@ function executeAIAction(action) {
   }
 
   if (tipo === 'criar_paciente') {
-    const arr = DB.get('pacientes'); arr.unshift({ ...dados, id: _novoId('pac'), profissionalId: currentProfissionalId || null }); DB.set('pacientes', arr);
+    const arr = DB.get('pacientes');
+    // `dados` vem do LLM, que transcreve o que o médico DITOU. Espalhar cru
+    // gravava o valor como TEXTO — e a soma de _resumoFin é `s + (p.valor||0)`,
+    // que com string concatena em vez de somar: 300 + "1.200,50" vira
+    // "3001.200,50" e o _centavos disso é NaN. Um único atendimento criado pelo
+    // copiloto zerava o financeiro inteiro. parseFloat não resolve: para no
+    // primeiro ponto e devolve 1.2. impNormValor é o normalizador da importação
+    // de planilha, que já sabe que o separador da DIREITA é o decimal.
+    // O statusPgto tem o problema irmão: fora da lista canônica o atendimento
+    // não cai em balde NENHUM de _resumoFin — o dinheiro some dos relatórios
+    // sem erro, sem aviso, sem rastro.
+    arr.unshift({ ...dados, valor: impNormValor(dados.valor),
+                  statusPgto: _statusPgtoCanonico(dados.statusPgto),
+                  id: _novoId('pac'), profissionalId: currentProfissionalId || null });
+    DB.set('pacientes', arr);
     appendChatMsg('system-ok', `✅ Atendimento de ${dados.nome} registrado — ${BRL(dados.valor)}`);
     if (document.getElementById('page-pacientes').classList.contains('active')) renderPacientes();
     renderDashboard();
@@ -10095,7 +10109,10 @@ function executeAIAction(action) {
     if (document.getElementById('page-followup').classList.contains('active')) renderFollowup();
 
   } else if (tipo === 'criar_despesa') {
-    const arr = DB.get('despesas'); arr.unshift(dados); DB.set('despesas', arr);
+    // Mesmo motivo do criar_paciente: valor em texto entra na soma como string.
+    const arr = DB.get('despesas');
+    arr.unshift({ ...dados, valor: impNormValor(dados.valor) });
+    DB.set('despesas', arr);
     appendChatMsg('system-ok', `✅ Despesa "${dados.descricao}" de ${BRL(dados.valor)} registrada`);
     if (document.getElementById('page-despesas').classList.contains('active')) renderDespesas();
 
@@ -10103,6 +10120,16 @@ function executeAIAction(action) {
     const arr = DB.get('crm');
     const idx = _acharCrmPorNome(arr, dados.nome);
     if (idx >= 0) {
+      // O irmão deste ramo (criar_crm) já passava por _statusCrmCanonico; este
+      // gravava o texto do LLM cru. Status que não é coluna do Kanban faz o card
+      // sumir da tela — ele não pertence a nenhuma coluna, e o funil passa a
+      // contar um contato a menos sem dizer nada. Aqui é UPDATE, então recusar é
+      // melhor que cair no padrão 'Contato feito', que jogaria pra trás um
+      // contato que já tinha avançado.
+      if (!KANBAN_COLUNAS.some(c => c.status === dados.novoStatus)) {
+        appendChatMsg('system-ok', `⚠️ "${dados.novoStatus}" não é uma etapa do funil — as válidas são ${KANBAN_COLUNAS.map(c => c.status).join(', ')}. Não mexi em nada.`);
+        return;
+      }
       arr[idx].status = dados.novoStatus; DB.set('crm', arr);
       appendChatMsg('system-ok', `✅ ${arr[idx].nome} → "${dados.novoStatus}"`);
       if (document.getElementById('page-crm').classList.contains('active')) renderCrm();
@@ -10227,8 +10254,23 @@ function executeAIAction(action) {
     const arr = DB.get('pacientes');
     const idx = _acharPorNome(arr, dados.nome, 'nome');
     if (idx >= 0) {
-      if (dados.novoStatus) arr[idx].statusPgto = dados.novoStatus;
-      if (dados.valor)      arr[idx].valor = parseFloat(dados.valor);
+      // Aqui NÃO dá pra cair num padrão: isto edita um atendimento que já
+      // existe. _statusPgtoCanonico devolve 'Pendente' pro que não reconhece —
+      // o que num UPDATE rebaixaria em silêncio um atendimento já pago. Melhor
+      // recusar e perguntar. (Gravar cru era pior ainda: status fora do canônico
+      // deixa o atendimento fora de todos os baldes de _resumoFin e o dinheiro
+      // some dos relatórios.)
+      if (dados.novoStatus != null && dados.novoStatus !== '') {
+        if (!STATUS_PGTO.includes(dados.novoStatus)) {
+          appendChatMsg('system-ok', `⚠️ "${dados.novoStatus}" não é um status de pagamento — os válidos são ${STATUS_PGTO.join(', ')}. Não mexi em nada.`);
+          return;
+        }
+        arr[idx].statusPgto = dados.novoStatus;
+      }
+      // `!= null` e não `if (dados.valor)`: zero é um valor legítimo — é assim
+      // que se marca um atendimento gratuito. E impNormValor porque o médico
+      // dita "1.200,50", que o parseFloat cru lia como 1.2.
+      if (dados.valor != null && dados.valor !== '') arr[idx].valor = impNormValor(dados.valor);
       if (dados.pagamento)  arr[idx].pagamento = dados.pagamento;
       DB.set('pacientes', arr);
       appendChatMsg('system-ok', `✅ Pagamento de ${arr[idx].nome} atualizado → ${dados.novoStatus || 'atualizado'}`);
@@ -10254,8 +10296,12 @@ function executeAIAction(action) {
 
   } else if (tipo === 'definir_meta') {
     const metas = DB.getObj('metas', {});
-    if (dados.fat !== undefined) metas.fat = parseFloat(dados.fat);
-    if (dados.pac !== undefined) metas.pac = parseInt(dados.pac);
+    // parseFloat de texto livre devolve NaN, e JSON.stringify(NaN) grava `null`:
+    // a meta que o médico acabou de definir simplesmente sumia, e a barra do
+    // Dashboard voltava a dizer "sem meta". impNormValor cai em 0 no pior caso,
+    // que ao menos é um número honesto e visível na tela.
+    if (dados.fat !== undefined) metas.fat = impNormValor(dados.fat);
+    if (dados.pac !== undefined) metas.pac = Math.max(0, Math.round(impNormValor(dados.pac)));
     DB.setObj('metas', metas);
     const partes = [];
     if (dados.fat !== undefined) partes.push(`Faturamento: ${BRL(dados.fat)}`);
