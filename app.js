@@ -152,6 +152,13 @@ function initSupabase() {
       _supa = window.supabase.createClient(SUPA_URL, SUPA_KEY);
       // Detecta retorno pelo link de recuperação de senha
       _supa.auth.onAuthStateChange((event) => {
+        // Sessão derrubada pelo servidor: refresh token expirado ou revogado
+        // (senha trocada em outro aparelho, sessão encerrada no painel, aba
+        // velha com token rotacionado). Antes isso era IGNORADO: o app seguia
+        // com a tela inteira montada e `currentUser` preenchido, mas toda
+        // gravação passava a ser recusada. A pessoa trabalhava a tarde toda e
+        // os dados só existiam no aparelho dela.
+        if (event === 'SIGNED_OUT') { _sessaoCaiu(); return; }
         if (event === 'PASSWORD_RECOVERY') {
           _recoveryFlow = true;
           // Mostra a tela de login com o form de nova senha
@@ -162,6 +169,46 @@ function initSupabase() {
       });
     }
   } catch(e) { console.warn('Supabase init error:', e); }
+}
+
+// Distingue o logout que NÓS pedimos do que o servidor impôs. Sem isso, o aviso
+// de "sessão expirada" dispararia em todo signOut deliberado — inclusive nos do
+// próprio fluxo de login (perfil ilegível, 2FA cancelado), onde só atrapalha e
+// esconde a mensagem verdadeira.
+let _saindoDeProposito = false;
+async function _signOutIntencional() {
+  _saindoDeProposito = true;
+  // Rede de segurança: se o evento SIGNED_OUT não chegar, a marca não pode ficar
+  // ligada pra sempre — ela engoliria a PRÓXIMA queda de sessão, que é
+  // justamente o que queremos avisar.
+  setTimeout(() => { _saindoDeProposito = false; }, 5000);
+  try { if (_supa) await _supa.auth.signOut(); } catch (e) { /* já estava fora */ }
+}
+
+// Sessão caiu sem ninguém ter pedido.
+function _sessaoCaiu() {
+  if (_saindoDeProposito) { _saindoDeProposito = false; return; }
+  if (!currentUser) return; // já estávamos na tela de login
+  currentUser = null; currentRole = null; currentNome = '';
+  currentDataOwner = null; currentTeamRole = null; currentProfissionalId = null;
+  // NÃO limpa o localStorage. O logout normal limpa de propósito (evita misturar
+  // contas no mesmo navegador) — mas aqui ninguém pediu pra sair, e ali dentro
+  // está o outbox com escritas que ainda não chegaram ao servidor. Apagar seria
+  // exatamente a perda que a fila existe pra impedir; o _drenarOutbox no próximo
+  // cloudPull entrega tudo assim que a pessoa entrar de novo.
+  const pend = Object.keys(_outboxGet());
+  const lp = document.getElementById('login-page');
+  if (lp) lp.style.display = 'flex';
+  const btn = document.getElementById('login-btn');
+  if (btn) { btn.textContent = 'Entrar'; btn.disabled = false; }
+  const errEl = document.getElementById('login-error');
+  if (errEl) {
+    errEl.textContent = 'Sua sessão expirou. Entre novamente.'
+      + (pend.length ? ' O que ainda não subiu está guardado neste aparelho e será enviado no próximo acesso.' : '');
+    errEl.style.display = 'block';
+  }
+  const senha = document.getElementById('login-password');
+  if (senha) senha.value = '';
 }
 
 // ============ OUTBOX — fila de escritas não confirmadas (offline/rejeitadas) ============
@@ -842,7 +889,7 @@ async function loginUser(email, password) {
     // 'medico' — e o upsert logo abaixo GRAVAVA isso por cima do perfil real.
     // Ou seja, uma falha de rede promovia o usuário, de forma permanente.
     if (errPerfil && errPerfil.code !== 'PGRST116') {
-      await _supa.auth.signOut().catch(() => {});
+      await _signOutIntencional();
       return { error: 'Não foi possível carregar seu perfil. Tente novamente.' };
     }
     if (!profile) {
@@ -1094,7 +1141,7 @@ async function logoutUser() {
       '\n\nSair agora vai descartá-las neste aparelho. Sair mesmo assim?')) return;
 
   _auditLog('logout', 'sistema', `Saiu do sistema`);
-  if (_supa) await _supa.auth.signOut();
+  await _signOutIntencional();
   currentUser = null;
   currentRole = null;
   currentNome  = '';
@@ -1197,7 +1244,7 @@ async function doLogin() {
     // `error` aqui significa "não consegui confirmar a segunda etapa". Era
     // ignorado, e o _iniciarApp() rodava assim mesmo — entrando sem 2FA.
     if (mfaCheck.error) {
-      await _supa.auth.signOut().catch(() => {});
+      await _signOutIntencional();
       errEl.textContent = mfaCheck.error;
       errEl.style.display = 'block';
       return;
@@ -1206,7 +1253,7 @@ async function doLogin() {
       const ok = await pedir2FACodigo();
       if (!ok) {
         // Cancelou 2FA — derruba a sessão (ela existe em aal1) e força novo login
-        await _supa.auth.signOut().catch(() => {});
+        await _signOutIntencional();
         errEl.textContent = 'Verificação 2FA cancelada. Faça login novamente.';
         errEl.style.display = 'block';
         return;
@@ -1216,7 +1263,7 @@ async function doLogin() {
   } catch (e) {
     // Falhar FECHADO: não há como saber em que ponto parou, e seguir para o app
     // com a sessão pela metade é pior que pedir de novo.
-    await (_supa?.auth?.signOut() || Promise.resolve()).catch(() => {});
+    await _signOutIntencional();
     errEl.textContent = 'Não foi possível entrar agora (' + ((e && e.message) || 'erro inesperado') + '). Tente novamente.';
     errEl.style.display = 'block';
   } finally {
@@ -12201,7 +12248,7 @@ function cancelar2FAChallenge() {
   closeModal('modal-2fa-challenge');
   if (_mfa_pending_resolve) { _mfa_pending_resolve(false); _mfa_pending_resolve = null; }
   // logout pra não deixar sessão pendurada com aal1
-  if (_supa) _supa.auth.signOut().catch(()=>{});
+  _signOutIntencional();
 }
 
 // Promete que o usuário completou 2FA — chamado no login se necessário
@@ -14430,7 +14477,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Não confirmou a segunda etapa (erro de rede, fator sumido): barra. Antes
     // o `error` era ignorado e a sessão seguia direto pro app, em aal1.
     const barrar = async (msg) => {
-      await _supa.auth.signOut().catch(()=>{});
+      await _signOutIntencional();
       document.getElementById('login-page').style.display = 'flex';
       const errEl2 = document.getElementById('login-error');
       if (errEl2 && msg) { errEl2.textContent = msg; errEl2.style.display = 'block'; }

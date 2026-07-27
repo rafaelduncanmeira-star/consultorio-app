@@ -276,7 +276,9 @@ test('login e checkSession barram quando o 2FA não pôde ser confirmado', () =>
     if (!/mfaCheck/.test(depois)) continue;              // chamada com código (fluxo do modal)
     assert.match(depois, /mfaCheck\.error/,
       'o resultado de erro do portão de 2FA não pode ser ignorado');
-    assert.match(depois, /signOut\(\)/,
+    // _signOutIntencional é o signOut do app: além de encerrar a sessão, marca
+    // que a saída foi PEDIDA, pra não disparar o aviso de "sessão expirada".
+    assert.match(depois, /_signOutIntencional\(\)/,
       'sessão em aal1 tem de ser derrubada, não deixada de pé');
   }
 });
@@ -525,7 +527,7 @@ for (const [fn, rotulo] of [['doLogin', 'Entrar'], ['doSignup', 'Criar conta gra
 
 test('doLogin: exceção no meio do login derruba a sessão (falha fechado)', () => {
   const src = _rec('doLogin').replace(/\/\/[^\n]*/g, '');
-  assert.match(src, /catch \(e\) \{[\s\S]*?signOut\(\)/,
+  assert.match(src, /catch \(e\) \{[\s\S]*?_signOutIntencional\(\)/,
     'não dá pra saber onde parou — seguir com a sessão pela metade é pior que pedir de novo');
   assert.match(src, /catch \(e\) \{[\s\S]*?errEl\.style\.display = 'block'/,
     'e a pessoa tem de ver uma mensagem, não um botão morto');
@@ -624,4 +626,78 @@ test('_copyLinkConvite mostra o link quando não consegue copiar', () => {
   const src = _rec('_copyLinkConvite').replace(/\/\/[^\n]*/g, '');
   assert.match(src, /\.catch\(/);
   assert.match(src, /\+ link/, 'o plano B tem de MOSTRAR o link, senão a pessoa fica sem ele');
+});
+
+// ---------- sessão derrubada pelo servidor ----------
+// O onAuthStateChange só tratava PASSWORD_RECOVERY. Quando o refresh token
+// expira ou é revogado (senha trocada em outro aparelho, sessão encerrada no
+// painel, aba velha com token rotacionado), o supabase-js emite SIGNED_OUT — e
+// o app IGNORAVA: seguia com a tela inteira montada e currentUser preenchido,
+// mas toda gravação passava a ser recusada. A pessoa trabalhava a tarde toda e
+// os dados só existiam no aparelho dela.
+function ambienteSessao({ outbox = {} } = {}) {
+  const els = {
+    'login-page': { style: {} },
+    'login-btn': {}, 'login-error': { style: {} }, 'login-password': {},
+  };
+  const s = carregar(['_signOutIntencional', '_sessaoCaiu'], {
+    Object, setTimeout: () => {}, console: { warn() {} },
+    _supa: { auth: { signOut: () => Promise.resolve() } },
+    currentUser: { id: 'u1' }, currentRole: 'medico', currentNome: 'Dr',
+    currentDataOwner: null, currentTeamRole: null, currentProfissionalId: null,
+    _saindoDeProposito: false,
+    _outboxGet: () => outbox,
+    localStorage: { removeItem: () => { throw new Error('não pode limpar o localStorage'); } },
+    document: { getElementById: (id) => els[id] || null },
+  });
+  return { ...s, els };
+}
+
+test('sessão caída: leva pra tela de login com o motivo', () => {
+  const a = ambienteSessao();
+  a._sessaoCaiu();
+  assert.strictEqual(a.els['login-page'].style.display, 'flex');
+  assert.match(a.els['login-error'].textContent, /sessão expirou/i);
+  assert.strictEqual(a.els['login-error'].style.display, 'block');
+});
+
+test('sessão caída NÃO apaga o localStorage', () => {
+  const a = ambienteSessao({ outbox: { pacientes: { tentativas: 1 } } });
+  // O stub de removeItem lança: se o código tentar limpar, o teste quebra.
+  assert.doesNotThrow(() => a._sessaoCaiu(),
+    'ali dentro está o outbox com escritas que ainda não subiram — apagar é '
+    + 'exatamente a perda que a fila existe pra impedir');
+  assert.match(a.els['login-error'].textContent, /guardado neste aparelho/,
+    'e a pessoa precisa saber que não perdeu nada');
+});
+
+test('sessão caída sem pendência não promete o que não há', () => {
+  const a = ambienteSessao({ outbox: {} });
+  a._sessaoCaiu();
+  assert.ok(!a.els['login-error'].textContent.includes('guardado neste aparelho'));
+});
+
+test('logout pedido pelo app não dispara o aviso de sessão expirada', async () => {
+  const a = ambienteSessao();
+  await a._signOutIntencional();
+  a._sessaoCaiu();                       // o SIGNED_OUT que o próprio signOut gera
+  assert.strictEqual(a.els['login-error'].style.display, undefined,
+    'o aviso esconderia a mensagem verdadeira do fluxo de login');
+});
+
+test('a marca de saída intencional é consumida uma vez só', async () => {
+  const a = ambienteSessao();
+  await a._signOutIntencional();
+  a._sessaoCaiu();                       // consome
+  a._sessaoCaiu();                       // esta é uma queda de verdade
+  assert.match(a.els['login-error'].textContent || '', /sessão expirou/i,
+    'a marca não pode engolir a PRÓXIMA queda');
+});
+
+test('todo signOut do app passa pelo helper', () => {
+  const { fonte } = require('./_extrair.js');
+  const semCom = fonte.replace(/\/\/[^\n]*/g, '');
+  const crus = [...semCom.matchAll(/auth\??\.?\.?signOut\(\)/g)];
+  assert.strictEqual(crus.length, 1,
+    'só o do próprio _signOutIntencional — os demais precisam marcar que a saída foi pedida');
 });
