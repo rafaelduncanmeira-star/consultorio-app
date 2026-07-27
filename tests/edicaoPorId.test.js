@@ -104,3 +104,49 @@ test('as telas de atendimentos passam o id nos botões, não o índice', () => {
   assert.doesNotMatch(semCom, /deleteRow\('pacientes',\$\{i(dx)?\}\)/);
   assert.doesNotMatch(semCom, /pgtoSelect\([^,]+,\s*i(dx)?\)/);
 });
+
+// ---------- mesma regra no Follow-up ----------
+function ambienteFu(followup) {
+  const banco = { followup: JSON.parse(JSON.stringify(followup)) };
+  const toasts = [];
+  const s = carregar(['_acharFuPorRef', 'toggleFollowupFeito'], {
+    JSON, Array, Object,
+    DB: {
+      get: () => JSON.parse(JSON.stringify(banco.followup)),
+      set: (k, v) => { banco[k] = JSON.parse(JSON.stringify(v)); },
+    },
+    toast: (t) => toasts.push(t),
+    renderFollowup: () => {},
+  });
+  return { ...s, banco, toasts };
+}
+
+test('toggleFollowupFeito: marca o follow-up certo depois de a lista deslocar', () => {
+  const a = ambienteFu([
+    { id: 'fu_ana', nome: 'Ana', feito: false },
+    { id: 'fu_bruno', nome: 'Bruno', feito: false },
+  ]);
+  // criar_followup pelo copiloto entra com unshift e desloca todos os índices.
+  a.banco.followup.unshift({ id: 'fu_novo', nome: 'Carla', feito: false });
+  a.toggleFollowupFeito('fu_ana');
+  const porNome = Object.fromEntries(a.banco.followup.map(f => [f.nome, f.feito]));
+  assert.strictEqual(porNome['Ana'], true);
+  assert.strictEqual(porNome['Carla'], false, 'quem entrou no topo não pode ser marcado');
+});
+
+test('toggleFollowupFeito: registro que sumiu avisa em vez de lançar', () => {
+  const a = ambienteFu([{ id: 'fu_ana', nome: 'Ana', feito: false }]);
+  a.banco.followup = [];
+  assert.doesNotThrow(() => a.toggleFollowupFeito('fu_ana'),
+    'o onchange do checkbox engole a exceção: marcava na tela e não gravava nada');
+  assert.match(a.toasts.join(' '), /não está mais na lista/);
+});
+
+test('a tela de follow-up passa o id nos botões, não o índice', () => {
+  const { fonte } = require('./_extrair.js');
+  const semCom = fonte.replace(/\/\/[^\n]*/g, '');
+  for (const re of [/editRow\('followup',\$\{i\}\)/, /deleteRow\('followup',\$\{i\}\)/,
+                    /toggleFollowupFeito\(\$\{i\}\)/, /_openWhatsAppForFu\(\$\{i\}\)/]) {
+    assert.doesNotMatch(semCom, re, 'índice congelado no HTML aponta pro registro errado');
+  }
+});

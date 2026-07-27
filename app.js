@@ -5231,9 +5231,21 @@ function saveFollowup(e) {
   renderFollowup();
 }
 
-function toggleFollowupFeito(i) {
+// `ref`: id estável (string) ou, pra registro legado, o índice (número).
+function _acharFuPorRef(data, ref) {
+  if (typeof ref === 'string') return data.findIndex(f => f && f.id === ref);
+  return (typeof ref === 'number' && data[ref]) ? ref : -1;
+}
+
+function toggleFollowupFeito(ref) {
   const data = DB.get('followup');
-  data[i].feito = !data[i].feito;
+  const fu = data[_acharFuPorRef(data, ref)];
+  // Sem a guarda, `data[i].feito` lançava quando o índice não existia mais — e
+  // quem chama é o onchange de um checkbox, que engole a exceção: o quadradinho
+  // marcava na tela e nada era gravado. Com o índice deslocado, era o follow-up
+  // de OUTRO paciente que ficava marcado como feito.
+  if (!fu) { toast('Este follow-up não está mais na lista. Atualize a tela.', 3000); renderFollowup(); return; }
+  fu.feito = !fu.feito;
   DB.set('followup', data);
   renderFollowup();
 }
@@ -5337,6 +5349,9 @@ function renderFollowup() {
 
   tbody.innerHTML = data.map((r, localI) => {
     const i = dataIdx[localI];
+    // Id sempre que houver; índice só como reserva pra registro legado. Índice
+    // congelado no HTML aponta pro follow-up errado assim que a lista muda.
+    const ref = r.id ? `'${r.id}'` : i;
     const atrasado = !r.feito && r.dataContato && r.dataContato < today;
     const hoje = !r.feito && r.dataContato === today;
     // Etapa (etiqueta extraída do obs) + badge de programa
@@ -5377,21 +5392,22 @@ function renderFollowup() {
       </td>
       <td class="px-4 py-3 text-gray-600">${_esc(r.tipoContato)}</td>
       <td class="px-4 py-3 text-center">
-        <input type="checkbox" ${r.feito ? 'checked' : ''} onchange="toggleFollowupFeito(${i})" class="w-4 h-4 accent-green-600 cursor-pointer" title="${r.feito ? 'Desmarcar' : 'Marcar como feito'}" />
+        <input type="checkbox" ${r.feito ? 'checked' : ''} onchange="toggleFollowupFeito(${ref})" class="w-4 h-4 accent-green-600 cursor-pointer" title="${r.feito ? 'Desmarcar' : 'Marcar como feito'}" />
       </td>
       <td class="px-4 py-3" style="white-space:nowrap;">
-        ${r.nome && (r.tipoContato || '').includes('WhatsApp') ? `<button onclick="_openWhatsAppForFu(${i})" title="Abrir WhatsApp" style="background:#dcfce7;color:#16a34a;border:none;border-radius:6px;padding:4px 9px;font-size:12px;cursor:pointer;margin-right:4px;">💬</button>` : ''}
-        <button onclick="editRow('followup',${i})" class="text-blue-400 hover:text-blue-600 text-xs mr-2" title="Editar">✏️</button>
-        <button onclick="deleteRow('followup',${i})" class="text-red-400 hover:text-red-600 text-xs" title="Excluir">🗑️</button>
+        ${r.nome && (r.tipoContato || '').includes('WhatsApp') ? `<button onclick="_openWhatsAppForFu(${ref})" title="Abrir WhatsApp" style="background:#dcfce7;color:#16a34a;border:none;border-radius:6px;padding:4px 9px;font-size:12px;cursor:pointer;margin-right:4px;">💬</button>` : ''}
+        <button onclick="editRow('followup',${ref})" class="text-blue-400 hover:text-blue-600 text-xs mr-2" title="Editar">✏️</button>
+        <button onclick="deleteRow('followup',${ref})" class="text-red-400 hover:text-red-600 text-xs" title="Excluir">🗑️</button>
       </td>
     </tr>`;
   }).join('');
 }
 
 // Abre WhatsApp com mensagem pré-formatada para o follow-up
-function _openWhatsAppForFu(idx) {
-  const fu = DB.get('followup')[idx];
-  if (!fu) return;
+function _openWhatsAppForFu(ref) {
+  const data = DB.get('followup');
+  const fu = data[_acharFuPorRef(data, ref)];
+  if (!fu) { toast('Este follow-up não está mais na lista.', 3000); return; }
   // Tenta achar o telefone do paciente
   const pac = DB.get('pacientes').find(p => p.nome === fu.nome && p.whatsapp);
   const crm = DB.get('crm').find(c => c.nome === fu.nome && c.whatsapp);
