@@ -9674,6 +9674,16 @@ function renderFluxoCaixa(mesAtual) {
 
   pacs.forEach(p => {
     if (!p.data) return;
+    // Isento é serviço prestado e explicitamente NÃO cobrado — o médico abriu
+    // mão daquele valor. _resumoFin, que é a fonte única do financeiro, já o
+    // mantém fora de `faturado` (o regime de competência). Esta tela somava
+    // `p.valor` de todo mundo, então a coluna "Regime de Competência" aqui
+    // divergia do faturado que o Dashboard e os Relatórios mostram para o mesmo
+    // mês — sem que nada apontasse qual dos dois estava certo.
+    // Na coluna de caixa é pior que divergência: projetar entrada de dinheiro a
+    // partir de uma isenção promete um recebimento que, por definição, nunca vai
+    // acontecer. O médico planeja o mês em cima disso.
+    if (p.statusPgto === 'Isento') return;
     if (p.recebimentos && p.recebimentos.length > 0) {
       // Parcelado: distribui pelas parcelas
       p.recebimentos.forEach(r => {
