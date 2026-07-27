@@ -13126,7 +13126,13 @@ function impExecute() {
       // 'status', a receita importada entrava no bruto mas ficava fora de
       // pago/parcial/pendente/isento — "Recebido R$ 0" com faturamento cheio.
       statusPgto: impNormStatus(m.status ? row[m.status] : ''),
-      whatsapp: m.whatsapp ? String(row[m.whatsapp]||'').replace(/\D/g,'').slice(-11) : '',
+      // _normPhone, NÃO slice(-11): "pegar os últimos 11 dígitos" só funciona
+      // pra celular. Fixo com DDI tem 12 dígitos (55 + DDD + 8), e cortar os
+      // últimos 11 deixava um "5" solto na frente — 551133334444 virava
+      // 51133334444. O app então lia isso como DDD 51 e o botão de WhatsApp
+      // abria conversa com um número de OUTRO estado. Além de nunca casar com
+      // o contato do CRM, que é indexado por _normPhone.
+      whatsapp: m.whatsapp ? _normPhone(row[m.whatsapp]) : '',
       obs:      'Importado de planilha',
     });
     nImportados++;

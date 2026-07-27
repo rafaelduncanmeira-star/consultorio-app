@@ -230,6 +230,48 @@ test('impNormDate: vazio, lixo e Date inválida devolvem string vazia', () => {
   }
 });
 
+// IMPORTAÇÃO DE TELEFONE. A importação usava slice(-11) — "os últimos 11
+// dígitos" — que só vale pra celular. Fixo com DDI tem 12 dígitos (55 + DDD +
+// 8) e sobrava um "5" solto na frente. O número gravado não casava com o
+// contato do CRM (indexado por _normPhone) e o _waMeLink montava um link pra
+// DDD de outro estado.
+test('importação de telefone: fixo com DDI não pode sobrar um 5 na frente', () => {
+  const { _normPhone } = carregar('_normPhone');
+  assert.strictEqual(_normPhone('551133334444'), '1133334444', 'fixo SP com DDI');
+  assert.notStrictEqual(_normPhone('551133334444'), '51133334444', 'o slice(-11) dava isto');
+  assert.strictEqual(_normPhone('+55 (11) 3333-4444'), '1133334444', 'com máscara');
+});
+
+test('importação de telefone: o link do WhatsApp aponta pro DDD certo', () => {
+  const { _normPhone, _waMeLink } = carregar(['_normPhone', '_waMeLink'], { encodeURIComponent });
+  // O que a importação grava é o que o _waMeLink vai ler depois.
+  const gravado = _normPhone('551133334444');
+  assert.strictEqual(_waMeLink(gravado), 'https://wa.me/551133334444');
+});
+
+// Os testes acima provam que _normPhone está certo — mas o bug era o PONTO DE
+// CHAMADA: impExecute usava slice(-11) direto. impExecute mexe em DOM e toast,
+// não dá pra rodar no sandbox, então aqui o guarda é no código-fonte mesmo.
+// Sem isto, voltar o slice(-11) passaria pela suíte inteira sem reprovar nada.
+test('impExecute: normaliza telefone com _normPhone, não com slice(-11)', () => {
+  const { recortarFuncao } = require('./_extrair.js');
+  // Sem os comentários: o próprio comentário da correção cita o slice(-11).
+  const src = recortarFuncao('impExecute').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /whatsapp:\s*m\.whatsapp\s*\?\s*_normPhone\(/,
+    'o telefone importado tem de passar pelo _normPhone');
+  assert.doesNotMatch(src, /slice\(-11\)/,
+    'slice(-11) quebra fixo com DDI — 551133334444 vira 51133334444');
+});
+
+test('importação de telefone: celular e número sem DDI seguem inalterados', () => {
+  const { _normPhone } = carregar('_normPhone');
+  assert.strictEqual(_normPhone('5511987654321'), '11987654321', 'celular com DDI');
+  assert.strictEqual(_normPhone('11987654321'), '11987654321', 'celular sem DDI');
+  assert.strictEqual(_normPhone('1133334444'), '1133334444', 'fixo sem DDI');
+  assert.strictEqual(_normPhone('555532201234'), '5532201234', 'fixo do DDD 55 com DDI');
+  assert.strictEqual(_normPhone(''), '');
+});
+
 // IMPORTAÇÃO DE VALOR. Todo ponto era lido como separador de milhar, então
 // "1234.56" virava 123456 — cem vezes maior, calado. E esse é o formato que o
 // exportarCSV deste app escreve: exportar e reimportar inflava o faturamento.
