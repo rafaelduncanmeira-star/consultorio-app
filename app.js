@@ -1175,7 +1175,11 @@ function _iniciarApp() {
   renderDashboard();
   saudacaoDiaria();
   setTimeout(() => checkAchievements(), 1000); // verifica conquistas após render
-  setTimeout(() => criarSnapshotDiario().then(r => r.created && console.log('🗂️ Backup automático criado:', r.data)), 3000);
+  setTimeout(() => criarSnapshotDiario().then(r => {
+    if (r.created) console.log('🗂️ Backup automático criado:', r.data);
+    // Falha de backup precisa aparecer: é a rede de segurança de todo o resto.
+    else if (r.error) toast('⚠️ ' + r.error, 6000);
+  }).catch(e => console.warn('backup automático falhou:', e && e.message)), 3000);
   setTimeout(() => rodarCicloLembretes().then(r => {
     if (r.enviados > 0) toast(`📲 ${r.enviados} lembrete(s) WhatsApp enviado(s).`, 4000);
   }), 5000);
@@ -10916,28 +10920,63 @@ async function criarSnapshotDiario() {
 
   // Monta o snapshot
   const snapshot = { _meta: { criadoEm: new Date().toISOString(), data: hoje, automatico: true } };
+  const ilegiveis = [];
   BACKUP_KEYS.forEach(k => {
     const raw = localStorage.getItem('consult_' + k);
-    if (raw) snapshot[k] = JSON.parse(raw);
+    if (!raw) return;
+    // Uma chave corrompida não pode derrubar o backup inteiro — o resto ainda
+    // vale mais que nada. Antes, o JSON.parse lançava e a promise morria sem
+    // catch nenhum no chamador: o backup automático simplesmente não existia.
+    try { snapshot[k] = JSON.parse(raw); }
+    catch (e) { ilegiveis.push(k); }
   });
+  if (ilegiveis.length) console.warn('snapshot: chaves ilegíveis, fora do backup —', ilegiveis.join(', '));
 
-  // Salva local + sincroniza com Supabase
-  localStorage.setItem('consult_' + chave, JSON.stringify(snapshot));
+  // Poda ANTES de gravar, abrindo vaga pro snapshot de hoje. A ordem importa:
+  // com a poda depois do setItem, bastava o localStorage encher uma vez pro
+  // setItem lançar, a poda nunca rodar e o backup automático parar PARA SEMPRE
+  // — sem nada na tela, porque o chamador não tinha catch.
+  await _limparSnapshotsAntigos(Math.max(MAX_SNAPSHOTS - 1, 1));
+
+  if (!_gravarSnapshot(chave, JSON.stringify(snapshot))) {
+    return { error: 'Sem espaço no navegador para o backup automático. Exporte um backup manual em Backup.' };
+  }
   if (typeof cloudPush === 'function') await cloudPush(chave);
-
-  // Limpa snapshots antigos (mantém últimos N)
   await _limparSnapshotsAntigos();
 
-  return { created: true, data: hoje, chave };
+  return { created: true, data: hoje, chave, ilegiveis };
 }
 
-async function _limparSnapshotsAntigos() {
-  const datas = Object.keys(localStorage)
+// Datas dos snapshots que existem neste navegador, do mais novo pro mais velho.
+function _snapshotsLocais() {
+  return Object.keys(localStorage)
     .filter(k => k.startsWith('consult_' + SNAPSHOT_PREFIX))
     .map(k => k.substring(('consult_' + SNAPSHOT_PREFIX).length))
     .sort()
     .reverse();
-  const aRemover = datas.slice(MAX_SNAPSHOTS);
+}
+
+// Grava o snapshot abrindo espaço quando o navegador recusa por cota. Cada
+// snapshot guarda a clínica INTEIRA; com sete cópias mais os dados vivos, o
+// localStorage de um consultório movimentado estoura. Sem esta tentativa
+// escalonada, o setItem lançava e o backup automático parava de existir.
+function _gravarSnapshot(chave, corpo) {
+  for (let tentativa = 0; tentativa < 4; tentativa++) {
+    try { localStorage.setItem('consult_' + chave, corpo); return true; }
+    catch (e) {
+      const antigos = _snapshotsLocais().filter(d => SNAPSHOT_PREFIX + d !== chave);
+      if (!antigos.length) { console.warn('snapshot: sem espaço e sem backup antigo pra descartar'); return false; }
+      const maisVelho = antigos[antigos.length - 1];
+      console.warn('snapshot: sem espaço — descartando o backup de', maisVelho);
+      localStorage.removeItem('consult_' + SNAPSHOT_PREFIX + maisVelho);
+    }
+  }
+  return false;
+}
+
+async function _limparSnapshotsAntigos(manter = MAX_SNAPSHOTS) {
+  const datas = _snapshotsLocais();
+  const aRemover = datas.slice(manter);
   for (const data of aRemover) {
     const k = SNAPSHOT_PREFIX + data;
     localStorage.removeItem('consult_' + k);
