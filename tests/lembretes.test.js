@@ -211,10 +211,12 @@ function ambienteCard(ags, cfg = {}) {
     'lemb-ativo': {}, 'lemb-horas': {}, 'lemb-msg': {},
   };
   const s = _carregar(['_esc', 'renderLembretesCard'], {
+    // O card passou a usar _waConnected (cobre Z-API E Cloud API), como já fazia
+    // quem envia. Antes ele olhava só o Z-API e mentia nas duas direções.
+    _waConnected: () => true,
     JSON, Array, Object, Date, String,
     document: { getElementById: (id) => els[id] || null },
     getLembretesConfig: () => ({ ativo: true, horasAntes: 24, mensagem: 'oi', ultimoEnvio: '2026-08-05', ...cfg }),
-    getZapiConfig: () => ({ enabled: true, instanceId: 'i', token: 't' }),
     getAgendamentos: () => JSON.parse(JSON.stringify(ags)),
     _ymd: () => '2026-08-05',
     formatDate: (d) => d,
@@ -323,4 +325,43 @@ test('a trava do ciclo segue o mesmo padrão do _drenarOutbox', () => {
   assert.match(src, /if \(_cicloLembretesRodando\) return/);
   assert.match(src, /finally \{ _cicloLembretesRodando = false; \}/,
     'sem finally, uma exceção no meio deixaria a trava presa pra sempre');
+});
+
+// ---------- o card não pode olhar um provedor só ----------
+// Quem ENVIA (rodarCicloLembretes) usa _waConnected, que cobre Z-API e Cloud
+// API. O card olhava só o Z-API e mentia nas duas direções — e é o único lugar
+// onde a pessoa confere se os lembretes estão de pé.
+function cardCom(waOk) {
+  let statusHtml = '';
+  const els = { 'card-lembretes': {}, 'lemb-status': { set innerHTML(v) { statusHtml = v; } },
+                'lemb-falhas': { set innerHTML(v) {} }, 'lemb-ativo': {}, 'lemb-horas': {}, 'lemb-msg': {} };
+  _carregar(['_esc', 'renderLembretesCard'], {
+    JSON, Array, Object, Date, String,
+    _waConnected: () => waOk,
+    document: { getElementById: (id) => els[id] || null },
+    getLembretesConfig: () => ({ ativo: true, horasAntes: 24, mensagem: '', ultimoEnvio: '2026-08-05' }),
+    getAgendamentos: () => [],
+    _ymd: () => '2026-08-05', formatDate: (d) => d,
+  }).renderLembretesCard();
+  return statusHtml;
+}
+
+test('card: com WhatsApp conectado por QUALQUER provedor, diz Ativo', () => {
+  assert.match(cardCom(true), /Ativo/,
+    'clínica na Cloud API via "Z-API não conectado" para sempre, com tudo funcionando');
+});
+
+test('card: sem WhatsApp conectado, avisa sem citar provedor específico', () => {
+  const html = cardCom(false);
+  assert.match(html, /WhatsApp não conectado/);
+  assert.ok(!html.includes('Z-API'), 'o aviso vale pros dois provedores');
+});
+
+test('card e envio usam a MESMA checagem de conexão', () => {
+  const card = _recF('renderLembretesCard').replace(/\/\/[^\n]*/g, '');
+  const ciclo = _recF('rodarCicloLembretes').replace(/\/\/[^\n]*/g, '');
+  assert.match(card, /_waConnected\(\)/);
+  assert.match(ciclo, /_waConnected\(\)/);
+  assert.doesNotMatch(card, /getZapiConfig\(\)/,
+    'duas checagens diferentes pra mesma coisa é como quase todo achado desta revisão começou');
 });

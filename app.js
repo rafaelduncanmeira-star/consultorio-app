@@ -11522,8 +11522,17 @@ function renderLembretesCard() {
   const card = document.getElementById('card-lembretes');
   if (!card) return;
   const cfg = getLembretesConfig();
-  const zapi = getZapiConfig();
-  const zapiOk = zapi.enabled && zapi.instanceId && zapi.token;
+  // _waConnected, NÃO a checagem do Z-API: quem envia (rodarCicloLembretes) usa
+  // _waConnected, que cobre os DOIS provedores. Olhando só o Z-API, este card
+  // mentia nas duas direções — e é o único lugar onde a pessoa confere se os
+  // lembretes estão de pé:
+  //   · clínica na Cloud API (Meta) via "⚠️ Z-API não conectado — lembretes não
+  //     serão enviados" para sempre, mesmo com tudo funcionando. Ou deixava de
+  //     confiar no recurso, ou ia configurar um Z-API que não precisa;
+  //   · pior no inverso: provedor 'cloud' sem credencial, mas com um Z-API
+  //     antigo ainda preenchido → o card dizia "✓ Ativo" enquanto TODO ciclo
+  //     terminava em "WhatsApp não está conectado".
+  const waOk = _waConnected();
 
   // Preenche campos
   const a = document.getElementById('lemb-ativo'); if (a) a.checked = cfg.ativo;
@@ -11533,7 +11542,7 @@ function renderLembretesCard() {
   // Status indicator
   const status = document.getElementById('lemb-status');
   if (status) {
-    if (!zapiOk) status.innerHTML = '<span style="color:#dc2626;">⚠️ Z-API não conectado — lembretes não serão enviados</span>';
+    if (!waOk) status.innerHTML = '<span style="color:#dc2626;">⚠️ WhatsApp não conectado — lembretes não serão enviados</span>';
     else if (!cfg.ativo) status.innerHTML = '<span style="color:#94a3b8;">Inativo</span>';
     else status.innerHTML = `<span style="color:#10b981;font-weight:600;">✓ Ativo</span> · último envio: ${cfg.ultimoEnvio || 'nunca'}`;
   }
@@ -12029,9 +12038,9 @@ function checkAchievements() {
   const metas = DB.getObj('metas', {});
   if ((metas.fat || 0) > 0) unlock('ritmo_financeiro');
 
-  // 💬 Harmonia Digital
-  const zapiCfg = getZapiConfig();
-  if (zapiCfg.enabled && zapiCfg.instanceId && zapiCfg.token) unlock('harmonia_digital');
+  // 💬 Harmonia Digital — vale pra qualquer provedor de WhatsApp, não só Z-API
+  // (quem usa a Cloud API da Meta nunca desbloqueava).
+  if (_waConnected()) unlock('harmonia_digital');
 
   // 🔁 Melodia Recorrente
   if (getInscricoes().length >= 1) unlock('melodia_recorrente');
