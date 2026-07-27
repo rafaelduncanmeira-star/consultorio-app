@@ -36,6 +36,7 @@ const LEGITIMAS = new Map([
   ['status === "CONNECTED"',      'estado da instância — vocabulário do Z-API'],
   ['value === "CONNECTED"',       'idem'],
   ['object === "whatsapp_business_account"', 'tipo do payload — vocabulário da Meta'],
+  ['visibilityState === "visible"', 'estado da aba — vocabulário do navegador (Page Visibility API)'],
 ]);
 
 // Campos genéricos demais pra essa análise dizer algo útil.

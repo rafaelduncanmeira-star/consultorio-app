@@ -13284,6 +13284,24 @@ async function sendChatMessage() {
 
 let _leadsChannel = null;
 
+// O canal do realtime é a única porta por onde um lead do WhatsApp entra no CRM
+// depois que o app já está aberto — o syncLeadsFromSupabase só rodava no login e
+// nesse callback. Se o canal caísse (notebook dormiu no almoço, wi-fi trocou de
+// ponto), os leads paravam de chegar e NADA indicava isso: a recepção fica com o
+// app aberto o dia inteiro e simplesmente não vê o paciente que mandou mensagem.
+// O subscribe() era chamado sem callback de status, então nem uma inscrição que
+// nunca chegou a valer (realtime desligado na tabela, RLS) aparecia em lugar
+// nenhum.
+let _leadsRearmarTimer = null;
+function _rearmarLeadsRealtime(motivo) {
+  if (_leadsRearmarTimer) return; // já há uma tentativa agendada
+  console.warn('[realtime] canal de leads caiu (' + motivo + ') — reconectando em 5s');
+  _leadsRearmarTimer = setTimeout(() => {
+    _leadsRearmarTimer = null;
+    initLeadsRealtime();
+  }, 5000);
+}
+
 function initLeadsRealtime() {
   if (!_supa || !currentUser) return;
   // Remove canal anterior (evita "cannot add callbacks after subscribe")
@@ -13300,8 +13318,30 @@ function initLeadsRealtime() {
     }, () => {
       syncLeadsFromSupabase();
     });
-  _leadsChannel.subscribe();
+  _leadsChannel.subscribe((status) => {
+    // Assinou (ou reassinou): puxa o que chegou enquanto estávamos fora. Sem
+    // esta varredura, o lead que entrou durante a queda ficaria esperando o
+    // PRÓXIMO lead pra ser notado — ou o próximo login.
+    if (status === 'SUBSCRIBED') { syncLeadsFromSupabase(); return; }
+    // Só estes dois: 'CLOSED' também chega quando SOMOS nós removendo o canal
+    // aqui em cima, e reagir a ele criaria um laço de reconexão infinito.
+    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') _rearmarLeadsRealtime(status);
+  });
 }
+
+// Voltar a ter rede ou trazer a aba de volta pra frente são os dois momentos em
+// que o canal costuma estar morto sem ninguém ter percebido. Nos dois casos:
+// varre o que ficou pra trás e reassina se o canal não estiver de pé.
+function _revisarCanalLeads() {
+  if (!_supa || !currentUser) return;
+  syncLeadsFromSupabase();
+  const estado = _leadsChannel && _leadsChannel.state;
+  if (estado !== 'joined' && estado !== 'joining') initLeadsRealtime();
+}
+window.addEventListener('online', () => setTimeout(_revisarCanalLeads, 2000));
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') _revisarCanalLeads();
+});
 
 async function syncLeadsFromSupabase() {
   if (!_supa || !currentUser) return;
