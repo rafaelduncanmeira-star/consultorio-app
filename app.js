@@ -13999,28 +13999,54 @@ function impDetectMapping(headers) {
 }
 
 /* ── Parser CSV inteligente (vírgula ou ponto-e-vírgula, aspas) ── */
+// Lê o arquivo INTEIRO respeitando aspas, em vez de quebrar por linha primeiro.
+// O próprio exportarCSV cita campos que contêm quebra de linha e duplica as
+// aspas internas (`"` vira `""`) — ou seja, o app não conseguia reimportar o
+// que ele mesmo exportava:
+//   · uma observação de duas linhas virava DUAS linhas da planilha, e a segunda
+//     entrava como um paciente novo chamado com o resto do texto. Faturamento e
+//     contagem de pacientes saíam errados, e ninguém liga o defeito à causa;
+//   · `disse ""ok"" ontem` chegava como `disse ok ontem` — o parser alternava o
+//     estado a cada aspa e simplesmente descartava as duas.
 function impParseCSV(text) {
-  const lines = text.split(/\r?\n/).filter(l => l.trim());
-  if (lines.length < 2) return null;
+  const src = String(text || '');
+  if (!src.trim()) return null;
 
-  const first = lines[0];
-  const delim = (first.match(/;/g)||[]).length >= (first.match(/,/g)||[]).length ? ';' : ',';
+  // Delimitador contado no primeiro REGISTRO (até a primeira quebra fora de
+  // aspas), não na primeira linha bruta do arquivo.
+  let fimCab = src.length, aspasCab = false;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (c === '"') { if (aspasCab && src[i + 1] === '"') i++; else aspasCab = !aspasCab; }
+    else if (!aspasCab && (c === '\n' || c === '\r')) { fimCab = i; break; }
+  }
+  const cab = src.slice(0, fimCab);
+  const delim = (cab.match(/;/g) || []).length >= (cab.match(/,/g) || []).length ? ';' : ',';
 
-  const parseLine = line => {
-    const res = []; let inQ = false; let cur = '';
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') { inQ = !inQ; }
-      else if (ch === delim && !inQ) { res.push(cur.trim()); cur = ''; }
-      else { cur += ch; }
+  const registros = [];
+  let campos = [], cur = '', emAspas = false;
+  const fechaCampo = () => { campos.push(cur.trim()); cur = ''; };
+  const fechaLinha = () => { fechaCampo(); registros.push(campos); campos = []; };
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (emAspas) {
+      if (c !== '"') { cur += c; continue; }
+      if (src[i + 1] === '"') { cur += '"'; i++; }  // aspa escapada
+      else emAspas = false;
+      continue;
     }
-    res.push(cur.trim());
-    return res;
-  };
+    if (c === '"') { emAspas = true; continue; }
+    if (c === delim) { fechaCampo(); continue; }
+    if (c === '\r') continue;
+    if (c === '\n') { fechaLinha(); continue; }
+    cur += c;
+  }
+  if (cur !== '' || campos.length) fechaLinha();
 
-  const headers = parseLine(lines[0]);
-  const rows = lines.slice(1)
-    .map(l => { const v = parseLine(l); const o = {}; headers.forEach((h,i) => o[h] = v[i]||''); return o; })
+  if (registros.length < 2) return null;
+  const headers = registros[0];
+  const rows = registros.slice(1)
+    .map(v => { const o = {}; headers.forEach((h, i) => o[h] = v[i] || ''); return o; })
     .filter(r => Object.values(r).some(v => v));
 
   return { headers, rows };
