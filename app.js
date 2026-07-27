@@ -1513,6 +1513,45 @@ function _profDoPaciente(nome) {
   return (p && p.profissionalId) || (typeof currentProfissionalId !== 'undefined' ? currentProfissionalId : null) || null;
 }
 
+// Acha UM contato do CRM pelo nome. Duas armadilhas que já morderam aqui:
+//
+// 1. `'qualquer coisa'.includes('')` é SEMPRE true. Contato salvo sem nome
+//    casava com todo mundo — e, por estar no começo do array, era o primeiro
+//    encontrado. Agendar a Carla marcava o card vazio como "Marcou" e o card
+//    da Carla continuava parado.
+// 2. Substring curta casa demais: "Ana" bate dentro de "Mariana".
+//
+// Regra: nome idêntico ganha. Só cai pro parcial com nome de verdade dos dois
+// lados, e apenas quando há UM candidato — na dúvida devolve -1, porque
+// escrever no contato errado é pior que não escrever.
+function _acharCrmPorNome(crm, nome) {
+  const alvo = (nome || '').toLowerCase().trim();
+  if (!alvo) return -1;
+  const nomeDe = c => ((c && c.nome) || '').toLowerCase().trim();
+  const lista = crm || [];
+  const exato = lista.findIndex(c => nomeDe(c) === alvo);
+  if (exato >= 0) return exato;
+  if (alvo.length < 3) return -1;
+  // Substring solta casa demais: "Ana" cai dentro de "Mariana" e cria uma
+  // ambiguidade que não existe pra ninguém olhando a tela. Só vale quando o
+  // trecho começa e termina em palavra inteira — assim "Bruno Alves Silva"
+  // ainda acha "Bruno Alves", mas "Mariana" não colide com "Ana".
+  const casaPorPalavra = (dentro, busca) => {
+    const i = dentro.indexOf(busca);
+    if (i < 0) return false;
+    const inicio = i === 0 || dentro[i - 1] === ' ';
+    const fim = i + busca.length === dentro.length || dentro[i + busca.length] === ' ';
+    return inicio && fim;
+  };
+  const cands = [];
+  lista.forEach((c, i) => {
+    const n = nomeDe(c);
+    if (n.length < 3) return;
+    if (casaPorPalavra(n, alvo) || casaPorPalavra(alvo, n)) cands.push(i);
+  });
+  return cands.length === 1 ? cands[0] : -1;
+}
+
 // Migração idempotente: garante id em pacientes/crm e converte vínculos
 // por índice (pacIdx/crmIdx) em vínculos por id (pacId/crmId), mantendo os
 // índices em paralelo. Roda no init; só grava quando há algo a preencher.
@@ -9768,6 +9807,19 @@ function executeAIAction(action) {
   const { tipo, dados } = action;
   if (!tipo || !dados) return;
 
+  // `dados` vem do LLM e era espalhado direto no registro. Sem nome, o registro
+  // fica invisível na lista E vira coringa na busca por nome (contato sem nome
+  // casava com qualquer paciente). Melhor recusar e pedir de novo do que gravar
+  // um fantasma que só aparece quando estraga outra coisa.
+  const PRECISA_NOME = ['criar_paciente', 'criar_crm', 'criar_followup', 'criar_agendamento'];
+  if (PRECISA_NOME.includes(tipo)) {
+    const nome = String(dados.pacienteNome || dados.nome || '').trim();
+    if (!nome) {
+      appendChatMsg('system-ok', '⚠️ Faltou o nome — não registrei nada. Me diga de quem é.');
+      return;
+    }
+  }
+
   if (tipo === 'criar_paciente') {
     const arr = DB.get('pacientes'); arr.unshift({ ...dados, id: _novoId('pac'), profissionalId: currentProfissionalId || null }); DB.set('pacientes', arr);
     appendChatMsg('system-ok', `✅ Atendimento de ${dados.nome} registrado — ${BRL(dados.valor)}`);
@@ -9791,14 +9843,15 @@ function executeAIAction(action) {
 
   } else if (tipo === 'atualizar_status_crm') {
     const arr = DB.get('crm');
-    const alvo = (dados.nome || '').toLowerCase().trim();
-    const idx = alvo ? arr.findIndex(c => (c.nome || '').toLowerCase().includes(alvo)) : -1;
+    const idx = _acharCrmPorNome(arr, dados.nome);
     if (idx >= 0) {
       arr[idx].status = dados.novoStatus; DB.set('crm', arr);
       appendChatMsg('system-ok', `✅ ${arr[idx].nome} → "${dados.novoStatus}"`);
       if (document.getElementById('page-crm').classList.contains('active')) renderCrm();
     } else {
-      appendChatMsg('system-ok', `⚠️ Não achei "${dados.nome}" no CRM. Quer que eu crie esse contato? Me passe os dados.`);
+      // Vale tanto pra "não existe" quanto pra "existe mais de um parecido":
+      // nos dois casos não dá pra gravar sem arriscar o contato errado.
+      appendChatMsg('system-ok', `⚠️ Não achei um contato único chamado "${dados.nome}" no CRM. Confira o nome exato, ou me passe os dados que eu crio.`);
     }
 
   } else if (tipo === 'criar_agendamento') {
@@ -9831,7 +9884,7 @@ function executeAIAction(action) {
     const nomeAlvo = item.pacienteNome.toLowerCase().trim();
     if (nomeAlvo) {
       const crm = DB.get('crm');
-      const crmIdx = crm.findIndex(c => (c.nome||'').toLowerCase().trim().includes(nomeAlvo) || nomeAlvo.includes((c.nome||'').toLowerCase().trim()));
+      const crmIdx = _acharCrmPorNome(crm, nomeAlvo);
       if (crmIdx >= 0 && !['Marcou','Atendeu'].includes(crm[crmIdx].status)) {
         crm[crmIdx].status = 'Marcou';
         DB.set('crm', crm);

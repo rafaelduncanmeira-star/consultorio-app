@@ -5,6 +5,66 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const { carregar } = require('./_extrair.js');
 
+// ---------- _acharCrmPorNome: casar paciente com card do CRM ----------
+// O copiloto usa isso pra mover o card quando agenda alguém. Duas armadilhas
+// que estavam no código: `'x'.includes('')` é sempre true (contato sem nome
+// casava com QUALQUER paciente e, por vir no topo do array, era o escolhido),
+// e substring curta casa demais ("Ana" bate dentro de "Mariana").
+const CRM = [
+  { nome: '',              status: 'Lead' },   // contato sem nome
+  { nome: 'Ana',           status: 'Lead' },
+  { nome: 'Mariana Souza', status: 'Lead' },
+  { nome: 'Bruno Alves',   status: 'Lead' },
+];
+
+test('_acharCrmPorNome: contato sem nome não casa com todo mundo', () => {
+  const { _acharCrmPorNome } = carregar('_acharCrmPorNome');
+  assert.strictEqual(_acharCrmPorNome(CRM, 'Carla Mendes'), -1,
+    'Carla não está no CRM — o card vazio não pode ser marcado no lugar dela');
+  assert.strictEqual(_acharCrmPorNome(CRM, 'Bruno Alves'), 3, 'e quem existe continua achando');
+});
+
+test('_acharCrmPorNome: nome idêntico ganha do parcial', () => {
+  const { _acharCrmPorNome } = carregar('_acharCrmPorNome');
+  assert.strictEqual(_acharCrmPorNome(CRM, 'Ana'), 1, 'exato vence "Mariana Souza"');
+  assert.strictEqual(_acharCrmPorNome(CRM, '  aNa  '), 1, 'ignora caixa e espaço');
+});
+
+test('_acharCrmPorNome: parcial ambíguo devolve -1 em vez de chutar', () => {
+  const { _acharCrmPorNome } = carregar('_acharCrmPorNome');
+  const dois = [{ nome: 'Ana Paula' }, { nome: 'Ana Clara' }];
+  assert.strictEqual(_acharCrmPorNome(dois, 'Ana'), -1,
+    'escrever no contato errado é pior do que não escrever');
+  assert.strictEqual(_acharCrmPorNome(dois, 'Ana Clara'), 1, 'com o nome inteiro, resolve');
+});
+
+test('_acharCrmPorNome: parcial único ainda funciona (sobrenome a mais)', () => {
+  const { _acharCrmPorNome } = carregar('_acharCrmPorNome');
+  assert.strictEqual(_acharCrmPorNome([{ nome: 'Bruno Alves' }], 'Bruno Alves Silva'), 0);
+});
+
+// "Ana" é substring de "Mariana", mas ninguém olhando a tela acharia que os
+// dois nomes colidem. O casamento é por palavra inteira justamente pra isso.
+test('_acharCrmPorNome: parcial casa por palavra, não por pedaço de palavra', () => {
+  const { _acharCrmPorNome } = carregar('_acharCrmPorNome');
+  assert.strictEqual(_acharCrmPorNome(CRM, 'Mariana'), 2,
+    '"Ana" não pode disputar com "Mariana Souza"');
+  assert.strictEqual(_acharCrmPorNome([{ nome: 'Ana' }], 'Mariana'), -1,
+    'e no isolamento também não casa');
+  assert.strictEqual(_acharCrmPorNome([{ nome: 'Ana Paula Souza' }], 'Paula'), 0,
+    'palavra do meio conta');
+});
+
+test('_acharCrmPorNome: busca vazia, lista vazia e nome curto não casam nada', () => {
+  const { _acharCrmPorNome } = carregar('_acharCrmPorNome');
+  for (const vazio of ['', null, undefined, '   ']) {
+    assert.strictEqual(_acharCrmPorNome(CRM, vazio), -1);
+  }
+  assert.strictEqual(_acharCrmPorNome(null, 'Ana'), -1);
+  assert.strictEqual(_acharCrmPorNome([{ nome: 'Ana Paula' }], 'An'), -1,
+    'duas letras casariam com meio CRM');
+});
+
 // ---------- _iaHistoricoToMessages: mapeia papéis p/ o LLM ----------
 test('histórico vira mensagens com role correto', () => {
   const { _iaHistoricoToMessages } = carregar('_iaHistoricoToMessages');
