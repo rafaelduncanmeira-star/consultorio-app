@@ -150,3 +150,19 @@ test('a tela de follow-up passa o id nos botões, não o índice', () => {
     assert.doesNotMatch(semCom, re, 'índice congelado no HTML aponta pro registro errado');
   }
 });
+
+// Varredura final da classe: nenhuma tela pode carimbar índice no onclick de
+// coleção que tem id estável. Procedimentos são a exceção declarada — são
+// chaveados por NOME (o seed nem tem id), então id ali não resolveria nada.
+test('nenhuma coleção com id estável usa índice no onclick', () => {
+  const { fonte } = require('./_extrair.js');
+  const semCom = fonte.replace(/\/\/[^\n]*/g, '');
+  const achados = [];
+  for (const m of semCom.matchAll(/on(?:click|change)="(\w+)\((?:'([a-z]+)',)?\$\{(i|idx|localI)\}/g)) {
+    const [, fn, col] = m;
+    if (fn === 'editProc' || fn === 'deleteProc') continue; // chaveados por nome
+    if (fn === '_kanbanScrollTo') continue;                 // posição de scroll, não registro
+    achados.push(col ? `${fn}('${col}')` : fn);
+  }
+  assert.deepStrictEqual([...new Set(achados)].sort(), []);
+});

@@ -3667,7 +3667,7 @@ function statusBadge(s) {
 }
 
 // Dropdown inline de status para o CRM (sem abrir modal)
-function statusSelect(status, idx) {
+function statusSelect(status, ref) {  // `ref` é o id do contato
   const val = (!status || status === 'null' || status === 'undefined') ? 'Contato feito' : status;
   const styles = {
     'Contato feito':  'background:#f1f5f9;color:#475569',
@@ -3679,7 +3679,7 @@ function statusSelect(status, idx) {
   const s = styles[val] || styles['Contato feito'];
   const opts = ['Contato feito','Em negociação','Marcou','Atendeu','Não marcou']
     .map(o => `<option value="${o}"${val===o?' selected':''}>${o}</option>`).join('');
-  return `<select onchange="updateCrmStatus('${idx}',this.value)" style="${s};border:none;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:600;cursor:pointer;outline:none;-webkit-appearance:none;appearance:none;text-align:center;">${opts}</select>`;
+  return `<select onchange="updateCrmStatus('${ref}',this.value)" style="${s};border:none;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:600;cursor:pointer;outline:none;-webkit-appearance:none;appearance:none;text-align:center;">${opts}</select>`;
 }
 
 function updateCrmStatus(ref, newStatus) {
@@ -6876,7 +6876,11 @@ function renderDespesas() {
     tbody.innerHTML = '<tr><td colspan="7" class="text-center py-12 text-gray-400">Nenhuma despesa registrada.</td></tr>';
     return;
   }
-  tbody.innerHTML = data.map((r, i) => `
+  tbody.innerHTML = data.map((r, i) => {
+    // Id sempre que houver (ver CLAUDE.md: índice no onclick aponta pro registro
+    // errado assim que a coleção muda entre o render e o clique).
+    const ref = r.id ? `'${r.id}'` : i;
+    return `
     <tr class="border-b border-gray-50 hover:bg-gray-50">
       <td class="px-4 py-3 text-gray-600">${formatDate(r.data)}</td>
       <td class="px-4 py-3 text-gray-900">${_esc(r.descricao)}</td>
@@ -6885,10 +6889,10 @@ function renderDespesas() {
       <td class="px-4 py-3 font-semibold text-red-600">${BRL(r.valor)}</td>
       <td class="px-4 py-3 text-gray-600">${_esc(r.formaPgto)}</td>
       <td class="px-4 py-3" style="white-space:nowrap;">
-        <button onclick="editRow('despesas',${i})" class="text-blue-400 hover:text-blue-600 text-xs mr-2" title="Editar">✏️</button>
-        <button onclick="deleteRow('despesas',${i})" class="text-red-400 hover:text-red-600 text-xs" title="Excluir">🗑️</button>
+        <button onclick="editRow('despesas',${ref})" class="text-blue-400 hover:text-blue-600 text-xs mr-2" title="Editar">✏️</button>
+        <button onclick="deleteRow('despesas',${ref})" class="text-red-400 hover:text-red-600 text-xs" title="Excluir">🗑️</button>
       </td>
-    </tr>`).join('');
+    </tr>`; }).join('');
 }
 
 // ====================== DASHBOARD ======================
