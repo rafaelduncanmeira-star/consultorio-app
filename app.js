@@ -1708,6 +1708,41 @@ function _aplicarModoUI() {
   }
 }
 
+// ====================== REDE COM PRAZO ======================
+// O fetch() do navegador NÃO tem prazo. Servidor que aceita a conexão e nunca
+// responde deixa a promise pendurada PARA SEMPRE — nem resolve nem rejeita, e
+// nenhum catch/finally roda. O wa-webhook já usa AbortSignal.timeout por isso;
+// no app o estrago é maior, porque a página não morre no fim da requisição:
+//   · a trava de reentrância de rodarCicloLembretes fica presa em true e
+//     NENHUM paciente é lembrado de novo naquela sessão;
+//   · o input do chat da IA fica desabilitado até recarregar;
+//   · o botão de testar conexão fica eternamente em "Testando…".
+// Toda chamada a servidor de terceiro passa por aqui.
+const _PRAZO_REDE       = 30000;  // LLM pode pensar — 30s é folgado e ainda finito
+const _PRAZO_REDE_CURTO = 15000;  // envio de mensagem e teste de conexão
+
+function _fetchComPrazo(url, opts, ms) {
+  const prazo = ms || _PRAZO_REDE;
+  // AbortSignal.timeout() não existe no Safari < 16 (iPhone antigo é justamente
+  // onde a rede pendura). AbortController existe desde 2017 — fazemos à mão.
+  const ctrl = new AbortController();
+  const req = fetch(url, Object.assign({}, opts || {}, { signal: ctrl.signal }));
+  // O abort rejeita `req` DEPOIS que a corrida já assentou; sem este catch de
+  // sacrifício o navegador registra "unhandled promise rejection".
+  req.catch(() => {});
+  let t = null;
+  const estouro = new Promise((_, rej) => {
+    t = setTimeout(() => {
+      // Rejeita ANTES de abortar: a corrida tem de assentar com a mensagem
+      // legível, não com o AbortError ("The operation was aborted"), que não
+      // diz nada ao médico. E não dependemos do fetch honrar o sinal.
+      rej(new Error('Tempo esgotado (' + Math.round(prazo / 1000) + 's) — o servidor não respondeu'));
+      try { ctrl.abort(); } catch (e) {}   // libera a conexão pendurada
+    }, prazo);
+  });
+  return Promise.race([req, estouro]).finally(() => clearTimeout(t));
+}
+
 // ====================== HELPERS DE SEGURANÇA ======================
 // Escapa string para inserção segura em innerHTML (evita XSS armazenado)
 function _esc(s) {
@@ -5091,7 +5126,7 @@ ${temImagem ? '- O nome do contato no print costuma estar no topo (header da con
     };
     if (!temImagem) body.response_format = { type: 'json_object' }; // visão nem sempre aceita json_object
 
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const res = await _fetchComPrazo('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
       body: JSON.stringify(body)
@@ -7498,7 +7533,7 @@ Responda APENAS com JSON válido:
   {"tipo":"...","titulo":"...","descricao":"...","acao":"..."}
 ]}`;
 
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const res = await _fetchComPrazo('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
       body: JSON.stringify({
@@ -10437,7 +10472,7 @@ async function sendAIMessage() {
     chatHistory.forEach(h => messages.push({ role: h.role === 'sofia' ? 'assistant' : 'user', content: h.text }));
     messages.push({ role: 'user', content: msg });
 
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const res = await _fetchComPrazo('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
       body: JSON.stringify({
@@ -11365,9 +11400,10 @@ async function _zapiSendText(cfg, rawPhone, text) {
   let lastErr = 'número inválido';
   for (const phone of cands) {
     try {
-      const res = await fetch(
+      const res = await _fetchComPrazo(
         `https://api.z-api.io/instances/${cfg.instanceId}/token/${cfg.token}/send-text`,
-        { method: 'POST', headers, body: JSON.stringify({ phone, message: text }) }
+        { method: 'POST', headers, body: JSON.stringify({ phone, message: text }) },
+        _PRAZO_REDE_CURTO
       );
       const data = await res.json().catch(() => ({}));
       if (res.ok && (data.zaapId || data.messageId || data.id)) return { ok: true, phone };
@@ -11388,11 +11424,11 @@ async function _cloudSendText(cfg, rawPhone, text) {
   if (!phone) return { ok: false, error: 'número inválido' };
   const to = _foneE164BR(phone);   // 55 + DDD + número (ver _foneE164BR)
   try {
-    const res = await fetch(`https://graph.facebook.com/v21.0/${cfg.phoneNumberId}/messages`, {
+    const res = await _fetchComPrazo(`https://graph.facebook.com/v21.0/${cfg.phoneNumberId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.accessToken },
       body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { preview_url: false, body: text } }),
-    });
+    }, _PRAZO_REDE_CURTO);
     const data = await res.json().catch(() => ({}));
     if (res.ok && data.messages && data.messages[0]) return { ok: true, phone: to };
     return { ok: false, error: (data.error && (data.error.message || data.error.type)) || ('HTTP ' + res.status) };
@@ -11409,12 +11445,12 @@ async function _cloudSendTemplate(cfg, rawPhone, templateName, langCode, bodyPar
     ? [{ type: 'body', parameters: bodyParams.map(v => ({ type: 'text', text: String(v) })) }]
     : [];
   try {
-    const res = await fetch(`https://graph.facebook.com/v21.0/${cfg.phoneNumberId}/messages`, {
+    const res = await _fetchComPrazo(`https://graph.facebook.com/v21.0/${cfg.phoneNumberId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.accessToken },
       body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'template',
         template: { name: templateName, language: { code: langCode || 'pt_BR' }, components } }),
-    });
+    }, _PRAZO_REDE_CURTO);
     const data = await res.json().catch(() => ({}));
     if (res.ok && data.messages && data.messages[0]) return { ok: true, phone: to };
     return { ok: false, error: (data.error && (data.error.message || data.error.type)) || ('HTTP ' + res.status) };
@@ -12783,9 +12819,9 @@ async function testCloudConnection() {
   if (statusEl) { statusEl.textContent = '⏳ Testando…'; statusEl.style.color = '#64748b'; }
   try {
     // GET no número: valida o token e retorna o número verificado.
-    const res = await fetch(`https://graph.facebook.com/v21.0/${cfg.phoneNumberId}?fields=display_phone_number,verified_name`, {
+    const res = await _fetchComPrazo(`https://graph.facebook.com/v21.0/${cfg.phoneNumberId}?fields=display_phone_number,verified_name`, {
       headers: { 'Authorization': 'Bearer ' + cfg.accessToken }
-    });
+    }, _PRAZO_REDE_CURTO);
     const data = await res.json().catch(() => ({}));
     if (res.ok && data.id) {
       if (statusEl) { statusEl.textContent = '✅ Conectado! ' + (data.display_phone_number || ''); statusEl.style.color = '#10b981'; }
@@ -12935,7 +12971,7 @@ async function testZapiConnection() {
     // Só manda Client-Token se a conta tiver token de segurança configurado
     const headers = {};
     if (cfg.clientToken) headers['Client-Token'] = cfg.clientToken;
-    const res  = await fetch(`https://api.z-api.io/instances/${cfg.instanceId}/token/${cfg.token}/status`, { headers });
+    const res  = await _fetchComPrazo(`https://api.z-api.io/instances/${cfg.instanceId}/token/${cfg.token}/status`, { headers }, _PRAZO_REDE_CURTO);
     const data = await res.json().catch(() => ({}));
     const ok   = data.connected || data.status === 'CONNECTED' || data.value === 'CONNECTED';
     if (ok) {
@@ -13232,7 +13268,7 @@ async function _llmChat({ system, messages, temperature = 0.4, maxTokens = 400 }
   try {
     if (cfg.provider === 'claude') {
       if (!cfg.claudeKey) return { error: 'no-key-claude' };
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await _fetchComPrazo('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -13273,7 +13309,7 @@ async function _llmChat({ system, messages, temperature = 0.4, maxTokens = 400 }
       model = cfg.groqModel || 'llama-3.3-70b-versatile';
     }
     if (!key) return { error: 'no-key' };
-    const res = await fetch(url, {
+    const res = await _fetchComPrazo(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}`, ...extraHeaders },
       body: JSON.stringify({
