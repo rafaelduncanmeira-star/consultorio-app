@@ -389,3 +389,44 @@ test('importação alimenta os baldes de _resumoFin', () => {
   assert.strictEqual(r.recebido, 1000);
   assert.strictEqual(r.aReceber, 800);
 });
+
+// ---------- o <select> do modal precisa OFERECER todo status que o app grava ----------
+// Mesmo bug que já foi corrigido no pgtoSelect (dropdown da tabela), mas o
+// <select> estático do modal de atendimento ficou de fora: não tinha 'Parcial'.
+// Atribuir um valor que não existe entre as <option> deixa selectedIndex = -1,
+// o campo aparece em branco e o FormData devolve '' no save — o status é
+// destruído. E valor com status fora do canônico fica FORA de todos os baldes
+// de _resumoFin: o dinheiro some dos relatórios.
+test('modal de atendimento: o select oferece os 4 status canônicos', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const m = /<select class="select" name="statusPgto">([\s\S]*?)<\/select>/.exec(html);
+  assert.ok(m, 'o select de status tem de existir no modal');
+  for (const st of ['Pago', 'Parcial', 'Pendente', 'Isento']) {
+    assert.ok(m[1].includes('<option>' + st + '</option>'),
+      `${st} falta no select — quem tem esse status perde ele ao salvar`);
+  }
+});
+
+test('_statusPgtoCanonico: valor de fora vira Pendente, nunca Pago', () => {
+  const { _statusPgtoCanonico } = carregar(['const:STATUS_PGTO', '_statusPgtoCanonico']);
+  for (const st of ['Pago', 'Parcial', 'Pendente', 'Isento']) {
+    assert.strictEqual(_statusPgtoCanonico(st), st, 'canônico passa intacto');
+  }
+  for (const ruim of ['', null, undefined, 'Parcelado', 'qualquer coisa']) {
+    assert.strictEqual(_statusPgtoCanonico(ruim), 'Pendente',
+      `${JSON.stringify(ruim)} não pode virar Pago — seria contar como recebido o que não entrou`);
+  }
+});
+
+// O ciclo que destruía o dado: abrir um atendimento Parcial no modal e salvar.
+test('editar um atendimento Parcial e salvar preserva o Parcial', () => {
+  const { _statusPgtoCanonico, _resumoFin } = carregar(['const:STATUS_PGTO', '_statusPgtoCanonico', '_centavos', '_resumoFin']);
+  // O select agora tem a opção, então o valor sobrevive ao ciclo abrir→salvar.
+  const gravado = _statusPgtoCanonico('Parcial');
+  assert.strictEqual(gravado, 'Parcial');
+  // E continua entrando no balde certo.
+  const r = _resumoFin([{ statusPgto: gravado, valor: 7200 }]);
+  assert.strictEqual(r.aReceber, 7200);
+  assert.strictEqual(r.recebido + r.aReceber + r.isento, r.bruto);
+});

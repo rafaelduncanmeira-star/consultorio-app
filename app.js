@@ -3707,6 +3707,15 @@ function _aplicarEfeitosMudancaStatusCrm(idx, oldStatus, newStatus) {
 }
 
 // Dropdown inline de status de pagamento (Atendidos)
+// Status de pagamento válidos, na ordem em que aparecem nos <select>.
+const STATUS_PGTO = ['Pago', 'Parcial', 'Pendente', 'Isento'];
+
+// Devolve sempre um status canônico. 'Pendente' é o padrão seguro: assumir
+// 'Pago' por omissão conta como recebido dinheiro que não entrou.
+function _statusPgtoCanonico(valor) {
+  return STATUS_PGTO.includes(valor) ? valor : 'Pendente';
+}
+
 function pgtoSelect(status, idx) {
   const val = (!status || status === 'null' || status === 'undefined') ? 'Pendente' : status;
   // 'Parcial' é gravado por toda inscrição parcelada em programa
@@ -3904,7 +3913,10 @@ function editRow(col, ref) {
     _popularProfissionalSelect(r.profissionalId, 'pac-profissional');
     form.valor.value = r.valor || '';
     form.pagamento.value = r.pagamento || '';
-    form.statusPgto.value = r.statusPgto || '';
+    // _statusPgtoCanonico: se o valor gravado não existir no <select>, o
+    // navegador deixa selectedIndex = -1 e o form devolve '' no save — apagando
+    // o status. Era o que acontecia com 'Parcial', que faltava na lista.
+    form.statusPgto.value = _statusPgtoCanonico(r.statusPgto);
     form.obs.value = r.obs || '';
     atualizarValorSugerido();
   } else if (col === 'followup') {
@@ -4880,7 +4892,9 @@ function savePaciente(e) {
     pagamento,
     parcelas,
     recebimentos,
-    statusPgto: fd.get('statusPgto'),
+    // Nunca gravar status fora do canônico. Valor sem status reconhecido fica
+    // FORA de todos os baldes de _resumoFin: o dinheiro some dos relatórios.
+    statusPgto: _statusPgtoCanonico(fd.get('statusPgto')),
     obs: fd.get('obs')
   };
   const data = DB.get('pacientes');
