@@ -6175,12 +6175,28 @@ function _popularProfissionalSelect(selectedId, elId, permitirVazio) {
   const sel = document.getElementById(elId || 'ag-profissional');
   if (!sel) return;
   const profs = getProfissionaisAtivos();
+  // O profissional DO REGISTRO entra na lista mesmo estando inativo. A lista de
+  // escolha só traz os ativos de propósito — ninguém deve atribuir trabalho novo
+  // a quem saiu da clínica —, mas o registro antigo continua sendo dele. Sem
+  // esta opção, o `sel.value = <id inativo>` não achava nada, o select ficava
+  // com selectedIndex -1 e o save gravava outra coisa:
+  //   · onde há "— não atribuído —", o vínculo era APAGADO;
+  //   · onde não há, caía no `profs[0].id` e o registro era TRANSFERIDO pro
+  //     primeiro profissional ativo da lista.
+  // O segundo é o pior: abrir um atendimento antigo do Dr. que saiu, só pra
+  // corrigir uma observação, movia a receita dele (e o repasse) pra outro — e
+  // o profissional_id também é o que o RLS usa pra decidir quem enxerga a linha.
+  const inativo = (selectedId && !profs.some(p => p.id === selectedId))
+    ? (getProfissional(selectedId) || { id: selectedId, nome: '(profissional removido)' })
+    : null;
   let html = permitirVazio ? '<option value="">— não atribuído —</option>' : '';
   html += profs.length
     ? profs.map(p => `<option value="${p.id}">${_esc(p.nome)}</option>`).join('')
     : (permitirVazio ? '' : '<option value="">(cadastre em Configurações)</option>');
+  if (inativo) html += `<option value="${_esc(inativo.id)}">${_esc(inativo.nome)} (inativo)</option>`;
   sel.innerHTML = html;
-  if (selectedId && profs.some(p => p.id === selectedId)) sel.value = selectedId;
+  if (inativo) sel.value = inativo.id;
+  else if (selectedId && profs.some(p => p.id === selectedId)) sel.value = selectedId;
   else if (permitirVazio) sel.value = '';
   else if (profs.length) sel.value = profs[0].id;
 }
