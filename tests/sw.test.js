@@ -159,7 +159,7 @@ function ambienteSW() {
     addEventListener(ev, fn) { if (ev === 'updatefound') ouvinteUpdate = fn; },
     update: () => Promise.resolve(),
   };
-  const s = _carr(['_observarAtualizacaoSW', '_checarAtualizacaoSW'], {
+  const s = _carr(['_avisarVersaoNova', '_observarAtualizacaoSW', '_checarAtualizacaoSW'], {
     _swRegistro: null, _avisouVersaoNova: false,
     navigator: { serviceWorker: { controller: {} } },
     toast: (t) => toasts.push(t),
@@ -183,7 +183,7 @@ test('não avisa na PRIMEIRA visita (não há o que atualizar)', () => {
   let ouvinte = null;
   const novo = { state: 'installing', _o: {}, addEventListener(e, f) { this._o[e] = f; } };
   const reg = { installing: novo, addEventListener: (e, f) => { if (e === 'updatefound') ouvinte = f; } };
-  const s = _carr('_observarAtualizacaoSW', {
+  const s = _carr(['_avisarVersaoNova', '_observarAtualizacaoSW'], {
     _swRegistro: null, _avisouVersaoNova: false,
     navigator: { serviceWorker: { controller: null } },  // ninguém no controle ainda
     toast: (t) => toasts.push(t),
@@ -221,4 +221,32 @@ test('a checagem entra na rodada do dia, antes do guard de sessão', () => {
   const iGuard = src.indexOf('if (!currentUser) return;');
   assert.ok(iCheca >= 0 && iCheca < iGuard,
     'procurar versão nova não depende de estar logado');
+});
+
+// O `updatefound` só é ouvido a partir do registro, que acontece no evento
+// `load`. Se o navegador achar a atualização ANTES disso, o evento dispara sem
+// ninguém ouvindo e o aviso nunca sai. O `controllerchange` cobre essa janela —
+// o sw.js chama clients.claim(), então o worker novo assume esta página assim
+// que ativa.
+test('controllerchange também avisa, e só quando já havia versão no ar', () => {
+  const semCom = _fnt.replace(/\/\/[^\n]*/g, '');
+  assert.match(semCom, /addEventListener\('controllerchange'[\s\S]{0,160}_avisarVersaoNova\(\)/,
+    'sem este segundo sinal, uma atualização achada antes do load passa batido');
+  assert.match(semCom, /_tinhaControllerNaCarga[\s\S]{0,80}_avisarVersaoNova\(\)/,
+    'sem a condição, a PRIMEIRA instalação (controller null → definido) avisaria à toa');
+});
+
+test('a condição do controller é lida na carga, não no evento', () => {
+  const semCom = _fnt.replace(/\/\/[^\n]*/g, '');
+  const iLeitura = semCom.indexOf('const _tinhaControllerNaCarga');
+  const iEvento  = semCom.indexOf("addEventListener('controllerchange'");
+  assert.ok(iLeitura > 0 && iLeitura < iEvento,
+    'depois que o worker novo assume, o controller JÁ é o novo — ler ali não '
+    + 'distingue mais troca de versão de primeira instalação');
+});
+
+test('os dois sinais compartilham a mesma marca de "já avisei"', () => {
+  const src = _rec2('_avisarVersaoNova').replace(/\/\/[^\n]*/g, '');
+  assert.match(src, /if \(_avisouVersaoNova\) return;/,
+    'updatefound e controllerchange podem disparar os dois para a mesma atualização');
 });

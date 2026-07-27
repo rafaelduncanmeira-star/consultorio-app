@@ -114,9 +114,7 @@ function _observarAtualizacaoSW(reg) {
       // no ar. Sem essa condição, o aviso apareceria na PRIMEIRA visita, quando
       // não há nada pra atualizar.
       if (novo.state !== 'installed' || !navigator.serviceWorker.controller) return;
-      if (_avisouVersaoNova) return;
-      _avisouVersaoNova = true;
-      toast('🔄 Versão nova disponível — recarregue a página para aplicar.', 12000);
+      _avisarVersaoNova();
     });
   });
 }
@@ -129,7 +127,25 @@ function _checarAtualizacaoSW() {
   }
 }
 
+function _avisarVersaoNova() {
+  if (_avisouVersaoNova) return;
+  _avisouVersaoNova = true;
+  toast('🔄 Versão nova disponível — recarregue a página para aplicar.', 12000);
+}
+
 if ('serviceWorker' in navigator) {
+  // Havia versão no ar quando esta página carregou? Precisa ser lido AGORA, na
+  // carga do módulo: depois que o worker novo assume, o controller já é o novo
+  // e não dá mais pra distinguir "trocou de versão" de "primeira instalação".
+  const _tinhaControllerNaCarga = !!navigator.serviceWorker.controller;
+  // Segundo sinal, complementar ao `updatefound`. O registro acontece no evento
+  // `load`; se o navegador já tiver achado a atualização ANTES disso, o
+  // updatefound dispara sem ninguém ouvindo e o aviso nunca sai. O
+  // `controllerchange` cobre essa janela — o sw.js chama clients.claim(), então
+  // o worker novo assume o controle desta página assim que ativa.
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (_tinhaControllerNaCarga) _avisarVersaoNova();
+  });
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js')
       .then(_observarAtualizacaoSW)
